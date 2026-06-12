@@ -130,11 +130,45 @@
 </div>
 
 <script>
-let state = { items: [], pinned:false, histOpen:false };
+/* ====================================================================
+   STATE MODEL
+   --------------------------------------------------------------------
+   Persisted shape (localStorage key "buddy.v1"):
+     { version:1,
+       today:    { date:"YYYY-MM-DD", items:[ {id,text,state,src} ] },
+       history:  [ { date, weekday, items:[ {id,text,done} ] } ],
+       settings: { confetti:true },
+       pinned:   false }
+
+   Runtime `state` mirrors that, plus transient UI flags (histOpen)
+   that are NOT persisted.
+   ==================================================================== */
+let state = {
+  today:   { date:null, items:[] },
+  history: [],
+  settings:{ confetti:true },
+  pinned:  false,
+  histOpen:false,
+};
+/* `state.items` is an alias for `state.today.items` so all existing
+   render/cycle/edit code keeps working unchanged. */
+Object.defineProperty(state,'items',{
+  get(){ return state.today.items; },
+  set(v){ state.today.items=v; },
+  enumerable:false, configurable:true,
+});
+
 let uid = 1; const nid = () => 'n'+(uid++);
 let editingId = null;
 const SOFT_CAP = 5, HARD_CAP = 6, RED = '#e5484d';
 const clamp=(a,v,b)=>Math.max(a,Math.min(b,v));
+const DOW=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+/* Local YYYY-MM-DD (never UTC — rollover must respect the user's tz). */
+function localDate(d=new Date()){
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
 
 const PIN_OFF='bg-black/5 text-black/60 hover:bg-black/10 hover:text-black';
 const PIN_ON ='bg-black text-white hover:bg-[#d9d9d9] hover:text-black';
@@ -165,24 +199,148 @@ function setDate(){
   $('#dNum').textContent=num;    $('#mNum').textContent=num;
 }
 
-/* ----------------------- history (sample) ------------------------ */
-function buildHistory(){
-  const DOW=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+/* ====================================================================
+   PERSISTENCE  — localStorage, debounced + force-flush
+   ==================================================================== */
+const STORAGE_KEY='buddy.v1', BAK_KEY='buddy.v1.bak', HISTORY_DAYS=30;
+let memoryStore=null;            // fallback when localStorage is unavailable
+let saveTimer=null;
+let bootedFresh=false;           // true when load() found no/invalid stored blob
+
+function lsGet(k){ try{ return localStorage.getItem(k); }catch{ return memoryStore?memoryStore[k]:null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch{ (memoryStore||(memoryStore={}))[k]=v; } }
+
+/* Serialise only the persisted slice (drop transient histOpen). */
+function serialize(){
+  return JSON.stringify({
+    version:1,
+    today:   { date:state.today.date, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null})) },
+    history: state.history,
+    settings:{ confetti:!!state.settings.confetti },
+    pinned:  !!state.pinned,
+  });
+}
+let saveSuppressed=false;        // test hook: freeze persistence so an injected blob survives reload
+function writeNow(){ if(saveSuppressed) return; clearTimeout(saveTimer); saveTimer=null; lsSet(STORAGE_KEY, serialize()); }
+function save(){ if(saveSuppressed) return; clearTimeout(saveTimer); saveTimer=setTimeout(writeNow,250); }
+
+/* Force-flush synchronously when the tab is hidden / closing — a trailing
+   debounce gets killed by tab close, so cancel the timer and write inline. */
+window.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') writeNow(); });
+window.addEventListener('beforeunload', writeNow);
+
+/* --------------------------------------------------------------------
+   LOAD + MIGRATE  — corruption guard: a bad blob must NEVER reach render
+   -------------------------------------------------------------------- */
+function migrate(blob){
+  // Future versions key off blob.version here. Empty for v1.
+  switch(blob.version){
+    // case 1: return blob;   // (handled by validation below)
+    default: return blob;
+  }
+}
+function isValidToday(t){
+  return t && typeof t==='object'
+    && typeof t.date==='string'
+    && Array.isArray(t.items)
+    && t.items.every(i=> i && typeof i.text==='string');
+}
+function freshBoot(){
+  state.today={ date:localDate(), items:[] };
+  state.history=[];
+  state.settings={ confetti:true };
+  state.pinned=false;
+  bootedFresh=true;
+}
+function load(){
+  bootedFresh=false;
+  const raw=lsGet(STORAGE_KEY);
+  if(raw==null){ freshBoot(); return; }
+  let blob;
+  try{ blob=JSON.parse(raw); }
+  catch{ lsSet(BAK_KEY, raw); freshBoot(); return; }     // bad JSON
+  if(!blob || typeof blob!=='object' || blob.version!==1 || !isValidToday(blob.today)){
+    lsSet(BAK_KEY, raw); freshBoot(); return;             // wrong version / malformed today
+  }
+  blob=migrate(blob);
+  // Hydrate runtime state from the validated blob.
+  state.today   = { date:blob.today.date, items:blob.today.items.map(i=>({
+                      id:i.id||nid(), text:String(i.text||''),
+                      state:(i.state==='focused'||i.state==='done')?i.state:'neutral',
+                      src:i.src??null })) };
+  state.history = Array.isArray(blob.history) ? blob.history.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items)) : [];
+  state.settings= { confetti: blob.settings && typeof blob.settings.confetti==='boolean' ? blob.settings.confetti : true };
+  state.pinned  = !!blob.pinned;
+}
+
+/* ====================================================================
+   ROLLOVER  — compare stored today.date to the current local date
+   ==================================================================== */
+function maybeRollover(){
+  if(editingId!==null) return false;          // never roll over mid-edit
+  const cur=localDate();
+  const stored=state.today.date;
+  if(stored===cur) return false;              // same day → restore verbatim, no morning
+  if(!stored){ state.today.date=cur; return false; }
+
+  if(state.today.items.length>0){
+    // Archive the finished day with STABLE ids.
+    const epoch=Math.floor(Date.now()/1000);
+    const wd=DOW[ new Date(stored+'T00:00:00').getDay() ];
+    const record={
+      date: stored, weekday: wd,
+      items: state.today.items.map((it,i)=>({ id:`h-${epoch}-${i}`, text:it.text, done: it.state==='done' })),
+    };
+    state.history.unshift(record);
+    if(state.history.length>HISTORY_DAYS) state.history.length=HISTORY_DAYS;
+    state.today={ date:cur, items:[] };
+    return true;                              // → caller shows morning
+  } else {
+    // Empty/skipped day → just advance the date, archive nothing.
+    state.today.date=cur;
+    return true;                              // fresh empty day → morning
+  }
+}
+
+/* ----------------------- demo history seed ----------------------- */
+/* Seed a tiny demo history ONLY when history is empty, so first-run
+   shows the Last-7-days panel populated. */
+function seedDemoHistory(){
+  if(state.history.length) return;
   const sample=[
     [['Reply to the team',true],['Draft the intro',true],['Book the flights',false]],
-    [['Review the doc',true],['Call Liam',false],['Water the plants',false],['Edit the photos',true]],
+    [['Review the doc',true],['Call Liam',false],['Water the plants',false]],
     [['Plan the week',true],['Ship the newsletter',false],['Tidy the desk',true]],
-    [],
+    null,                                       // a skipped day (dimmed)
     [['Read two chapters',false],['Stretch',true],['Email Erica',false]],
-    [],
   ];
-  const today=new Date(); const days=[];
-  for(let i=1;i<=6;i++){ const d=new Date(today); d.setDate(today.getDate()-i);
-    days.push({ name:DOW[d.getDay()], items:(sample[i-1]||[]).map(([text,done],j)=>({text,done,key:'h'+i+'-'+j})) }); }
-  return days;
+  const base=new Date();
+  sample.forEach((day,i)=>{
+    if(!day) return;                            // skipped day = no record
+    const d=new Date(base); d.setDate(base.getDate()-(i+1));
+    const date=localDate(d), epoch=Math.floor(d.getTime()/1000);
+    state.history.push({
+      date, weekday:DOW[d.getDay()],
+      items: day.map(([text,done],j)=>({ id:`h-${epoch}-${j}`, text, done })),
+    });
+  });
 }
-const HISTORY=buildHistory();
+
+/* `src` now links to a STABLE history item id (persisted). */
 const isAdded = key => state.items.some(it=>it.src===key);
+
+/* Build the last 7 calendar days (excluding today) for the panel,
+   matching history records by date. */
+function last7Days(){
+  const out=[]; const base=new Date();
+  for(let i=1;i<=7;i++){
+    const d=new Date(base); d.setDate(base.getDate()-i);
+    const date=localDate(d);
+    const rec=state.history.find(h=>h.date===date);
+    out.push({ date, name:DOW[d.getDay()], items: rec? rec.items : [] });
+  }
+  return out;
+}
 
 /* ----------------------- drawer open / close --------------------- */
 let openTimer=null, closeTimer=null;
@@ -199,7 +357,14 @@ pinBtn.addEventListener('click', e=>{
   state.pinned=!state.pinned;
   if(state.pinned){ openDrawer(); desktop.style.width='calc(100vw - 416px)'; pinBtn.className=PIN_BASE+PIN_ON; }
   else { desktop.style.width='100vw'; pinBtn.className=PIN_BASE+PIN_OFF; closeDrawer(); }
+  save();
 });
+
+/* Reflect pinned state in the UI (used at boot to restore a pinned session). */
+function applyPinnedUI(){
+  if(state.pinned){ desktop.style.width='calc(100vw - 416px)'; pinBtn.className=PIN_BASE+PIN_ON; openDrawer(); }
+  else { desktop.style.width='100vw'; pinBtn.className=PIN_BASE+PIN_OFF; }
+}
 
 /* --------------------------- state cycle ------------------------- */
 function cycle(it){
@@ -253,6 +418,7 @@ function render(){
   }
   renderDots();
   requestAnimationFrame(fitToday);
+  save();                                  // debounced persist after any mutation
 }
 function warnLevel(){ const n=state.items.length; return n>=HARD_CAP?2 : n===SOFT_CAP?1 : 0; }
 
@@ -309,13 +475,13 @@ function renderToday(){
 function renderHist(){
   histBody.innerHTML='';
   const canAdd = state.items.length < HARD_CAP;
-  HISTORY.forEach((day,di)=>{
+  last7Days().forEach((day,di)=>{
     const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
     const h=document.createElement('div');
     h.className='chrome text-[18px] font-medium tracking-[-0.36px] '+(day.items.length?'text-black mb-1':'text-black/35');
     h.textContent=day.name; grp.appendChild(h);
     day.items.forEach(it=>{
-      const added=isAdded(it.key);
+      const added=isAdded(it.id);
       const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5 pr-9';
       if(added){
         const badge=document.createElement('span');
@@ -330,9 +496,9 @@ function renderHist(){
         const aff=document.createElement('button');
         const base='chrome absolute right-0 top-1/2 -translate-y-1/2 grid place-items-center opacity-0 group-hover/h:opacity-100 transition-opacity ';
         if(added){ aff.className=base+'size-[32px] rounded-full text-black/50 hover:bg-black/5'; aff.innerHTML=UNDO; aff.title='Undo — remove from today';
-          aff.addEventListener('click',()=>removeBySrc(it.key)); }
+          aff.addEventListener('click',()=>removeBySrc(it.id)); }
         else if(canAdd){ aff.className=base+'size-[32px] rounded-full text-black/50 hover:bg-black/5'; aff.innerHTML=PLUS; aff.title='Add to today';
-          aff.addEventListener('click',()=>{ state.items.push({id:nid(),text:it.text,state:'neutral',src:it.key}); render(); }); }
+          aff.addEventListener('click',()=>{ state.items.push({id:nid(),text:it.text,state:'neutral',src:it.id}); render(); }); }
         else { aff.className=base+'text-[18px] leading-none'; aff.textContent='😈'; aff.title="You've got too many today"; aff.style.cursor='not-allowed'; }
         r.appendChild(aff);
       }
@@ -395,10 +561,64 @@ function skip(){ morning.classList.add('hidden'); render(); }
 morning.addEventListener('click',e=>{ if(e.target===morning || e.target===morning.firstElementChild){ if(morningVals().some(Boolean)) startDay(); else skip(); }});
 $('#devMorning').addEventListener('click',showMorning);
 
+/* ====================================================================
+   LIVE MIDNIGHT TRIGGER
+   Boot won't fire at midnight (pinned, always-open drawer), so re-check
+   on focus, on tab-visible, and every 60s. Never while editing.
+   ==================================================================== */
+function liveRolloverCheck(){
+  if(editingId!==null) return;               // defer until the edit commits
+  const rolled=maybeRollover();
+  if(rolled){
+    setDate();
+    render();
+    showMorning();                           // a real day-change → morning
+  }
+}
+window.addEventListener('focus', liveRolloverCheck);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') liveRolloverCheck(); });
+setInterval(liveRolloverCheck, 60000);
+
+/* ====================================================================
+   TEST HOOK  — read / inject state without depending on hover timers.
+   Used by the Playwright acceptance suite (§7).
+   ==================================================================== */
+window.__buddy = {
+  get state(){ return state; },
+  STORAGE_KEY,
+  localDate,
+  // Read the raw persisted blob.
+  read(){ return lsGet(STORAGE_KEY); },
+  readBak(){ return lsGet(BAK_KEY); },
+  // Force a synchronous flush.
+  flush: writeNow,
+  // Test helper: write a raw blob to localStorage AND freeze this instance's
+  // persistence so the unload force-flush can't clobber it before the reload.
+  inject(raw){ saveSuppressed=true; clearTimeout(saveTimer); lsSet(STORAGE_KEY, typeof raw==='string'?raw:JSON.stringify(raw)); },
+  injectBak(raw){ lsSet(BAK_KEY, typeof raw==='string'?raw:JSON.stringify(raw)); },
+  clear(){ saveSuppressed=true; clearTimeout(saveTimer); try{ localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(BAK_KEY); }catch{} },
+  suppressSave(){ saveSuppressed=true; clearTimeout(saveTimer); },
+  // Re-run the full boot sequence against whatever is in localStorage.
+  // Mirrors a page reload but in-process (used to assert load/rollover).
+  boot,
+  rollover: maybeRollover,
+  openDrawer, closeDrawer,
+  showMorning,
+};
+
 /* --------------------------- boot -------------------------------- */
-setDate();
-render();
-showMorning();
+function boot(){
+  load();                                    // corruption-guarded; bad blob → fresh
+  const rolled=maybeRollover();              // same-day → restore; older → archive/advance
+  if(state.history.length===0) seedDemoHistory();   // first-run panel populated
+  setDate();
+  applyPinnedUI();
+  render();
+  // Show morning only on a fresh/rolled day with no items — NOT on same-day restore.
+  // Fresh first run (no stored blob) and a real day-rollover both qualify.
+  if((bootedFresh || rolled) && state.today.items.length===0) showMorning();
+}
+boot();
 </script>
 </body>
 </html>
