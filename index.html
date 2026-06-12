@@ -8,14 +8,9 @@
 <style>
   /* Native (Tauri) mode: hide the web-demo scaffolding so only Buddy shows;
      the real macOS desktop sits behind the transparent window. */
-  body.native #wallpaper, body.native #desktop, body.native #devMorning{ display:none !important; }
+  body.native #wallpaper, body.native #desktop, body.native #devMorning, body.native #edgeBar{ display:none !important; }
   body.native{ background:transparent !important; }
-  /* native: the WINDOW slivers & expands; the edge bar + drawer reveal like the web */
-  /* visible handle on the sliver so you can find the edge to hover */
-  body.native #edgeBar{ background:transparent !important; }
-  body.native #edgeBar::after{ content:''; position:absolute; right:3px; top:50%; transform:translateY(-50%);
-    width:5px; height:64px; border-radius:5px; background:rgba(0,0,0,.28); transition:background .15s; }
-  body.native #edgeBar:hover::after{ background:rgba(0,0,0,.45); }
+  body.native #drawer{ transform:none !important; }   /* always-visible drawer (edge-reveal deferred) */
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
   :root{
     --font:'Graphik','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; --red:#e5484d;
@@ -508,7 +503,7 @@ function last7Days(){
 /* ----------------------- drawer open / close --------------------- */
 let openTimer=null, closeTimer=null;
 function openDrawer(){ if(NATIVE) nativeFit('drawer'); drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }
-function closeDrawer(){ if(state.pinned) return; drawer.classList.add('translate-x-full'); if(NATIVE) nativeFit('sliver'); }
+function closeDrawer(){ if(state.pinned || NATIVE) return; drawer.classList.add('translate-x-full'); }
 edgeBar.addEventListener('mouseenter', ()=>{ clearTimeout(closeTimer); openTimer=setTimeout(openDrawer,120); });
 edgeBar.addEventListener('mouseleave', ()=>{ clearTimeout(openTimer); });
 drawer.addEventListener('mouseenter', ()=>{ clearTimeout(closeTimer); clearTimeout(openTimer); });
@@ -1073,12 +1068,8 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
     await win.setPosition(new D.PhysicalPosition(p.x + sz.width - w, p.y + top));
   }catch(e){ console.warn('[buddy] nativeFit', e); }
 }
-// resting state when no morning is up: pinned → drawer; otherwise → hidden sliver
-function settleNative(){
-  if(!NATIVE) return;
-  if(state.pinned){ openDrawer(); }
-  else { drawer.classList.add('translate-x-full'); nativeFit('sliver'); }
-}
+// resting state when no morning is up: always show the drawer (edge-reveal deferred)
+function settleNative(){ if(!NATIVE) return; openDrawer(); }
 
 function boot(){
   cursor=0; kbActive=false; editingId=null;  // reset transient keyboard cursor on (re)boot
