@@ -774,17 +774,20 @@ function addAndEdit(){
    - Cleanup: animationend AND a 2000ms hard backstop.
    - Skipped entirely under prefers-reduced-motion or settings.confetti=false.
    ==================================================================== */
-const PARROTS=['parrot.gif'];    // drop more *.gif into assets/ and list them here for variety
+let PARROTS=[];                  // auto-populated with whichever parrot gifs exist in assets/
 let burstTotal=0;
-let parrotMode='emoji';          // 'gif' once the asset is confirmed present
+let parrotMode='emoji';          // 'gif' once at least one parrot gif loads
 let confettiTimer=null;
 
-/* Probe the bundled GIF once at boot. If it loads, use <img>; else 🦜. */
-(function detectParrot(){
-  const img=new Image();
-  img.onload=()=>{ if(img.naturalWidth>0) parrotMode='gif'; };
-  img.onerror=()=>{ parrotMode='emoji'; };
-  img.src='assets/parrot.gif';
+/* Probe a set of party-parrot filenames; whichever are present become the variety pool.
+   Drop more <name>.gif into assets/ and add the name here and they just work. */
+const PARROT_CANDIDATES=['parrot','parrotdad','aussieparrot','cowboyparrot','dealwithitparrot','fiestaparrot','margaritaparrot','shuffleparrot'];
+(function detectParrots(){
+  PARROT_CANDIDATES.forEach(name=>{
+    const img=new Image();
+    img.onload=()=>{ if(img.naturalWidth>0){ const f=name+'.gif'; if(!PARROTS.includes(f)) PARROTS.push(f); parrotMode='gif'; } };
+    img.src='assets/'+name+'.gif';
+  });
 })();
 
 function clearConfetti(){
@@ -811,7 +814,7 @@ function fireConfetti(){
   for(let k=0;k<count;k++){
     const parrot = Math.random() < parrotRatio;
     let el;
-    if(parrot && useGif){ el=document.createElement('img'); el.src='assets/'+PARROTS[Math.floor(Math.random()*PARROTS.length)]; el.alt=''; }
+    if(parrot && useGif && PARROTS.length){ el=document.createElement('img'); el.src='assets/'+PARROTS[Math.floor(Math.random()*PARROTS.length)]; el.alt=''; }
     else { el=document.createElement('span'); el.textContent = parrot ? '🦜' : '👍🏼'; }
     el.className='parrot';
     const dx   = count<=2 ? -(Math.random()*14) : -(10 + Math.random()*95);  // lone → floats up; many → flings left
