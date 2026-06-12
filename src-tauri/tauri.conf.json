@@ -16,7 +16,7 @@
         "title": "Buddy",
         "width": 340,
         "height": 760,
-        "minWidth": 300,
+        "minWidth": 1,
         "resizable": false,
         "decorations": false,
         "transparent": true,

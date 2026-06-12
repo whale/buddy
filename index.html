@@ -8,9 +8,14 @@
 <style>
   /* Native (Tauri) mode: hide the web-demo scaffolding so only Buddy shows;
      the real macOS desktop sits behind the transparent window. */
-  body.native #wallpaper, body.native #desktop, body.native #devMorning, body.native #edgeBar{ display:none !important; }
+  body.native #wallpaper, body.native #desktop, body.native #devMorning{ display:none !important; }
   body.native{ background:transparent !important; }
-  body.native #drawer{ transform:none !important; }   /* drawer is always present in the strip */
+  /* native: the WINDOW slivers & expands; the edge bar + drawer reveal like the web */
+  /* visible handle on the sliver so you can find the edge to hover */
+  body.native #edgeBar{ background:transparent !important; }
+  body.native #edgeBar::after{ content:''; position:absolute; right:3px; top:50%; transform:translateY(-50%);
+    width:5px; height:64px; border-radius:5px; background:rgba(0,0,0,.28); transition:background .15s; }
+  body.native #edgeBar:hover::after{ background:rgba(0,0,0,.45); }
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
   :root{
     --font:'Graphik','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; --red:#e5484d;
@@ -65,9 +70,9 @@
 
   /* ---- keyboard cursor ring: a transient nav cursor, distinct from the
      grey "now"/focused STATE (§3.2). Inset ring so it reads on any bg. ---- */
-  .cursor-ring{ box-shadow: inset 0 0 0 2px rgba(0,0,0,.55); }
-  #drawer.lvl1 .cursor-ring{ box-shadow: inset 0 0 0 2px var(--red); }
-  #drawer.lvl2 .cursor-ring{ box-shadow: inset 0 0 0 2px #fff; }
+  /* keyboard cursor = a darker background, no border/box */
+  .cursor-ring{ background-color: rgba(0,0,0,.06); }
+  #drawer.lvl2 .cursor-ring{ background-image: linear-gradient(rgba(0,0,0,.10),rgba(0,0,0,.10)); }
 
   /* ---- Add + shade per level, full-opacity on hover ---- */
   .addtxt{ transition:color .1s ease; }
@@ -502,8 +507,8 @@ function last7Days(){
 
 /* ----------------------- drawer open / close --------------------- */
 let openTimer=null, closeTimer=null;
-function openDrawer(){ drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }
-function closeDrawer(){ if(state.pinned) return; drawer.classList.add('translate-x-full'); }
+function openDrawer(){ if(NATIVE) nativeFit('drawer'); drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }
+function closeDrawer(){ if(state.pinned) return; drawer.classList.add('translate-x-full'); if(NATIVE) nativeFit('sliver'); }
 edgeBar.addEventListener('mouseenter', ()=>{ clearTimeout(closeTimer); openTimer=setTimeout(openDrawer,120); });
 edgeBar.addEventListener('mouseleave', ()=>{ clearTimeout(openTimer); });
 drawer.addEventListener('mouseenter', ()=>{ clearTimeout(closeTimer); clearTimeout(openTimer); });
@@ -615,7 +620,7 @@ function renderToday(){
     const enter = (it.id===justAddedId) ? ' item-enter' : '';
     row.className='buddy-row pressable bd '+bgClass+ring+enter+' group relative flex items-center cursor-pointer overflow-hidden '+(idx>0?'border-t border-[#d9d9d9]':'');
     row.dataset.idx=idx;
-    row.addEventListener('click',()=>{ if(editingId) return; cursor=idx; cycle(it); });
+    row.addEventListener('click',()=>{ if(editingId) return; kbActive=false; cursor=idx; cycle(it); });
 
     const txt=document.createElement('div');
     txt.dataset.tid=it.id; txt.dataset.ph='Untitled'; txt.style.fontSize='var(--fs)';
@@ -738,14 +743,14 @@ function buildMorning(){
   }
 }
 function morningVals(){ return [...morningSlots.querySelectorAll('input')].map(i=>i.value.trim()); }
-function showMorning(){ T('showMorning'); buildMorning(); morning.classList.remove('hidden'); nativeFit(true); setTimeout(()=>morningSlots.querySelector('input')?.focus(),60); }
+function showMorning(){ T('showMorning'); buildMorning(); morning.classList.remove('hidden'); nativeFit('full'); setTimeout(()=>morningSlots.querySelector('input')?.focus(),60); }
 function startDay(){
   const vals=morningVals().filter(Boolean); if(!vals.length) return;
   state.items=vals.map(t=>({id:nid(),text:t,state:'neutral'}));
-  T('startDay'); state.today.morningDone=true; save(); morning.classList.add('hidden'); render(); nativeFit(false);
+  T('startDay'); state.today.morningDone=true; save(); morning.classList.add('hidden'); render();
   openDrawer(); setTimeout(()=>{ if(!state.pinned) closeDrawer(); },1500);
 }
-function skip(){ T('skip'); state.today.morningDone=true; save(); morning.classList.add('hidden'); render(); nativeFit(false); }
+function skip(){ T('skip'); state.today.morningDone=true; save(); morning.classList.add('hidden'); render(); settleNative(); }
 // (removed) background-click dismissed the morning on stray activation clicks (acceptFirstMouse).
 // Dismiss only via the explicit "Skip today" link or by starting the day (Enter on the last slot).
 $('#devMorning').addEventListener('click',showMorning);
@@ -801,8 +806,7 @@ let endCount=0;
    spread → a staccato pop/fade rather than all at once. */
 function fireConfetti(){
   if(reduced()) return;                        // reduced-motion → no burst
-  const lvl = state.settings.celebrate ?? 100; // 0..100
-  if(lvl<=0) return;                           // slider at the very bottom = off
+  const lvl = state.settings.celebrate ?? 100; // 0..100 (left end = one thumb, never silent)
   clearConfetti();                             // single burst in flight
   const i=lvl/100;
   const count=Math.max(1, Math.round(1 + i*i*199));   // 1 → ~200 (quadratic ramp)
@@ -1047,8 +1051,10 @@ window.__buddy = {
 /* ---- native (Tauri) window sizing: morning = full screen, daily = right-edge strip ---- */
 const NATIVE = !!(window.__TAURI__ && window.__TAURI__.window);
 function T(m){ try{ window.__TAURI__?.core?.invoke('trace',{msg:String(m)}); }catch(_){} }
-async function nativeFit(full){
-  T('nativeFit('+full+')');
+const SLIVER=14;   // hidden width — just the edge hot-zone
+const DRAWERW=420; // revealed/pinned width
+async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
+  T('nativeFit('+mode+')');
   if(!NATIVE) return;
   try{
     const W=window.__TAURI__.window, D=window.__TAURI__.dpi||W;
@@ -1057,15 +1063,21 @@ async function nativeFit(full){
     const sz=mon.size, p=mon.position, sf=mon.scaleFactor;
     const top=Math.round(25*sf);          // sit below the menu bar (≈25pt)
     const h=sz.height - top;
-    if(full){
+    if(mode==='full'){
       await win.setSize(new D.PhysicalSize(sz.width, h));
       await win.setPosition(new D.PhysicalPosition(p.x, p.y + top));
-    } else {
-      const w=Math.round(420*sf);
-      await win.setSize(new D.PhysicalSize(w, h));
-      await win.setPosition(new D.PhysicalPosition(p.x + sz.width - w, p.y + top));
+      return;
     }
+    const w=Math.round((mode==='drawer'?DRAWERW:SLIVER)*sf);
+    await win.setSize(new D.PhysicalSize(w, h));
+    await win.setPosition(new D.PhysicalPosition(p.x + sz.width - w, p.y + top));
   }catch(e){ console.warn('[buddy] nativeFit', e); }
+}
+// resting state when no morning is up: pinned → drawer; otherwise → hidden sliver
+function settleNative(){
+  if(!NATIVE) return;
+  if(state.pinned){ openDrawer(); }
+  else { drawer.classList.add('translate-x-full'); nativeFit('sliver'); }
 }
 
 function boot(){
@@ -1083,7 +1095,7 @@ function boot(){
   // Fresh first run (no stored blob) and a real day-rollover both qualify.
   T('boot done='+state.today.morningDone+' n='+state.today.items.length);
   // Show the morning until it's been handled today — survives the dev double-boot/reload.
-  if(!state.today.morningDone && state.today.items.length===0) showMorning(); else nativeFit(false);
+  if(!state.today.morningDone && state.today.items.length===0) showMorning(); else settleNative();
 }
 boot();
 </script>
