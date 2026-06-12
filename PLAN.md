@@ -13,7 +13,7 @@ Make the current Buddy prototype a **complete, self-contained web app** with rea
 ## 2. Scope decision (read first)
 
 **Overnight delivers:** the complete web app, self-verified via Playwright.
-**Overnight does NOT deliver:** native Mac pieces (menu-bar, global hotkey, reserved-space window, login item) — they can't be verified headlessly. Phase 2 (§11).
+**Overnight does NOT deliver:** native Mac pieces (menu-bar, global hotkey, reserved-space window, login item) — they can't be verified headlessly. Phase C (§11).
 
 **Critical context the agent must internalize:** the current prototype has **NO persistence** — `state` is in memory, `showMorning()` runs on every boot, history is hard-coded sample data. So persistence/rollover/real-history are **net-new builds**, not regressions to protect. Do not treat them as already-passing.
 
@@ -87,15 +87,38 @@ One selection model. A transient **keyboard cursor** (subtle ring) is the naviga
 
 ### 3.4 Animation pass  *(gap #4)* — PHASE B
 
-Slight + speedy: **120–220ms, `ease-out`**, never bouncy/slow. Implement these **literal** specs (no open-ended "polish" pass; the agent can't judge feel — `frontend-design` is reference only, not a build dependency):
-- Drawer reveal/hide ~240ms (exists — confirm).
-- **Last 7 days open/close: a crossfade is the spec** (~200ms) — today list fades out, history fades in, the bar relocates. (The bar "travel" animation is explicitly NOT required; crossfade is primary, not a fallback.)
-- Task state change: bg + text ~140ms (exists — confirm it also eases the red theme).
-- **Red theme cross-level:** crossing 4→5 / 5→6 washes the drawer red over ~200ms (not a snap).
-- Add: row expands/fades in ~160ms. Remove: collapses/fades out ~160ms.
-- Settings sheet slide ~220ms. Pin/desktop resize animated (exists).
-- Hover states already ~120ms — keep.
-- **Wrap everything in `@media (prefers-reduced-motion: reduce)` → ~0 durations.**
+**Load the `emil-design-eng` skill at the start of this phase** (Emil Kowalski's design-engineering philosophy — installed; also animations.dev). The specs below are derived from it; implement them literally (no open-ended "feel" pass the agent can't judge — `frontend-design` is reference only).
+
+**Easing tokens (built-in CSS easings are too weak — define & use these):**
+```css
+--ease-out:    cubic-bezier(0.23, 1, 0.32, 1);   /* enter/exit, feedback */
+--ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);  /* on-screen movement */
+--ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);   /* iOS drawer curve */
+```
+Never `ease-in` on UI. Never `transition: all` — always name the properties. All UI motion **< 300ms**.
+
+**Durations:**
+- Drawer reveal/hide ~240ms `--ease-drawer`, via `translateX(100%)` (percentage, Vaul-style — exists).
+- Settings/history sheets: **~220ms enter / ~180ms exit** (exit faster), `translateY(100%)`.
+- Task state change (bg/text incl. red theme) ~140ms `ease`.
+- Red cross-level wash ~200ms. **Add ~160ms / Remove ~120ms** (exit faster).
+- Hover/affordance ~100ms (reduced — fires constantly). Press feedback ~140ms.
+
+**Principles (bake in):**
+- **Press feedback everywhere:** every pressable (pin, gear, task row, Add, history +/undo, settings toggle) gets `transform: scale(0.97)` on `:active`, ~140ms `--ease-out`.
+- **Never animate keyboard-initiated actions:** the `` ` `` drawer toggle and ↑/↓ cursor nav are **instant** (no transition). Only pointer-driven reveal/sheets animate.
+- **Never enter from `scale(0)`:** Add row enters `opacity 0→1` + `translateY(8px)→0`; sheets use `translateY(100%)`.
+- **Transitions, not keyframes, for interruptible UI** (state changes, add/remove, sheets retarget mid-flight). Keyframes only for the one-shot confetti.
+- **Only animate `transform`/`opacity`** (GPU). Height/width only where unavoidable (item collapse on remove) — animate everything else with transform.
+- **Mask the Last-7-days crossfade with `filter: blur(2px)`** on the swapping layers so it reads as one motion, not two overlapping states (blur ≤ 4px; Safari cost). Crossfade is the spec; no bar-travel tween.
+- **Stagger grouped entrances 40–60ms:** morning's 3 slots, history day-groups on open. Confetti parrots stagger 0–250ms (decorative).
+- **`@starting-style`** for entries where supported, `data-mounted` fallback.
+- **Gate hover** behind `@media (hover: hover) and (pointer: fine)`.
+- **Match the mood:** Buddy stays calm and crisp; delight is licensed **only** at task completion (the parrots).
+- **Red wash interpolation:** animate real `background-color`/`color` (they interpolate). Do **not** animate by swapping `--color` custom-property values — that hard-cuts in WebKit (and Tauri's webview is WebKit). If a clean wash is hard, fade in a `position:fixed; mix-blend-mode:hue` red overlay instead.
+- **WebKit/Tauri:** every technique here works in WKWebView (transforms, opacity, `@keyframes`, `filter: blur`, `@starting-style`). The one broken feature — `backdrop-filter: blur()` on a transparent Tauri window (macOS 15 bug) — Buddy doesn't use (flat, solid cards), so motion ports 1:1 to the Mac shell.
+
+**Reduced motion (corrected — gentler, NOT zero):** under `@media (prefers-reduced-motion: reduce)`, keep short **opacity/color** transitions (they aid comprehension); **remove positional motion** (translate/scale → snap to final). Confetti skipped entirely.
 
 ### 3.5 "3 is ideal"  *(gap #5)*
 The morning is the anchor: **exactly 3 slots.** In-day you may add more, but 5 = all-text-red (the edge), 6 = whole-view-red (over), no 7th. No copy change — the 3-slot morning teaches the ideal.
@@ -185,8 +208,24 @@ Party Parrot — bundle to `assets/parrot.gif`:
 `https://cultofthepartyparrot.com/parrots/hd/parrot.gif`
 Display 24×24. If unreachable → small CSS/🦜 burst + README note.
 
-## 11. Phase 2 — Mac shell (NOT overnight; together)
-Wrap in **Tauri** (riff-raff stack): transparent always-on-top non-activating panel (wallpaper shows through); right-edge reveal + pin (reserved-space is the fragile part — prototype & measure); global hotkey → real `` ` `` summon; menu-bar item reflecting current "now"; login-item, multi-display, notch. Needs interactive verification.
+## 11. Phase C — Mac shell (Tauri): how far the overnight can get
+
+Research finding: **riff-raff is spec-only (no runnable code)** but its blueprint maps onto Buddy; **sensei** (the owner's active SwiftUI Mac app) is a native reference if we ever go AppKit instead of Tauri.
+
+**An agent CAN scaffold unattended (~80% — written, NOT run):**
+- `pnpm create tauri-app` structure; `tauri.conf.json` window config (`decorations:false, transparent:true, alwaysOnTop:true, skipTaskbar:true, resizable:false`).
+- `tray-icon` plugin (menu-bar icon + click-to-toggle); `tauri-plugin-global-shortcut` for the `` ` `` summon.
+- Load the existing `index.html` into the webview; right-edge positioning math (`PhysicalPosition`, monitor size); build scripts.
+
+**Needs YOU (~30–60 min, can't be done/verified headlessly):**
+- `rustup` install (one-time interactive) + the first 5–20 min compile (errors need a human).
+- Non-activating `NSPanel` behavior + correct `NSWindowLevel` (Tauri v2 doesn't expose these; needs Rust→AppKit via `objc2`, only testable on the machine).
+- Reserved-space ("no app behind it") — the genuinely fragile bit; prototype and measure.
+- A real 22×22@2x menu-bar icon (agent stubs a placeholder).
+
+**Decision before this phase:** Buddy's flat design means the transparent-window wallpaper-bleed works without `backdrop-filter`, so no blocker there. Confirm we're going **Tauri** (web ports 1:1) vs **SwiftUI** (sensei-style, fully native, no webview — bigger rewrite).
+
+**Overnight stretch (optional, after Gate B):** if time remains, scaffold the Tauri shell as **unverified code** in a `src-tauri/` branch so you can `rustup` + compile + test in the morning. Mark it clearly as not-yet-run. The verified web app is the guaranteed deliverable; the shell is a head-start, not a promise.
 
 ## 12. Open questions for the morning
 - Settings gear placement (Buddy pill vs date-card corner)?
