@@ -103,6 +103,7 @@ Never `ease-in` on UI. Never `transition: all` — always name the properties. A
 - Task state change (bg/text incl. red theme) ~140ms `ease`.
 - Red cross-level wash ~200ms. **Add ~160ms / Remove ~120ms** (exit faster).
 - Hover/affordance ~100ms (reduced — fires constantly). Press feedback ~140ms.
+- Hover *surface* tint: **2% black** on white rows/headers (not 5% — too intense), **10% white** on red.
 
 **Principles (bake in):**
 - **Press feedback everywhere:** every pressable (pin, gear, task row, Add, history +/undo, settings toggle) gets `transform: scale(0.97)` on `:active`, ~140ms `--ease-out`.
