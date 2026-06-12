@@ -6,6 +6,11 @@
 <title>Buddy — prototype</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
+  /* Native (Tauri) mode: hide the web-demo scaffolding so only Buddy shows;
+     the real macOS desktop sits behind the transparent window. */
+  body.native #wallpaper, body.native #desktop, body.native #devMorning, body.native #edgeBar{ display:none !important; }
+  body.native{ background:transparent !important; }
+  body.native #drawer{ transform:none !important; }   /* drawer is always present in the strip */
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
   :root{
     --font:'Graphik','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; --red:#e5484d;
@@ -724,14 +729,14 @@ function buildMorning(){
   }
 }
 function morningVals(){ return [...morningSlots.querySelectorAll('input')].map(i=>i.value.trim()); }
-function showMorning(){ buildMorning(); morning.classList.remove('hidden'); setTimeout(()=>morningSlots.querySelector('input')?.focus(),60); }
+function showMorning(){ buildMorning(); morning.classList.remove('hidden'); nativeFit(true); setTimeout(()=>morningSlots.querySelector('input')?.focus(),60); }
 function startDay(){
   const vals=morningVals().filter(Boolean); if(!vals.length) return;
   state.items=vals.map(t=>({id:nid(),text:t,state:'neutral'}));
-  morning.classList.add('hidden'); render();
+  morning.classList.add('hidden'); render(); nativeFit(false);
   openDrawer(); setTimeout(()=>{ if(!state.pinned) closeDrawer(); },1500);
 }
-function skip(){ morning.classList.add('hidden'); render(); }
+function skip(){ morning.classList.add('hidden'); render(); nativeFit(false); }
 morning.addEventListener('click',e=>{ if(e.target===morning || e.target===morning.firstElementChild){ if(morningVals().some(Boolean)) startDay(); else skip(); }});
 $('#devMorning').addEventListener('click',showMorning);
 
@@ -1000,8 +1005,29 @@ window.__buddy = {
 };
 
 /* --------------------------- boot -------------------------------- */
+/* ---- native (Tauri) window sizing: morning = full screen, daily = right-edge strip ---- */
+const NATIVE = !!(window.__TAURI__ && window.__TAURI__.window);
+async function nativeFit(full){
+  if(!NATIVE) return;
+  try{
+    const W=window.__TAURI__.window, D=window.__TAURI__.dpi||W;
+    const win=W.getCurrentWindow(), mon=await W.currentMonitor();
+    if(!mon || !D.PhysicalSize || !D.PhysicalPosition) return;
+    const sz=mon.size, p=mon.position, sf=mon.scaleFactor;
+    if(full){
+      await win.setSize(new D.PhysicalSize(sz.width, sz.height));
+      await win.setPosition(new D.PhysicalPosition(p.x, p.y));
+    } else {
+      const w=Math.round(420*sf);
+      await win.setSize(new D.PhysicalSize(w, sz.height));
+      await win.setPosition(new D.PhysicalPosition(p.x + sz.width - w, p.y));
+    }
+  }catch(e){ console.warn('[buddy] nativeFit', e); }
+}
+
 function boot(){
   cursor=0; kbActive=false; editingId=null;  // reset transient keyboard cursor on (re)boot
+  if(NATIVE) document.body.classList.add('native');
   load();                                    // corruption-guarded; bad blob → fresh
   const rolled=maybeRollover();              // same-day → restore; older → archive/advance
   if(state.history.length===0) seedDemoHistory();   // first-run panel populated
@@ -1011,7 +1037,7 @@ function boot(){
   render();
   // Show morning only on a fresh/rolled day with no items — NOT on same-day restore.
   // Fresh first run (no stored blob) and a real day-rollover both qualify.
-  if((bootedFresh || rolled) && state.today.items.length===0) showMorning();
+  if((bootedFresh || rolled) && state.today.items.length===0) showMorning(); else nativeFit(false);
 }
 boot();
 </script>

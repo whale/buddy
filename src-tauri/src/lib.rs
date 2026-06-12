@@ -30,7 +30,7 @@ use tauri::{
 
 /// Width (in logical-ish physical px) of the Buddy strip on screen.
 /// Tweak to taste; the web layout is comfortable around 320–360.
-const STRIP_WIDTH: u32 = 340;
+const STRIP_WIDTH: u32 = 420;
 
 /// Position `win` flush against the right edge of whichever monitor it currently
 /// sits on (falls back to the primary monitor), spanning the full usable height.
