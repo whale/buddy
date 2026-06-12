@@ -7,50 +7,152 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-  :root{ --font:'Graphik','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; --red:#e5484d; }
+  :root{
+    --font:'Graphik','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; --red:#e5484d;
+    /* ---- easing tokens (built-in CSS easings are too weak — §3.4) ---- */
+    --ease-out:    cubic-bezier(0.23, 1, 0.32, 1);   /* enter/exit, feedback */
+    --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);  /* on-screen movement */
+    --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);   /* iOS drawer curve */
+  }
   html,body{height:100%} body{margin:0; font-family:var(--font);}
-  .ease-d{transition:transform .3s cubic-bezier(.22,.61,.36,1), width .3s cubic-bezier(.22,.61,.36,1)}
+  .ease-d{transition:transform .24s var(--ease-drawer), width .24s var(--ease-drawer)}
+  /* keyboard-initiated drawer toggle is INSTANT (no transition) — §3.4 */
+  .ease-d.no-anim{transition:none !important}
   .no-sb{scrollbar-width:none} .no-sb::-webkit-scrollbar{display:none}
   [contenteditable]:focus{outline:none}
   [contenteditable].empty:before{content:attr(data-ph);color:rgba(0,0,0,.2)}
 
-  /* ---- warning themes: whole view ---- */
+  /* ---- press feedback: every pressable scales on :active (§3.4) ---- */
+  .pressable{ transition:transform .14s var(--ease-out); }
+  .pressable:active{ transform:scale(0.97); }
+
+  /* ---- warning themes: whole view ----
+     Red wash animates REAL background-color/color (they interpolate) — NOT
+     --var swaps (those hard-cut in WebKit). ~200ms wash. §3.4 */
+  .bcard{ transition:background-color .2s ease; }
+  .chrome{ transition:color .2s ease; }
+  .divider{ transition:background-color .2s ease; }
+  .bd{ transition:border-color .2s ease; }
   /* level 1 — at the limit: every text turns red, backgrounds stay white */
   #drawer.lvl1 .chrome{ color:var(--red) !important; }
   /* level 2 — over the limit: the entire view turns red, text white */
-  #drawer.lvl2 .bcard{ background:var(--red) !important; }
-  #drawer.lvl2 .barwhite{ background:var(--red) !important; }
+  #drawer.lvl2 .bcard{ background-color:var(--red) !important; }
+  #drawer.lvl2 .barwhite{ background-color:var(--red) !important; }
   #drawer.lvl2 .chrome{ color:#fff !important; }
-  #drawer.lvl2 .divider{ background:rgba(255,255,255,.30) !important; }
+  #drawer.lvl2 .divider{ background-color:rgba(255,255,255,.30) !important; }
   #drawer.lvl2 .bd{ border-color:rgba(255,255,255,.30) !important; }
-  #drawer.lvl2 #pinBtn{ background:rgba(255,255,255,.20) !important; color:#fff !important; }
+  #drawer.lvl2 #pinBtn{ background-color:rgba(255,255,255,.20) !important; color:#fff !important; }
   /* pin hover while red: solid white chip, red icon */
-  #drawer.lvl2 #pinBtn:hover{ background:#fff !important; color:var(--red) !important; }
+  @media (hover:hover) and (pointer:fine){
+    #drawer.lvl2 #pinBtn:hover{ background-color:#fff !important; color:var(--red) !important; }
+  }
 
-  /* ---- row hover affordance ---- */
-  .buddy-row{ transition:background .12s ease; }
-  .row-neutral:hover{ background:rgba(0,0,0,.02); }
-  .row-focused{ background:#f4f4f4; }
-  .row-focused:hover{ background:transparent; }            /* selected → back to normal on hover */
-  #drawer.lvl2 .buddy-row{ background:var(--red) !important; }
-  #drawer.lvl2 .buddy-row:hover{ background:#e85a5f !important; }   /* red + ~10% white */
+  /* ---- row hover affordance (gated behind real hover — §3.4) ---- */
+  .buddy-row{ transition:background-color .1s ease; }
+  .row-focused{ background-color:#f4f4f4; }
+  @media (hover:hover) and (pointer:fine){
+    .row-neutral:hover{ background-color:rgba(0,0,0,.02); }   /* 2% black */
+    .row-focused:hover{ background-color:transparent; }       /* selected → normal on hover */
+    #drawer.lvl2 .buddy-row:hover{ background-color:#e85a5f !important; } /* red + ~10% white */
+  }
+  #drawer.lvl2 .buddy-row{ background-color:var(--red) !important; }
+
+  /* ---- keyboard cursor ring: a transient nav cursor, distinct from the
+     grey "now"/focused STATE (§3.2). Inset ring so it reads on any bg. ---- */
+  .cursor-ring{ box-shadow: inset 0 0 0 2px rgba(0,0,0,.55); }
+  #drawer.lvl1 .cursor-ring{ box-shadow: inset 0 0 0 2px var(--red); }
+  #drawer.lvl2 .cursor-ring{ box-shadow: inset 0 0 0 2px #fff; }
 
   /* ---- Add + shade per level, full-opacity on hover ---- */
-  .addtxt{ transition:color .15s ease; }
+  .addtxt{ transition:color .1s ease; }
   #drawer:not(.lvl1):not(.lvl2) .addtxt{ color:rgba(0,0,0,.20); }
-  #drawer:not(.lvl1):not(.lvl2) .addrow:hover .addtxt{ color:#000; }
   #drawer.lvl1 .addtxt{ color:rgba(0,0,0,.60); }            /* all-red-text: Add stays 60% black */
-  #drawer.lvl1 .addrow:hover .addtxt{ color:#000; }
   #drawer.lvl2 .addtxt{ color:rgba(255,255,255,.60); }      /* all-red-bg: Add is 60% white */
-  #drawer.lvl2 .addrow:hover .addtxt{ color:#fff; }
+  @media (hover:hover) and (pointer:fine){
+    #drawer:not(.lvl1):not(.lvl2) .addrow:hover .addtxt{ color:#000; }
+    #drawer.lvl1 .addrow:hover .addtxt{ color:#000; }
+    #drawer.lvl2 .addrow:hover .addtxt{ color:#fff; }
+  }
 
   /* ---- today badge: reversed so it reads on red ---- */
   #drawer.lvl2 .todaybadge{ background:rgba(0,0,0,.22) !important; color:rgba(255,255,255,.92) !important; }
 
   /* ---- Last 7 days header: link affordance ---- */
-  .barhdr{ transition:background .15s ease; }
-  .barhdr:hover{ background:rgba(0,0,0,.02); }
-  #drawer.lvl2 .barhdr:hover{ background:rgba(255,255,255,.10); }
+  .barhdr{ transition:background-color .1s ease; }
+  @media (hover:hover) and (pointer:fine){
+    .barhdr:hover{ background-color:rgba(0,0,0,.02); }
+    #drawer.lvl2 .barhdr:hover{ background-color:rgba(255,255,255,.10); }
+  }
+
+  /* ====================================================================
+     ANIMATIONS (§3.4) — transitions for interruptible UI, keyframes only
+     for the one-shot confetti. Only transform/opacity (GPU). <300ms.
+     ==================================================================== */
+
+  /* Add-row / item enter: opacity 0→1 + translateY(8px)→0. NEVER scale(0).
+     Asymmetric: enter ~160ms, exit ~120ms (exit faster). */
+  .item-enter{ animation: item-in .16s var(--ease-out) both; }
+  @keyframes item-in{ from{ opacity:0; transform:translateY(8px); } to{ opacity:1; transform:none; } }
+
+  /* Settings / history sheets: translateY(100%). enter ~220ms / exit ~180ms. */
+  .sheet{ transition: transform .22s var(--ease-out); will-change:transform; }
+  .sheet.closing{ transition: transform .18s var(--ease-out); }
+  .sheet[data-open="false"]{ transform: translateY(100%); }
+  .sheet[data-open="true"]{ transform: translateY(0); }
+
+  /* Last-7-days crossfade — blur-masked so it reads as ONE motion (§3.4).
+     blur ≤ 4px (Safari cost). Crossfade, no bar-travel tween. */
+  .hist-fade{ animation: hist-cf .22s var(--ease-out) both; }
+  @keyframes hist-cf{
+    from{ opacity:0; filter:blur(2px); }
+    to{   opacity:1; filter:blur(0); }
+  }
+
+  /* Stagger grouped entrances 40–60ms (morning slots, history day-groups). */
+  .stagger > *{ animation: item-in .18s var(--ease-out) both; }
+  .stagger > *:nth-child(1){ animation-delay:0ms; }
+  .stagger > *:nth-child(2){ animation-delay:50ms; }
+  .stagger > *:nth-child(3){ animation-delay:100ms; }
+  .stagger > *:nth-child(4){ animation-delay:150ms; }
+  .stagger > *:nth-child(5){ animation-delay:200ms; }
+  .stagger > *:nth-child(6){ animation-delay:250ms; }
+  .stagger > *:nth-child(7){ animation-delay:300ms; }
+
+  /* chevron rotate on Last-7 open */
+  .chev{ transition: transform .2s var(--ease-out); }
+
+  /* ---- Confetti: 100 party-parrots, one-shot keyframe burst (§3.3) ---- */
+  #confetti{ position:fixed; inset:0; z-index:200; pointer-events:none; overflow:hidden; }
+  .parrot{
+    position:absolute; width:24px; height:24px; line-height:24px;
+    font-size:22px; text-align:center; will-change:transform, opacity;
+    top:-30px; opacity:0;
+    animation: parrot-fall var(--dur,1.8s) cubic-bezier(0.23,1,0.32,1) var(--delay,0ms) forwards;
+  }
+  @keyframes parrot-fall{
+    0%{   transform: translate3d(0,0,0) rotate(0deg);            opacity:0; }
+    8%{   opacity:1; }
+    100%{ transform: translate3d(var(--dx,0), var(--dy,110vh), 0) rotate(var(--rot,90deg)); opacity:0; }
+  }
+
+  /* ====================================================================
+     REDUCED MOTION (§3.4 corrected — gentler, NOT zero):
+     keep short opacity/color transitions (they aid comprehension);
+     remove POSITIONAL motion (translate/scale → snap to final).
+     Confetti is skipped in JS entirely.
+     ==================================================================== */
+  @media (prefers-reduced-motion: reduce){
+    .ease-d{ transition: width .2s ease !important; }   /* drop translateX motion */
+    .pressable:active{ transform:none; }
+    .sheet{ transition: opacity .18s ease; }
+    .sheet.closing{ transition: opacity .14s ease; }
+    .sheet[data-open="false"]{ transform:none; opacity:0; }
+    .sheet[data-open="true"]{  transform:none; opacity:1; }
+    .item-enter{ animation: rm-fade .14s ease both; }
+    .stagger > *{ animation: rm-fade .14s ease both; animation-delay:0ms !important; }
+    .hist-fade{ animation: rm-fade .16s ease both; }
+    @keyframes rm-fade{ from{opacity:0;} to{opacity:1;} }
+  }
 </style>
 </head>
 <body class="antialiased select-none text-black">
@@ -91,10 +193,16 @@
   <!-- Card 1: Buddy pill + date -->
   <div class="bcard w-[400px] shrink-0 bg-white rounded-[24px] overflow-hidden">
     <div class="flex items-center justify-between px-8 py-6">
-      <button id="pinBtn" title="Pin open"
-        class="size-[39px] grid place-items-center rounded-full transition-colors bg-black/5 text-black/60 hover:bg-black/10 hover:text-black">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
-      </button>
+      <div class="flex items-center gap-2">
+        <button id="pinBtn" title="Pin open"
+          class="pressable size-[39px] grid place-items-center rounded-full transition-colors bg-black/5 text-black/60 hover:bg-black/10 hover:text-black">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+        </button>
+        <button id="gearBtn" title="Settings"
+          class="pressable chrome size-[39px] grid place-items-center rounded-full transition-colors text-black/45 hover:bg-black/5 hover:text-black/80">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
       <span class="chrome text-[18px] text-black/60 tracking-[-0.36px]">Buddy</span>
     </div>
     <div class="divider h-px w-full bg-[#d9d9d9]"></div>
@@ -108,10 +216,37 @@
   </div>
 
   <!-- Card 2: list -->
-  <div class="bcard w-[400px] flex-1 min-h-0 bg-white rounded-[24px] overflow-hidden">
+  <div class="bcard relative w-[400px] flex-1 min-h-0 bg-white rounded-[24px] overflow-hidden">
     <div id="list" class="h-full flex flex-col overflow-hidden"></div>
+
+    <!-- Settings sheet: slides up over the list (same language as history) -->
+    <div id="settings" class="sheet absolute inset-0 z-20 bg-white flex flex-col" data-open="false" aria-hidden="true">
+      <div class="flex items-center justify-between px-8 py-6">
+        <span class="text-[18px] font-medium text-black/80 tracking-[-0.36px]">Settings</span>
+        <button id="settingsClose" title="Close"
+          class="pressable size-[39px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 hover:text-black/80 transition-colors">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="h-px w-full bg-[#d9d9d9]"></div>
+      <div class="p-8">
+        <button id="confettiToggle" type="button" role="switch" aria-checked="true"
+          class="pressable w-full flex items-center justify-between gap-4 text-left">
+          <span class="text-[17px] font-medium text-black/80 tracking-[-0.34px]">Celebrate completed tasks 🎉</span>
+          <span id="confettiTrack" class="relative shrink-0 h-[28px] w-[48px] rounded-full bg-black transition-colors duration-200">
+            <span id="confettiKnob" class="absolute top-[3px] left-[3px] h-[22px] w-[22px] rounded-full bg-white shadow-sm transition-transform duration-200" style="transform:translateX(20px)"></span>
+          </span>
+        </button>
+        <p id="confettiOverride" class="mt-3 text-[13px] text-black/40 leading-snug hidden">
+          Off while your system is set to reduce motion.
+        </p>
+      </div>
+    </div>
   </div>
 </aside>
+
+<!-- Confetti overlay (parrots injected at burst time) -->
+<div id="confetti" aria-hidden="true"></div>
 
 <!-- ============ MORNING ============ -->
 <div id="morning" class="fixed inset-0 z-[100] hidden bg-white">
@@ -130,11 +265,51 @@
 </div>
 
 <script>
-let state = { items: [], pinned:false, histOpen:false };
+/* ====================================================================
+   STATE MODEL
+   --------------------------------------------------------------------
+   Persisted shape (localStorage key "buddy.v1"):
+     { version:1,
+       today:    { date:"YYYY-MM-DD", items:[ {id,text,state,src} ] },
+       history:  [ { date, weekday, items:[ {id,text,done} ] } ],
+       settings: { confetti:true },
+       pinned:   false }
+
+   Runtime `state` mirrors that, plus transient UI flags (histOpen)
+   that are NOT persisted.
+   ==================================================================== */
+let state = {
+  today:   { date:null, items:[] },
+  history: [],
+  settings:{ confetti:true },
+  pinned:  false,
+  histOpen:false,
+};
+/* `state.items` is an alias for `state.today.items` so all existing
+   render/cycle/edit code keeps working unchanged. */
+Object.defineProperty(state,'items',{
+  get(){ return state.today.items; },
+  set(v){ state.today.items=v; },
+  enumerable:false, configurable:true,
+});
+
 let uid = 1; const nid = () => 'n'+(uid++);
 let editingId = null;
+let cursor = 0;                  // keyboard cursor index (0..items.length, last = Add row)
+let kbActive = false;           // true once a key has been used → cursor ring shows
 const SOFT_CAP = 5, HARD_CAP = 6, RED = '#e5484d';
+
+/* prefers-reduced-motion — live (matchMedia updates if the user flips it). */
+const RM = window.matchMedia('(prefers-reduced-motion: reduce)');
+const reduced = () => RM.matches;
 const clamp=(a,v,b)=>Math.max(a,Math.min(b,v));
+const DOW=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+/* Local YYYY-MM-DD (never UTC — rollover must respect the user's tz). */
+function localDate(d=new Date()){
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
 
 const PIN_OFF='bg-black/5 text-black/60 hover:bg-black/10 hover:text-black';
 const PIN_ON ='bg-black text-white hover:bg-[#d9d9d9] hover:text-black';
@@ -142,7 +317,11 @@ const PIN_BASE='size-[39px] grid place-items-center rounded-full transition-colo
 
 const $ = s => document.querySelector(s);
 const desktop=$('#desktop'), drawer=$('#drawer'), edgeBar=$('#edgeBar'), edgeDots=$('#edgeDots'),
-      listEl=$('#list'), morning=$('#morning'), morningSlots=$('#morningSlots');
+      listEl=$('#list'), morning=$('#morning'), morningSlots=$('#morningSlots'),
+      confettiEl=$('#confetti'),
+      settingsSheet=$('#settings'), gearBtn=$('#gearBtn'), settingsClose=$('#settingsClose'),
+      confettiToggle=$('#confettiToggle'), confettiKnob=$('#confettiKnob'), confettiTrack=$('#confettiTrack'),
+      confettiOverride=$('#confettiOverride');
 
 const todayWrap=document.createElement('div'); todayWrap.className='flex-1 min-h-0 flex flex-col';
 const histBody =document.createElement('div');
@@ -165,24 +344,148 @@ function setDate(){
   $('#dNum').textContent=num;    $('#mNum').textContent=num;
 }
 
-/* ----------------------- history (sample) ------------------------ */
-function buildHistory(){
-  const DOW=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+/* ====================================================================
+   PERSISTENCE  — localStorage, debounced + force-flush
+   ==================================================================== */
+const STORAGE_KEY='buddy.v1', BAK_KEY='buddy.v1.bak', HISTORY_DAYS=30;
+let memoryStore=null;            // fallback when localStorage is unavailable
+let saveTimer=null;
+let bootedFresh=false;           // true when load() found no/invalid stored blob
+
+function lsGet(k){ try{ return localStorage.getItem(k); }catch{ return memoryStore?memoryStore[k]:null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch{ (memoryStore||(memoryStore={}))[k]=v; } }
+
+/* Serialise only the persisted slice (drop transient histOpen). */
+function serialize(){
+  return JSON.stringify({
+    version:1,
+    today:   { date:state.today.date, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null})) },
+    history: state.history,
+    settings:{ confetti:!!state.settings.confetti },
+    pinned:  !!state.pinned,
+  });
+}
+let saveSuppressed=false;        // test hook: freeze persistence so an injected blob survives reload
+function writeNow(){ if(saveSuppressed) return; clearTimeout(saveTimer); saveTimer=null; lsSet(STORAGE_KEY, serialize()); }
+function save(){ if(saveSuppressed) return; clearTimeout(saveTimer); saveTimer=setTimeout(writeNow,250); }
+
+/* Force-flush synchronously when the tab is hidden / closing — a trailing
+   debounce gets killed by tab close, so cancel the timer and write inline. */
+window.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') writeNow(); });
+window.addEventListener('beforeunload', writeNow);
+
+/* --------------------------------------------------------------------
+   LOAD + MIGRATE  — corruption guard: a bad blob must NEVER reach render
+   -------------------------------------------------------------------- */
+function migrate(blob){
+  // Future versions key off blob.version here. Empty for v1.
+  switch(blob.version){
+    // case 1: return blob;   // (handled by validation below)
+    default: return blob;
+  }
+}
+function isValidToday(t){
+  return t && typeof t==='object'
+    && typeof t.date==='string'
+    && Array.isArray(t.items)
+    && t.items.every(i=> i && typeof i.text==='string');
+}
+function freshBoot(){
+  state.today={ date:localDate(), items:[] };
+  state.history=[];
+  state.settings={ confetti:true };
+  state.pinned=false;
+  bootedFresh=true;
+}
+function load(){
+  bootedFresh=false;
+  const raw=lsGet(STORAGE_KEY);
+  if(raw==null){ freshBoot(); return; }
+  let blob;
+  try{ blob=JSON.parse(raw); }
+  catch{ lsSet(BAK_KEY, raw); freshBoot(); return; }     // bad JSON
+  if(!blob || typeof blob!=='object' || blob.version!==1 || !isValidToday(blob.today)){
+    lsSet(BAK_KEY, raw); freshBoot(); return;             // wrong version / malformed today
+  }
+  blob=migrate(blob);
+  // Hydrate runtime state from the validated blob.
+  state.today   = { date:blob.today.date, items:blob.today.items.map(i=>({
+                      id:i.id||nid(), text:String(i.text||''),
+                      state:(i.state==='focused'||i.state==='done')?i.state:'neutral',
+                      src:i.src??null })) };
+  state.history = Array.isArray(blob.history) ? blob.history.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items)) : [];
+  state.settings= { confetti: blob.settings && typeof blob.settings.confetti==='boolean' ? blob.settings.confetti : true };
+  state.pinned  = !!blob.pinned;
+}
+
+/* ====================================================================
+   ROLLOVER  — compare stored today.date to the current local date
+   ==================================================================== */
+function maybeRollover(){
+  if(editingId!==null) return false;          // never roll over mid-edit
+  const cur=localDate();
+  const stored=state.today.date;
+  if(stored===cur) return false;              // same day → restore verbatim, no morning
+  if(!stored){ state.today.date=cur; return false; }
+
+  if(state.today.items.length>0){
+    // Archive the finished day with STABLE ids.
+    const epoch=Math.floor(Date.now()/1000);
+    const wd=DOW[ new Date(stored+'T00:00:00').getDay() ];
+    const record={
+      date: stored, weekday: wd,
+      items: state.today.items.map((it,i)=>({ id:`h-${epoch}-${i}`, text:it.text, done: it.state==='done' })),
+    };
+    state.history.unshift(record);
+    if(state.history.length>HISTORY_DAYS) state.history.length=HISTORY_DAYS;
+    state.today={ date:cur, items:[] };
+    return true;                              // → caller shows morning
+  } else {
+    // Empty/skipped day → just advance the date, archive nothing.
+    state.today.date=cur;
+    return true;                              // fresh empty day → morning
+  }
+}
+
+/* ----------------------- demo history seed ----------------------- */
+/* Seed a tiny demo history ONLY when history is empty, so first-run
+   shows the Last-7-days panel populated. */
+function seedDemoHistory(){
+  if(state.history.length) return;
   const sample=[
     [['Reply to the team',true],['Draft the intro',true],['Book the flights',false]],
-    [['Review the doc',true],['Call Liam',false],['Water the plants',false],['Edit the photos',true]],
+    [['Review the doc',true],['Call Liam',false],['Water the plants',false]],
     [['Plan the week',true],['Ship the newsletter',false],['Tidy the desk',true]],
-    [],
+    null,                                       // a skipped day (dimmed)
     [['Read two chapters',false],['Stretch',true],['Email Erica',false]],
-    [],
   ];
-  const today=new Date(); const days=[];
-  for(let i=1;i<=6;i++){ const d=new Date(today); d.setDate(today.getDate()-i);
-    days.push({ name:DOW[d.getDay()], items:(sample[i-1]||[]).map(([text,done],j)=>({text,done,key:'h'+i+'-'+j})) }); }
-  return days;
+  const base=new Date();
+  sample.forEach((day,i)=>{
+    if(!day) return;                            // skipped day = no record
+    const d=new Date(base); d.setDate(base.getDate()-(i+1));
+    const date=localDate(d), epoch=Math.floor(d.getTime()/1000);
+    state.history.push({
+      date, weekday:DOW[d.getDay()],
+      items: day.map(([text,done],j)=>({ id:`h-${epoch}-${j}`, text, done })),
+    });
+  });
 }
-const HISTORY=buildHistory();
+
+/* `src` now links to a STABLE history item id (persisted). */
 const isAdded = key => state.items.some(it=>it.src===key);
+
+/* Build the last 7 calendar days (excluding today) for the panel,
+   matching history records by date. */
+function last7Days(){
+  const out=[]; const base=new Date();
+  for(let i=1;i<=7;i++){
+    const d=new Date(base); d.setDate(base.getDate()-i);
+    const date=localDate(d);
+    const rec=state.history.find(h=>h.date===date);
+    out.push({ date, name:DOW[d.getDay()], items: rec? rec.items : [] });
+  }
+  return out;
+}
 
 /* ----------------------- drawer open / close --------------------- */
 let openTimer=null, closeTimer=null;
@@ -199,13 +502,34 @@ pinBtn.addEventListener('click', e=>{
   state.pinned=!state.pinned;
   if(state.pinned){ openDrawer(); desktop.style.width='calc(100vw - 416px)'; pinBtn.className=PIN_BASE+PIN_ON; }
   else { desktop.style.width='100vw'; pinBtn.className=PIN_BASE+PIN_OFF; closeDrawer(); }
+  save();
 });
 
+/* Reflect pinned state in the UI (used at boot to restore a pinned session). */
+function applyPinnedUI(){
+  if(state.pinned){ desktop.style.width='calc(100vw - 416px)'; pinBtn.className=PIN_BASE+PIN_ON; openDrawer(); }
+  else { desktop.style.width='100vw'; pinBtn.className=PIN_BASE+PIN_OFF; }
+}
+
 /* --------------------------- state cycle ------------------------- */
+/* Confetti fires ONLY on a transition INTO `done`, from any source (§3.3).
+   We compare the state before/after — re-renders and pull-forwards of an
+   already-done item never pass through here, so they never celebrate. */
 function cycle(it){
+  const was=it.state;
   if(it.state==='neutral'){ state.items.forEach(x=>{ if(x.state==='focused') x.state='neutral'; }); it.state='focused'; }
   else if(it.state==='focused'){ it.state='done'; }
   else { it.state='neutral'; }
+  if(was!=='done' && it.state==='done') fireConfetti();
+  render();
+}
+
+/* --------------------------- set "now" (focus) ------------------- */
+/* F key: set a task as focused without cycling. Idempotent. */
+function setNow(it){
+  if(it.state==='done') return;        // a done task isn't a "now"
+  state.items.forEach(x=>{ if(x.state==='focused') x.state='neutral'; });
+  it.state='focused';
   render();
 }
 function removeItem(id){ state.items=state.items.filter(x=>x.id!==id); render(); }
@@ -235,6 +559,7 @@ new ResizeObserver(()=>requestAnimationFrame(fitToday)).observe(todayWrap);
 window.addEventListener('resize',()=>requestAnimationFrame(fitToday));
 
 /* --------------------------- rendering --------------------------- */
+let prevHistOpen=false;          // detect the open↔close transition for the crossfade
 function render(){
   const lvl=warnLevel();
   drawer.classList.toggle('lvl1', lvl===1);
@@ -242,17 +567,26 @@ function render(){
 
   renderToday(); renderHist(); renderBar();
   listEl.innerHTML='';
+  // Blur-masked crossfade ONLY on the actual open↔close transition (§3.4),
+  // never on a plain re-render (would flicker on every keystroke/cycle).
+  todayWrap.classList.remove('hist-fade'); histBody.classList.remove('hist-fade');
+  const toggled = state.histOpen!==prevHistOpen;
   if(state.histOpen){
     listEl.className='h-full overflow-y-auto no-sb';
     last7.className='barwhite sticky top-0 z-10 bg-white';
+    if(toggled) histBody.classList.add('hist-fade');
     listEl.append(last7, histBody);
   } else {
     listEl.className='h-full flex flex-col overflow-hidden';
     last7.className='barwhite shrink-0 bg-white';
+    if(toggled) todayWrap.classList.add('hist-fade');
     listEl.append(todayWrap, last7);
   }
+  prevHistOpen=state.histOpen;
+  justAddedId=null;                // enter animation is one-shot, consumed above
   renderDots();
   requestAnimationFrame(fitToday);
+  save();                                  // debounced persist after any mutation
 }
 function warnLevel(){ const n=state.items.length; return n>=HARD_CAP?2 : n===SOFT_CAP?1 : 0; }
 
@@ -264,8 +598,11 @@ function renderToday(){
     const row=document.createElement('div');
     row.style.cssText=rowStyle;
     const bgClass = it.state==='focused' ? 'row-focused' : 'row-neutral';
-    row.className='buddy-row bd '+bgClass+' group relative flex items-center cursor-pointer overflow-hidden '+(idx>0?'border-t border-[#d9d9d9]':'');
-    row.addEventListener('click',()=>{ if(editingId) return; cycle(it); });
+    const ring = (kbActive && cursor===idx) ? ' cursor-ring' : '';
+    const enter = (it.id===justAddedId) ? ' item-enter' : '';
+    row.className='buddy-row pressable bd '+bgClass+ring+enter+' group relative flex items-center cursor-pointer overflow-hidden '+(idx>0?'border-t border-[#d9d9d9]':'');
+    row.dataset.idx=idx;
+    row.addEventListener('click',()=>{ if(editingId) return; cursor=idx; cycle(it); });
 
     const txt=document.createElement('div');
     txt.dataset.tid=it.id; txt.dataset.ph='Untitled'; txt.style.fontSize='var(--fs)';
@@ -298,24 +635,26 @@ function renderToday(){
     // Add is always visible; at the hard cap it's the faded "maxed out" state and won't add a 7th
     const add=document.createElement('div');
     add.style.cssText=rowStyle;
-    add.className='buddy-row addrow row-neutral bd group relative flex items-center cursor-pointer overflow-hidden '+(state.items.length?'border-t border-[#d9d9d9]':'');
+    const addRing = (kbActive && cursor===state.items.length) ? ' cursor-ring' : '';
+    add.className='buddy-row addrow pressable row-neutral bd'+addRing+' group relative flex items-center cursor-pointer overflow-hidden '+(state.items.length?'border-t border-[#d9d9d9]':'');
     add.innerHTML='<div class="addtxt flex gap-[18px] font-medium tracking-[-0.48px]" style="font-size:var(--fs)"><span>Add</span><span>+</span></div>';
     add.addEventListener('mousedown',e=>e.preventDefault());   // keep the click from stealing focus
-    add.addEventListener('click',()=>{ if(state.items.length>=HARD_CAP) return; const it={id:nid(),text:'',state:'neutral'}; state.items.push(it); render(); requestAnimationFrame(()=>startEdit(it.id)); });
+    add.addEventListener('click',()=>{ addAndEdit(); });
     todayWrap.appendChild(add);
   }
 }
 
 function renderHist(){
   histBody.innerHTML='';
+  histBody.className='stagger';     // day-groups stagger in on open (§3.4)
   const canAdd = state.items.length < HARD_CAP;
-  HISTORY.forEach((day,di)=>{
+  last7Days().forEach((day,di)=>{
     const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
     const h=document.createElement('div');
     h.className='chrome text-[18px] font-medium tracking-[-0.36px] '+(day.items.length?'text-black mb-1':'text-black/35');
     h.textContent=day.name; grp.appendChild(h);
     day.items.forEach(it=>{
-      const added=isAdded(it.key);
+      const added=isAdded(it.id);
       const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5 pr-9';
       if(added){
         const badge=document.createElement('span');
@@ -328,11 +667,11 @@ function renderHist(){
       t.textContent=it.text; r.appendChild(t);
       if(!it.done){
         const aff=document.createElement('button');
-        const base='chrome absolute right-0 top-1/2 -translate-y-1/2 grid place-items-center opacity-0 group-hover/h:opacity-100 transition-opacity ';
+        const base='chrome pressable absolute right-0 top-1/2 -translate-y-1/2 grid place-items-center opacity-0 group-hover/h:opacity-100 transition-opacity ';
         if(added){ aff.className=base+'size-[32px] rounded-full text-black/50 hover:bg-black/5'; aff.innerHTML=UNDO; aff.title='Undo — remove from today';
-          aff.addEventListener('click',()=>removeBySrc(it.key)); }
+          aff.addEventListener('click',()=>removeBySrc(it.id)); }
         else if(canAdd){ aff.className=base+'size-[32px] rounded-full text-black/50 hover:bg-black/5'; aff.innerHTML=PLUS; aff.title='Add to today';
-          aff.addEventListener('click',()=>{ state.items.push({id:nid(),text:it.text,state:'neutral',src:it.key}); render(); }); }
+          aff.addEventListener('click',()=>{ state.items.push({id:nid(),text:it.text,state:'neutral',src:it.id}); render(); }); }
         else { aff.className=base+'text-[18px] leading-none'; aff.textContent='😈'; aff.title="You've got too many today"; aff.style.cursor='not-allowed'; }
         r.appendChild(aff);
       }
@@ -347,9 +686,9 @@ function renderBar(){
   const open=state.histOpen;
   const divider=document.createElement('div'); divider.className='divider h-px w-full bg-[#d9d9d9]';
   const header=document.createElement('button');
-  header.className='barhdr flex items-center justify-between p-8 w-full';
+  header.className='barhdr pressable flex items-center justify-between p-8 w-full';
   header.innerHTML='<span class="chrome text-[18px] text-black/60 tracking-[-0.36px]">Last 7 days</span>'+
-    '<span class="chrome text-black/60 transition-transform '+(open?'':'rotate-180')+'">'+CHEV+'</span>';
+    '<span class="chrome chev text-black/60 '+(open?'':'rotate-180')+'">'+CHEV+'</span>';
   header.addEventListener('click',()=>{ state.histOpen=!state.histOpen; render(); if(state.histOpen) listEl.scrollTop=0; });
   if(open){ last7.append(header, divider); } else { last7.append(divider, header); }
 }
@@ -367,6 +706,7 @@ function renderDots(){
 /* --------------------------- morning ----------------------------- */
 function buildMorning(){
   morningSlots.innerHTML='';
+  morningSlots.classList.add('stagger');   // 3 slots stagger in (§3.4)
   for(let i=0;i<3;i++){
     const wrap=document.createElement('div');
     wrap.className='relative flex items-center h-[129px] px-8 '+(i>0?'border-t border-[#d9d9d9]':'');
@@ -395,10 +735,285 @@ function skip(){ morning.classList.add('hidden'); render(); }
 morning.addEventListener('click',e=>{ if(e.target===morning || e.target===morning.firstElementChild){ if(morningVals().some(Boolean)) startDay(); else skip(); }});
 $('#devMorning').addEventListener('click',showMorning);
 
+/* ====================================================================
+   ADD + EDIT  (shared by the Add row click and the keyboard A/+/Enter)
+   ==================================================================== */
+let justAddedId=null;            // the one row that should play the enter animation
+function addAndEdit(){
+  if(state.items.length>=HARD_CAP) return;     // visible-but-inert at the cap
+  const it={id:nid(),text:'',state:'neutral'};
+  state.items.push(it);
+  justAddedId=it.id;
+  cursor=state.items.length-1;                 // cursor follows the new task
+  render();
+  requestAnimationFrame(()=>startEdit(it.id));
+}
+
+/* ====================================================================
+   CONFETTI  (§3.3) — 100 party-parrots, 24×24, one-shot burst.
+   - One cached src reused by all 100 nodes.
+   - Prefers the bundled GIF (assets/parrot.gif); falls back to the 🦜
+     emoji if the asset is missing/unreachable (PLAN §10).
+   - Fires ONLY via cycle()'s transition-into-done (never on re-render).
+   - Single burst in flight: clear any existing container before a new one.
+   - Cleanup: animationend AND a 2000ms hard backstop.
+   - Skipped entirely under prefers-reduced-motion or settings.confetti=false.
+   ==================================================================== */
+const PARROT_COUNT=100;
+let parrotMode='emoji';          // 'gif' once the asset is confirmed present
+let confettiTimer=null;
+
+/* Probe the bundled GIF once at boot. If it loads, use <img>; else 🦜. */
+(function detectParrot(){
+  const img=new Image();
+  img.onload=()=>{ if(img.naturalWidth>0) parrotMode='gif'; };
+  img.onerror=()=>{ parrotMode='emoji'; };
+  img.src='assets/parrot.gif';
+})();
+
+function clearConfetti(){
+  clearTimeout(confettiTimer); confettiTimer=null;
+  confettiEl.innerHTML='';
+}
+
+let endCount=0;
+function fireConfetti(){
+  if(reduced()) return;                        // reduced-motion → no burst
+  if(!state.settings.confetti) return;         // toggle off → no burst
+  clearConfetti();                             // single burst in flight
+  endCount=0;                                  // reset per-burst animationend counter
+
+  const frag=document.createDocumentFragment();
+  for(let i=0;i<PARROT_COUNT;i++){
+    const p=document.createElement(parrotMode==='gif'?'img':'span');
+    p.className='parrot';
+    if(parrotMode==='gif'){ p.src='assets/parrot.gif'; p.alt=''; }
+    else { p.textContent='🦜'; }
+    // random start x, horizontal drift, fall distance, rotation, stagger, duration
+    const startX=Math.random()*100;            // vw
+    const drift =(Math.random()*2-1)*30;       // ±30vw
+    const fall  =80+Math.random()*40;          // 80–120vh
+    const rot   =(Math.random()*2-1)*180;      // ±180deg
+    const delay =Math.random()*250;            // 0–250ms stagger
+    const dur   =1.4+Math.random()*0.6;        // 1.4–2.0s (~1.8s avg)
+    p.style.left=startX+'vw';
+    p.style.setProperty('--dx', drift+'vw');
+    p.style.setProperty('--dy', fall+'vh');
+    p.style.setProperty('--rot', rot+'deg');
+    p.style.setProperty('--delay', delay+'ms');
+    p.style.setProperty('--dur', dur+'s');
+    frag.appendChild(p);
+  }
+  confettiEl.appendChild(frag);
+
+  // Cleanup belt-and-suspenders: last parrot's animationend OR 2000ms backstop.
+  confettiEl.addEventListener('animationend', onBurstEnd);
+  confettiTimer=setTimeout(()=>{ confettiEl.removeEventListener('animationend', onBurstEnd); clearConfetti(); }, 2000);
+}
+function onBurstEnd(){
+  if(++endCount>=PARROT_COUNT){
+    confettiEl.removeEventListener('animationend', onBurstEnd);
+    clearConfetti();
+  }
+}
+
+/* ====================================================================
+   SETTINGS SHEET  (§3.3) — gear opens it; one toggle wired to
+   settings.confetti (persisted, applied live). Shown overridden under
+   prefers-reduced-motion.
+   ==================================================================== */
+let settingsOpen=false;
+function syncConfettiToggle(){
+  const on=!!state.settings.confetti;
+  const overridden=reduced();
+  confettiToggle.setAttribute('aria-checked', String(on && !overridden));
+  // knob/track reflect the stored value; if reduced-motion overrides, show OFF + note
+  const effective = on && !overridden;
+  confettiKnob.style.transform = effective ? 'translateX(20px)' : 'translateX(0px)';
+  confettiTrack.style.backgroundColor = effective ? '#000' : 'rgba(0,0,0,.18)';
+  confettiToggle.disabled = overridden;
+  confettiToggle.classList.toggle('opacity-50', overridden);
+  confettiToggle.classList.toggle('cursor-not-allowed', overridden);
+  confettiOverride.classList.toggle('hidden', !overridden);
+}
+function openSettings(){
+  settingsOpen=true;
+  settingsSheet.classList.remove('closing');
+  settingsSheet.setAttribute('data-open','true');
+  settingsSheet.setAttribute('aria-hidden','false');
+  syncConfettiToggle();
+}
+function closeSettings(){
+  settingsOpen=false;
+  settingsSheet.classList.add('closing');
+  settingsSheet.setAttribute('data-open','false');
+  settingsSheet.setAttribute('aria-hidden','true');
+}
+gearBtn.addEventListener('click', e=>{ e.stopPropagation(); settingsOpen?closeSettings():openSettings(); });
+settingsClose.addEventListener('click', e=>{ e.stopPropagation(); closeSettings(); });
+confettiToggle.addEventListener('click', e=>{
+  e.stopPropagation();
+  if(reduced()) return;                        // overridden — inert
+  state.settings.confetti=!state.settings.confetti;
+  syncConfettiToggle();
+  save();
+});
+// keep the toggle honest if the user flips system reduced-motion live
+RM.addEventListener?.('change', ()=>{ if(settingsOpen) syncConfettiToggle(); });
+
+/* ====================================================================
+   KEYBOARD LAYER  (§3.2) — one cursor model. The cursor RING is a
+   transient navigation marker; the grey "now"/focused is a task STATE.
+   They look different by design (see .cursor-ring CSS).
+   While editingId!==null the global layer is INERT (Enter commits the
+   edit; no double-fire).
+   ==================================================================== */
+function maxCursor(){ return state.items.length; }   // last index = Add row
+function moveCursor(delta){
+  kbActive=true;
+  cursor=clamp(0, cursor+delta, maxCursor());
+  render();                                     // ring is instant (no transition on it)
+}
+function cursoredItem(){ return cursor<state.items.length ? state.items[cursor] : null; }
+
+document.addEventListener('keydown', e=>{
+  // Morning overlay owns its own keys (Enter/Esc) — don't double-handle.
+  if(!morning.classList.contains('hidden')) return;
+
+  // Backtick toggles the drawer INSTANTLY (stand-in for the global hotkey).
+  if(e.key==='`'){
+    e.preventDefault();
+    drawer.classList.add('no-anim');            // kill the transition for this toggle
+    const closed=drawer.classList.contains('translate-x-full');
+    if(closed) openDrawer(); else closeDrawer();
+    requestAnimationFrame(()=>requestAnimationFrame(()=>drawer.classList.remove('no-anim')));
+    return;
+  }
+
+  // Global layer is inert while editing — let contenteditable handle keys.
+  if(editingId!==null){
+    if(e.key==='Escape'){ /* commit handled by blur below */ const el=todayWrap.querySelector(`[data-tid="${editingId}"]`); el?.blur(); e.preventDefault(); }
+    return;
+  }
+
+  // Settings sheet open → Esc closes it; swallow other nav keys.
+  if(settingsOpen){
+    if(e.key==='Escape'){ e.preventDefault(); closeSettings(); }
+    return;
+  }
+
+  // Only act when the drawer is open (visible).
+  if(drawer.classList.contains('translate-x-full')) return;
+
+  switch(e.key){
+    case 'ArrowDown': e.preventDefault(); moveCursor(+1); break;
+    case 'ArrowUp':   e.preventDefault(); moveCursor(-1); break;
+    case 'Enter': {
+      e.preventDefault(); kbActive=true;
+      const it=cursoredItem();
+      if(it) cycle(it);                          // cycle (→done fires confetti)
+      else   addAndEdit();                       // Add row
+      break;
+    }
+    case 'f': case 'F': {
+      e.preventDefault(); kbActive=true;
+      const it=cursoredItem(); if(it) setNow(it);
+      break;
+    }
+    case 'e': case 'E': {
+      e.preventDefault(); kbActive=true;
+      const it=cursoredItem(); if(it) startEdit(it.id);
+      break;
+    }
+    case 'Backspace': case 'Delete': {
+      e.preventDefault(); kbActive=true;
+      const it=cursoredItem();
+      if(it){ removeItem(it.id); cursor=clamp(0,cursor,maxCursor()); }
+      break;
+    }
+    case 'a': case 'A': case '+': {
+      e.preventDefault(); kbActive=true; addAndEdit(); break;
+    }
+    case 'Escape': {
+      e.preventDefault();
+      if(state.histOpen){ state.histOpen=false; render(); }
+      else closeDrawer();
+      break;
+    }
+  }
+});
+
+/* ====================================================================
+   LIVE MIDNIGHT TRIGGER
+   Boot won't fire at midnight (pinned, always-open drawer), so re-check
+   on focus, on tab-visible, and every 60s. Never while editing.
+   ==================================================================== */
+function liveRolloverCheck(){
+  if(editingId!==null) return;               // defer until the edit commits
+  const rolled=maybeRollover();
+  if(rolled){
+    setDate();
+    render();
+    showMorning();                           // a real day-change → morning
+  }
+}
+window.addEventListener('focus', liveRolloverCheck);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') liveRolloverCheck(); });
+setInterval(liveRolloverCheck, 60000);
+
+/* ====================================================================
+   TEST HOOK  — read / inject state without depending on hover timers.
+   Used by the Playwright acceptance suite (§7).
+   ==================================================================== */
+window.__buddy = {
+  get state(){ return state; },
+  STORAGE_KEY,
+  localDate,
+  // Read the raw persisted blob.
+  read(){ return lsGet(STORAGE_KEY); },
+  readBak(){ return lsGet(BAK_KEY); },
+  // Force a synchronous flush.
+  flush: writeNow,
+  // Test helper: write a raw blob to localStorage AND freeze this instance's
+  // persistence so the unload force-flush can't clobber it before the reload.
+  inject(raw){ saveSuppressed=true; clearTimeout(saveTimer); lsSet(STORAGE_KEY, typeof raw==='string'?raw:JSON.stringify(raw)); },
+  injectBak(raw){ lsSet(BAK_KEY, typeof raw==='string'?raw:JSON.stringify(raw)); },
+  clear(){ saveSuppressed=true; clearTimeout(saveTimer); try{ localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(BAK_KEY); }catch{} },
+  suppressSave(){ saveSuppressed=true; clearTimeout(saveTimer); },
+  // Re-run the full boot sequence against whatever is in localStorage.
+  // Mirrors a page reload but in-process (used to assert load/rollover).
+  boot,
+  rollover: maybeRollover,
+  openDrawer, closeDrawer,
+  showMorning,
+  // Phase B hooks (confetti / settings / keyboard verification)
+  fireConfetti: ()=>fireConfetti(),
+  openSettings: ()=>openSettings(),
+  closeSettings: ()=>closeSettings(),
+  setConfetti(v){ state.settings.confetti=!!v; syncConfettiToggle(); save(); },
+  get reduced(){ return reduced(); },
+  get parrotMode(){ return parrotMode; },
+  get confettiCount(){ return confettiEl.children.length; },
+  get cursor(){ return cursor; },
+  get kbActive(){ return kbActive; },
+  cycle: it => cycle(it),
+};
+
 /* --------------------------- boot -------------------------------- */
-setDate();
-render();
-showMorning();
+function boot(){
+  cursor=0; kbActive=false; editingId=null;  // reset transient keyboard cursor on (re)boot
+  load();                                    // corruption-guarded; bad blob → fresh
+  const rolled=maybeRollover();              // same-day → restore; older → archive/advance
+  if(state.history.length===0) seedDemoHistory();   // first-run panel populated
+  setDate();
+  applyPinnedUI();
+  syncConfettiToggle();                        // reflect stored settings.confetti
+  render();
+  // Show morning only on a fresh/rolled day with no items — NOT on same-day restore.
+  // Fresh first run (no stored blob) and a real day-rollover both qualify.
+  if((bootedFresh || rolled) && state.today.items.length===0) showMorning();
+}
+boot();
 </script>
 </body>
 </html>

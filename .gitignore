@@ -3,3 +3,13 @@
 node_modules/
 *.log
 .playwright-mcp/
+
+# skill-manager artifacts (skill is installed globally, not vendored here)
+skills-lock.json
+.agents/
+
+# Tauri / Rust build artifacts (Phase C Mac shell)
+src-tauri/target/
+src-tauri/gen/
+src-tauri/Cargo.lock
+pnpm-lock.yaml

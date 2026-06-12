@@ -1,0 +1,31 @@
+[package]
+name = "buddy"
+version = "0.1.0"
+description = "Buddy — a calm day companion that lives on the right edge of your screen."
+authors = ["Whale"]
+edition = "2021"
+rust-version = "1.77.2"
+
+# The library that the Tauri app binary links against.
+[lib]
+name = "buddy_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Global shortcut is desktop-only; gate it off mobile targets.
+[target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
+tauri-plugin-global-shortcut = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
