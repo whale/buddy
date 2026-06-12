@@ -3,3 +3,7 @@
 node_modules/
 *.log
 .playwright-mcp/
+
+# skill-manager artifacts (skill is installed globally, not vendored here)
+skills-lock.json
+.agents/
