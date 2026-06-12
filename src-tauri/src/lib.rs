@@ -57,10 +57,12 @@ fn position_right_edge(win: &WebviewWindow) {
 
     // Convert our logical strip width to physical pixels for this monitor.
     let width_px = (STRIP_WIDTH as f64 * scale).round() as u32;
-    let height_px = m_size.height;
+    // Sit below the menu bar (~25pt) so the window doesn't run off the top.
+    let top_px = (25.0 * scale).round() as i32;
+    let height_px = (m_size.height as i32 - top_px).max(200) as u32;
 
     let x = m_pos.x + (m_size.width as i32 - width_px as i32);
-    let y = m_pos.y;
+    let y = m_pos.y + top_px;
 
     if let Err(e) = win.set_size(PhysicalSize::new(width_px, height_px)) {
         eprintln!("[buddy] set_size failed: {e}");

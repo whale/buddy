@@ -617,7 +617,7 @@ function renderToday(){
     txt.textContent=it.text||''; if(!it.text)txt.classList.add('empty');
     txt.addEventListener('input',()=>{ it.text=txt.textContent.trim(); });
     txt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); txt.blur(); } });
-    txt.addEventListener('blur',()=>{ it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable'); editingId=null; render(); });
+    txt.addEventListener('blur',()=>{ it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable'); editingId=null; if(!it.text){ state.items=state.items.filter(x=>x.id!==it.id); } render(); });
     row.appendChild(txt);
 
     const onRed=lvl===2;
@@ -1014,13 +1014,15 @@ async function nativeFit(full){
     const win=W.getCurrentWindow(), mon=await W.currentMonitor();
     if(!mon || !D.PhysicalSize || !D.PhysicalPosition) return;
     const sz=mon.size, p=mon.position, sf=mon.scaleFactor;
+    const top=Math.round(25*sf);          // sit below the menu bar (≈25pt)
+    const h=sz.height - top;
     if(full){
-      await win.setSize(new D.PhysicalSize(sz.width, sz.height));
-      await win.setPosition(new D.PhysicalPosition(p.x, p.y));
+      await win.setSize(new D.PhysicalSize(sz.width, h));
+      await win.setPosition(new D.PhysicalPosition(p.x, p.y + top));
     } else {
       const w=Math.round(420*sf);
-      await win.setSize(new D.PhysicalSize(w, sz.height));
-      await win.setPosition(new D.PhysicalPosition(p.x + sz.width - w, p.y));
+      await win.setSize(new D.PhysicalSize(w, h));
+      await win.setPosition(new D.PhysicalPosition(p.x + sz.width - w, p.y + top));
     }
   }catch(e){ console.warn('[buddy] nativeFit', e); }
 }
