@@ -174,8 +174,12 @@ pub fn run() {
                 }
             }
 
-            // Position and reveal on launch.
-            show_window(&handle);
+            // Reveal on launch WITHOUT positioning — the web layer (nativeFit) owns
+            // sizing/position so the full-screen morning isn't snapped back to the strip.
+            if let Some(win) = handle.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
 
             // No Dock icon: behave like a menu-bar utility (macOS "Accessory").
             #[cfg(target_os = "macos")]
