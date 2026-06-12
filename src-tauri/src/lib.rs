@@ -101,6 +101,13 @@ fn toggle_window(app: &AppHandle) {
     }
 }
 
+/// Diagnostic: the webview console isn't forwarded to the terminal, so JS calls
+/// this to log into the same file we can read. (Temporary.)
+#[tauri::command]
+fn trace(msg: String) {
+    eprintln!("[buddy-js] {msg}");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
@@ -123,6 +130,7 @@ pub fn run() {
     }
 
     builder
+        .invoke_handler(tauri::generate_handler![trace])
         .setup(|app| {
             let handle = app.handle();
 
@@ -190,11 +198,13 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the window (e.g. Cmd+W) should just hide it, not quit —
-            // Buddy lives in the menu bar. Quit via the tray menu.
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            match event {
+                tauri::WindowEvent::Resized(sz) => eprintln!("[buddy-win] Resized {}x{}", sz.width, sz.height),
+                tauri::WindowEvent::Moved(p) => eprintln!("[buddy-win] Moved {},{}", p.x, p.y),
+                tauri::WindowEvent::Focused(f) => eprintln!("[buddy-win] Focused {}", f),
+                // Closing (e.g. Cmd+W) just hides — Buddy lives in the menu bar.
+                tauri::WindowEvent::CloseRequested { api, .. } => { api.prevent_close(); let _ = window.hide(); }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())

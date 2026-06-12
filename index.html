@@ -238,19 +238,18 @@
       </div>
       <div class="h-px w-full bg-[#d9d9d9]"></div>
       <div class="flex flex-col">
-        <div class="border-b border-[#d9d9d9]">
-          <button id="confettiToggle" type="button" role="switch" aria-checked="true"
-            class="pressable w-full flex items-center justify-between gap-4 text-left px-8 py-5 hover:bg-black/[0.02]">
-            <span class="text-[17px] font-medium text-black/80 tracking-[-0.34px]">Celebrate completed tasks 🎉</span>
-            <span id="confettiTrack" class="relative shrink-0 h-[28px] w-[48px] rounded-full bg-black transition-colors duration-200">
-              <span id="confettiKnob" class="absolute top-[3px] left-[3px] h-[22px] w-[22px] rounded-full bg-white shadow-sm transition-transform duration-200" style="transform:translateX(20px)"></span>
-            </span>
-          </button>
-          <p id="confettiOverride" class="px-8 pb-4 -mt-1 text-[13px] text-black/40 leading-snug hidden">Off while your system is set to reduce motion.</p>
+        <div class="border-b border-[#d9d9d9] px-8 py-5">
+          <div class="text-[18px] text-black/60 tracking-[-0.36px] mb-3">Celebrate completed tasks</div>
+          <div class="flex items-center gap-3">
+            <span class="text-[20px] leading-none">👍🏼</span>
+            <input id="celebrateSlider" type="range" min="0" max="100" value="100" class="flex-1 h-1.5 rounded-full appearance-none bg-black/15 accent-black cursor-pointer">
+            <span class="text-[20px] leading-none">🦜</span>
+          </div>
+          <p id="confettiOverride" class="mt-3 text-[13px] text-black/40 leading-snug hidden">Off while your system is set to reduce motion.</p>
         </div>
-        <button id="exportBtn" class="pressable w-full text-left px-8 py-5 text-[17px] font-medium text-black/80 tracking-[-0.34px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Export my data</button>
-        <button id="expungeBtn" class="pressable w-full text-left px-8 py-5 text-[17px] font-medium text-[#e5484d] tracking-[-0.34px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Erase all data…</button>
-        <button id="restartBtn" class="pressable w-full text-left px-8 py-5 text-[15px] font-medium text-black/45 tracking-[-0.3px] hover:bg-black/[0.02]">Restart Buddy <span class="text-black/25">· dev</span></button>
+        <button id="exportBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Export my data</button>
+        <button id="expungeBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-[#e5484d] tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Erase all data…</button>
+        <button id="restartBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] hover:bg-black/[0.02]">Restart Buddy <span class="text-black/30">· dev</span></button>
       </div>
     </div>
   </div>
@@ -291,9 +290,9 @@
    that are NOT persisted.
    ==================================================================== */
 let state = {
-  today:   { date:null, items:[] },
+  today:   { date:null, items:[], morningDone:false },
   history: [],
-  settings:{ confetti:true },
+  settings:{ celebrate:100 },
   pinned:  false,
   histOpen:false,
 };
@@ -306,6 +305,8 @@ Object.defineProperty(state,'items',{
 });
 
 let uid = 1; const nid = () => 'n'+(uid++);
+// After loading saved tasks (ids n1,n2,…), push uid past them so new ids never collide.
+function bumpUid(){ let mx=0; (state.today.items||[]).forEach(i=>{ const m=/^n(\d+)$/.exec(i.id||''); if(m) mx=Math.max(mx,+m[1]); }); uid=Math.max(uid, mx+1); }
 let editingId = null;
 let cursor = 0;                  // keyboard cursor index (0..items.length, last = Add row)
 let kbActive = false;           // true once a key has been used → cursor ring shows
@@ -332,7 +333,7 @@ const desktop=$('#desktop'), drawer=$('#drawer'), edgeBar=$('#edgeBar'), edgeDot
       listEl=$('#list'), morning=$('#morning'), morningSlots=$('#morningSlots'),
       confettiEl=$('#confetti'),
       settingsSheet=$('#settings'), gearBtn=$('#gearBtn'), settingsClose=$('#settingsClose'),
-      confettiToggle=$('#confettiToggle'), confettiKnob=$('#confettiKnob'), confettiTrack=$('#confettiTrack'),
+      celebrateSlider=$('#celebrateSlider'),
       confettiOverride=$('#confettiOverride');
 
 const todayWrap=document.createElement('div'); todayWrap.className='flex-1 min-h-0 flex flex-col';
@@ -371,9 +372,9 @@ function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch{ (memoryStore||(memo
 function serialize(){
   return JSON.stringify({
     version:1,
-    today:   { date:state.today.date, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null})) },
+    today:   { date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null})) },
     history: state.history,
-    settings:{ confetti:!!state.settings.confetti },
+    settings:{ celebrate: Math.max(0,Math.min(100, state.settings.celebrate??100)) },
     pinned:  !!state.pinned,
   });
 }
@@ -403,9 +404,9 @@ function isValidToday(t){
     && t.items.every(i=> i && typeof i.text==='string');
 }
 function freshBoot(){
-  state.today={ date:localDate(), items:[] };
+  state.today={ date:localDate(), items:[], morningDone:false };
   state.history=[];
-  state.settings={ confetti:true };
+  state.settings={ celebrate:100 };
   state.pinned=false;
   bootedFresh=true;
 }
@@ -421,12 +422,12 @@ function load(){
   }
   blob=migrate(blob);
   // Hydrate runtime state from the validated blob.
-  state.today   = { date:blob.today.date, items:blob.today.items.map(i=>({
+  state.today   = { date:blob.today.date, morningDone:!!blob.today.morningDone, items:blob.today.items.map(i=>({
                       id:i.id||nid(), text:String(i.text||''),
                       state:(i.state==='focused'||i.state==='done')?i.state:'neutral',
                       src:i.src??null })) };
   state.history = Array.isArray(blob.history) ? blob.history.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items)) : [];
-  state.settings= { confetti: blob.settings && typeof blob.settings.confetti==='boolean' ? blob.settings.confetti : true };
+  state.settings= { celebrate: (blob.settings && typeof blob.settings.celebrate==='number') ? Math.max(0,Math.min(100,blob.settings.celebrate)) : (blob.settings && blob.settings.confetti===false ? 0 : 100) };
   state.pinned  = !!blob.pinned;
 }
 
@@ -450,7 +451,7 @@ function maybeRollover(){
     };
     state.history.unshift(record);
     // history is kept forever until the user erases it (Settings → Erase all data)
-    state.today={ date:cur, items:[] };
+    state.today={ date:cur, items:[], morningDone:false };
     return true;                              // → caller shows morning
   } else {
     // Empty/skipped day → just advance the date, archive nothing.
@@ -737,15 +738,16 @@ function buildMorning(){
   }
 }
 function morningVals(){ return [...morningSlots.querySelectorAll('input')].map(i=>i.value.trim()); }
-function showMorning(){ buildMorning(); morning.classList.remove('hidden'); nativeFit(true); setTimeout(()=>morningSlots.querySelector('input')?.focus(),60); }
+function showMorning(){ T('showMorning'); buildMorning(); morning.classList.remove('hidden'); nativeFit(true); setTimeout(()=>morningSlots.querySelector('input')?.focus(),60); }
 function startDay(){
   const vals=morningVals().filter(Boolean); if(!vals.length) return;
   state.items=vals.map(t=>({id:nid(),text:t,state:'neutral'}));
-  morning.classList.add('hidden'); render(); nativeFit(false);
+  T('startDay'); state.today.morningDone=true; save(); morning.classList.add('hidden'); render(); nativeFit(false);
   openDrawer(); setTimeout(()=>{ if(!state.pinned) closeDrawer(); },1500);
 }
-function skip(){ morning.classList.add('hidden'); render(); nativeFit(false); }
-morning.addEventListener('click',e=>{ if(e.target===morning || e.target===morning.firstElementChild){ if(morningVals().some(Boolean)) startDay(); else skip(); }});
+function skip(){ T('skip'); state.today.morningDone=true; save(); morning.classList.add('hidden'); render(); nativeFit(false); }
+// (removed) background-click dismissed the morning on stray activation clicks (acceptFirstMouse).
+// Dismiss only via the explicit "Skip today" link or by starting the day (Enter on the last slot).
 $('#devMorning').addEventListener('click',showMorning);
 
 /* ====================================================================
@@ -772,7 +774,8 @@ function addAndEdit(){
    - Cleanup: animationend AND a 2000ms hard backstop.
    - Skipped entirely under prefers-reduced-motion or settings.confetti=false.
    ==================================================================== */
-const PARROT_COUNT=100;
+const PARROTS=['parrot.gif'];    // drop more *.gif into assets/ and list them here for variety
+let burstTotal=0;
 let parrotMode='emoji';          // 'gif' once the asset is confirmed present
 let confettiTimer=null;
 
@@ -790,41 +793,49 @@ function clearConfetti(){
 }
 
 let endCount=0;
+/* Intensity 0..100 drives count, thumb↔parrot mix, and variety.
+   Burst up and to the LEFT; a lone thumb just floats up. Wide per-item delay
+   spread → a staccato pop/fade rather than all at once. */
 function fireConfetti(){
   if(reduced()) return;                        // reduced-motion → no burst
-  if(!state.settings.confetti) return;         // toggle off → no burst
+  const lvl = state.settings.celebrate ?? 100; // 0..100
+  if(lvl<=0) return;                           // slider at the very bottom = off
   clearConfetti();                             // single burst in flight
-  endCount=0;                                  // reset per-burst animationend counter
+  const i=lvl/100;
+  const count=Math.max(1, Math.round(1 + i*i*199));   // 1 → ~200 (quadratic ramp)
+  const parrotRatio=i;                                // low → 👍🏼, high → 🦜
+  const useGif=parrotMode==='gif';
+  burstTotal=count; endCount=0;
 
   const frag=document.createDocumentFragment();
-  for(let i=0;i<PARROT_COUNT;i++){
-    const p=document.createElement(parrotMode==='gif'?'img':'span');
-    p.className='parrot';
-    if(parrotMode==='gif'){ p.src='assets/parrot.gif'; p.alt=''; }
-    else { p.textContent='🦜'; }
-    // burst from the bottom-right corner: outward up and to the LEFT, arcing
-    const dx   = -(15 + Math.random()*95);      // -15..-110vw (leftward)
-    const peak = -(40 + Math.random()*55);      // -40..-95vh (apex, up)
-    const dy   = peak + (8 + Math.random()*32); // settle a bit below the apex (gravity)
-    const rot  = (Math.random()*2-1)*260;       // ±260deg
-    const delay= Math.random()*180;             // 0–180ms (tight = more "explosion")
-    const dur  = 1.3+Math.random()*0.7;         // 1.3–2.0s
-    p.style.setProperty('--dx', dx+'vw');
-    p.style.setProperty('--peak', peak+'vh');
-    p.style.setProperty('--dy', dy+'vh');
-    p.style.setProperty('--rot', rot+'deg');
-    p.style.setProperty('--delay', delay+'ms');
-    p.style.setProperty('--dur', dur+'s');
-    frag.appendChild(p);
+  for(let k=0;k<count;k++){
+    const parrot = Math.random() < parrotRatio;
+    let el;
+    if(parrot && useGif){ el=document.createElement('img'); el.src='assets/'+PARROTS[Math.floor(Math.random()*PARROTS.length)]; el.alt=''; }
+    else { el=document.createElement('span'); el.textContent = parrot ? '🦜' : '👍🏼'; }
+    el.className='parrot';
+    const dx   = count<=2 ? -(Math.random()*14) : -(10 + Math.random()*95);  // lone → floats up; many → flings left
+    const peak = -(40 + Math.random()*55);
+    const dy   = peak + (8 + Math.random()*32);
+    const rot  = (Math.random()*2-1)*260;
+    const delay= Math.random()*650;             // wide spread → staccato
+    const dur  = 1.1+Math.random()*0.9;
+    el.style.setProperty('--dx', dx+'vw');
+    el.style.setProperty('--peak', peak+'vh');
+    el.style.setProperty('--dy', dy+'vh');
+    el.style.setProperty('--rot', rot+'deg');
+    el.style.setProperty('--delay', delay+'ms');
+    el.style.setProperty('--dur', dur+'s');
+    frag.appendChild(el);
   }
   confettiEl.appendChild(frag);
 
-  // Cleanup belt-and-suspenders: last parrot's animationend OR 2000ms backstop.
+  // Cleanup: each item's animationend, plus a backstop past the widest delay+dur.
   confettiEl.addEventListener('animationend', onBurstEnd);
-  confettiTimer=setTimeout(()=>{ confettiEl.removeEventListener('animationend', onBurstEnd); clearConfetti(); }, 2000);
+  confettiTimer=setTimeout(()=>{ confettiEl.removeEventListener('animationend', onBurstEnd); clearConfetti(); }, 3400);
 }
 function onBurstEnd(){
-  if(++endCount>=PARROT_COUNT){
+  if(++endCount>=burstTotal){
     confettiEl.removeEventListener('animationend', onBurstEnd);
     clearConfetti();
   }
@@ -836,17 +847,14 @@ function onBurstEnd(){
    prefers-reduced-motion.
    ==================================================================== */
 let settingsOpen=false;
-function syncConfettiToggle(){
-  const on=!!state.settings.confetti;
+function syncCelebrate(){
   const overridden=reduced();
-  confettiToggle.setAttribute('aria-checked', String(on && !overridden));
-  // knob/track reflect the stored value; if reduced-motion overrides, show OFF + note
-  const effective = on && !overridden;
-  confettiKnob.style.transform = effective ? 'translateX(20px)' : 'translateX(0px)';
-  confettiTrack.style.backgroundColor = effective ? '#000' : 'rgba(0,0,0,.18)';
-  confettiToggle.disabled = overridden;
-  confettiToggle.classList.toggle('opacity-50', overridden);
-  confettiToggle.classList.toggle('cursor-not-allowed', overridden);
+  const v = state.settings.celebrate ?? 100;
+  if(celebrateSlider){
+    celebrateSlider.value = String(v);
+    celebrateSlider.disabled = overridden;
+    celebrateSlider.classList.toggle('opacity-50', overridden);
+  }
   confettiOverride.classList.toggle('hidden', !overridden);
 }
 function openSettings(){
@@ -854,7 +862,7 @@ function openSettings(){
   settingsSheet.classList.remove('closing');
   settingsSheet.setAttribute('data-open','true');
   settingsSheet.setAttribute('aria-hidden','false');
-  syncConfettiToggle();
+  syncCelebrate();
 }
 function closeSettings(){
   settingsOpen=false;
@@ -864,15 +872,10 @@ function closeSettings(){
 }
 gearBtn.addEventListener('click', e=>{ e.stopPropagation(); settingsOpen?closeSettings():openSettings(); });
 settingsClose.addEventListener('click', e=>{ e.stopPropagation(); closeSettings(); });
-confettiToggle.addEventListener('click', e=>{
-  e.stopPropagation();
-  if(reduced()) return;                        // overridden — inert
-  state.settings.confetti=!state.settings.confetti;
-  syncConfettiToggle();
-  save();
-});
+celebrateSlider.addEventListener('input', ()=>{ state.settings.celebrate=+celebrateSlider.value; save(); });
+celebrateSlider.addEventListener('change', ()=>{ fireConfetti(); });   // preview the chosen level on release
 // keep the toggle honest if the user flips system reduced-motion live
-RM.addEventListener?.('change', ()=>{ if(settingsOpen) syncConfettiToggle(); });
+RM.addEventListener?.('change', ()=>{ if(settingsOpen) syncCelebrate(); });
 
 // Export: download all data as JSON (works in-browser; native file-save needs the fs plugin — follow-up)
 $('#exportBtn').addEventListener('click', e=>{ e.stopPropagation();
@@ -894,7 +897,7 @@ $('#expungeBtn').addEventListener('click', e=>{ e.stopPropagation();
   location.reload();
 });
 // dev: restart the app (reloads the webview)
-$('#restartBtn')?.addEventListener('click', e=>{ e.stopPropagation(); location.reload(); });
+$('#restartBtn')?.addEventListener('click', e=>{ e.stopPropagation(); state.today.morningDone=false; save(); closeSettings(); showMorning(); });
 // morning "Skip today"
 $('#skipToday')?.addEventListener('click', e=>{ e.stopPropagation(); skip(); });
 
@@ -986,6 +989,7 @@ document.addEventListener('keydown', e=>{
    on focus, on tab-visible, and every 60s. Never while editing.
    ==================================================================== */
 function liveRolloverCheck(){
+  T('liveRollover');
   if(editingId!==null) return;               // defer until the edit commits
   const rolled=maybeRollover();
   if(rolled){
@@ -1027,7 +1031,7 @@ window.__buddy = {
   fireConfetti: ()=>fireConfetti(),
   openSettings: ()=>openSettings(),
   closeSettings: ()=>closeSettings(),
-  setConfetti(v){ state.settings.confetti=!!v; syncConfettiToggle(); save(); },
+  setCelebrate(v){ state.settings.celebrate=+v; syncCelebrate(); save(); },
   get reduced(){ return reduced(); },
   get parrotMode(){ return parrotMode; },
   get confettiCount(){ return confettiEl.children.length; },
@@ -1039,7 +1043,9 @@ window.__buddy = {
 /* --------------------------- boot -------------------------------- */
 /* ---- native (Tauri) window sizing: morning = full screen, daily = right-edge strip ---- */
 const NATIVE = !!(window.__TAURI__ && window.__TAURI__.window);
+function T(m){ try{ window.__TAURI__?.core?.invoke('trace',{msg:String(m)}); }catch(_){} }
 async function nativeFit(full){
+  T('nativeFit('+full+')');
   if(!NATIVE) return;
   try{
     const W=window.__TAURI__.window, D=window.__TAURI__.dpi||W;
@@ -1063,15 +1069,18 @@ function boot(){
   cursor=0; kbActive=false; editingId=null;  // reset transient keyboard cursor on (re)boot
   if(NATIVE) document.body.classList.add('native');
   load();                                    // corruption-guarded; bad blob → fresh
+  bumpUid();                                 // avoid id collisions with loaded tasks (the Add bug)
   const rolled=maybeRollover();              // same-day → restore; older → archive/advance
   if(state.history.length===0) seedDemoHistory();   // first-run panel populated
   setDate();
   applyPinnedUI();
-  syncConfettiToggle();                        // reflect stored settings.confetti
+  syncCelebrate();                        // reflect stored settings.confetti
   render();
   // Show morning only on a fresh/rolled day with no items — NOT on same-day restore.
   // Fresh first run (no stored blob) and a real day-rollover both qualify.
-  if((bootedFresh || rolled) && state.today.items.length===0) showMorning(); else nativeFit(false);
+  T('boot done='+state.today.morningDone+' n='+state.today.items.length);
+  // Show the morning until it's been handled today — survives the dev double-boot/reload.
+  if(!state.today.morningDone && state.today.items.length===0) showMorning(); else nativeFit(false);
 }
 boot();
 </script>
