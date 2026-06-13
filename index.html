@@ -39,7 +39,15 @@
   /* ---- warning themes: whole view ----
      Red wash animates REAL background-color/color (they interpolate) — NOT
      --var swaps (those hard-cut in WebKit). ~200ms wash. §3.4 */
-  .bcard{ transition:background-color .2s ease; }
+  /* macOS-style elevation for floating containers: a hairline edge + a tight
+     key shadow + a soft wide ambient shadow (Apple's layered panel look). */
+  .bcard{ transition:background-color .2s ease, box-shadow .2s ease;
+    /* macOS panel shadow: a soft layered ramp — opacity rises gently as blur
+       grows, no hairline edge — so it fades out gradually instead of a hard line. */
+    box-shadow:
+      0 1px 4px rgba(0,0,0,.04),
+      0 6px 16px rgba(0,0,0,.06),
+      0 14px 34px rgba(0,0,0,.09); }
   .chrome{ transition:color .2s ease; }
   .divider{ transition:background-color .2s ease; }
   .bd{ transition:border-color .2s ease; }
@@ -62,7 +70,7 @@
   .row-focused{ background-color:#f4f4f4; }
   @media (hover:hover) and (pointer:fine){
     .row-neutral:hover{ background-color:rgba(0,0,0,.02); }   /* 2% black */
-    .row-focused:hover{ background-color:transparent; }       /* selected → normal on hover */
+    .row-focused:hover{ background-color:#f7f7f7; }           /* selected: lightens slightly on hover, stays grey (still reads as selected) */
     #drawer.lvl2 .buddy-row:hover{ background-color:#e85a5f !important; } /* red + ~10% white */
   }
   #drawer.lvl2 .buddy-row{ background-color:var(--red) !important; }
@@ -258,8 +266,11 @@
         </div>
         <button id="exportBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Export my data</button>
         <button id="expungeBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-[#e5484d] tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Erase all data…</button>
-        <button id="restartBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] hover:bg-black/[0.02]">Restart Buddy <span class="text-black/30">· dev</span></button>
+        <button id="restartBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Restart Buddy <span class="text-black/30">· dev</span></button>
+        <button id="quitBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] hover:bg-black/[0.02]">Quit Buddy</button>
       </div>
+      <!-- version, pinned to the bottom of the sheet -->
+      <div class="mt-auto px-8 py-5 text-[13px] text-black/30 tracking-[-0.26px]">Buddy <span id="appVersion">—</span></div>
     </div>
   </div>
 </aside>
@@ -928,6 +939,15 @@ $('#expungeBtn').addEventListener('click', e=>{ e.stopPropagation();
 });
 // dev: restart the app (reloads the webview)
 $('#restartBtn')?.addEventListener('click', e=>{ e.stopPropagation(); state.today.morningDone=false; save(); closeSettings(); showMorning(); });
+// Quit (native): ask the Rust shell to exit. Harmless no-op in the web demo.
+// (Uses window.__TAURI__ directly — the NATIVE const isn't defined this early.)
+$('#quitBtn')?.addEventListener('click', e=>{ e.stopPropagation();
+  window.__TAURI__?.core?.invoke('quit'); });
+// Show the running version, pinned at the bottom of Settings.
+(async()=>{ let v='0.1.0';
+  try{ const t=window.__TAURI__; if(t&&t.core) v=await t.core.invoke('app_version'); }catch(_){}
+  const el=$('#appVersion'); if(el) el.textContent='v'+v;
+})();
 // morning "Skip today"
 $('#skipToday')?.addEventListener('click', e=>{ e.stopPropagation(); skip(); });
 
@@ -1083,7 +1103,7 @@ if(NATIVE){
     drawer.classList.contains('translate-x-full') ? openDrawer() : closeDrawer(); });
 }
 const SLIVER=2;    // hidden width — just enough to keep the webview alive (no widget)
-const DRAWERW=420; // revealed/pinned width
+const DRAWERW=452; // revealed/pinned window width — wider than the 416 drawer so the card's soft left (screen-facing) drop shadow has room to fade instead of being clipped by the window edge
 async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
   T('nativeFit('+mode+')');
   if(!NATIVE) return;

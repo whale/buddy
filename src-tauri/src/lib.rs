@@ -42,6 +42,18 @@ fn trace(msg: String) {
     eprintln!("[buddy-js] {msg}");
 }
 
+/// Quit the app (from the Settings "Quit Buddy" row).
+#[tauri::command]
+fn quit(app: AppHandle) {
+    app.exit(0);
+}
+
+/// The running version, baked in from Cargo.toml at compile time.
+#[tauri::command]
+fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
@@ -64,7 +76,7 @@ pub fn run() {
     }
 
     builder
-        .invoke_handler(tauri::generate_handler![trace])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).
@@ -147,7 +159,7 @@ pub fn run() {
                 let h = handle.clone();
                 std::thread::spawn(move || {
                     use mouse_position::mouse_position::Mouse;
-                    const DRAWER_W: f64 = 420.0; // matches DRAWERW in index.html
+                    const DRAWER_W: f64 = 416.0; // the visible drawer's left edge (the window is wider for the shadow); hide when the cursor passes it
                     const TICK_MS: u64 = 16;
                     // Dwell times: the cursor must REST at the edge before revealing
                     // (so a quick brush-past doesn't pop it), and rest off the drawer
