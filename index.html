@@ -8,9 +8,31 @@
 <style>
   /* Native (Tauri) mode: hide the web-demo scaffolding so only Buddy shows;
      the real macOS desktop sits behind the transparent window. */
-  body.native #wallpaper, body.native #desktop, body.native #devMorning, body.native #edgeBar{ display:none !important; }
+  body.native #wallpaper, body.native #desktop, body.native #devMorning{ display:none !important; }
   body.native{ background:transparent !important; }
-  body.native #drawer{ transform:none !important; }   /* always-visible drawer (edge-reveal deferred) */
+
+  /* ---- Edge-reveal handle (the HIDDEN state) ---------------------------
+     When the drawer is tucked away this tab is the ONLY thing on screen, so
+     it must be findable on ANY wallpaper and big enough to hover OR click.
+     (The old 14px fully-transparent sliver was invisible — "not coming up".)
+     Native: the whole window shrinks to --sliver px wide and this frosted
+     pill is painted flush-right inside it. Web: it rides the right edge of
+     the demo so what I verify in the browser matches the native build. ---- */
+  #edgeBar{ width:var(--sliver, 22px); }
+  #edgeTab{
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px;
+    padding:12px 5px; border-radius:13px 0 0 13px;
+    background:rgba(255,255,255,.80); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px);
+    border:1px solid rgba(0,0,0,.07); border-right:none;
+    box-shadow:-2px 2px 14px rgba(0,0,0,.22);
+    transition:background .15s ease, box-shadow .15s ease, transform .15s ease;
+  }
+  #edgeBar:hover #edgeTab{ background:rgba(255,255,255,.94); box-shadow:-3px 3px 18px rgba(0,0,0,.28); transform:translateX(-1px); }
+  #edgeTab .edge-chev{ font-size:11px; line-height:1; color:rgba(0,0,0,.42); }
+  /* escalation bleeds through even while hidden: a task gone red tints the tab */
+  #edgeBar.edge-alert #edgeTab{ background:var(--red); border-color:transparent; box-shadow:-2px 2px 16px rgba(229,72,77,.45); }
+  #edgeBar.edge-alert .edge-chev{ color:rgba(255,255,255,.9); }
+  #edgeBar.edge-alert #edgeDots span{ background:rgba(255,255,255,.92) !important; }
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
   :root{
     --font:'Graphik','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; --red:#e5484d;
@@ -192,8 +214,11 @@
   ↻ restart morning (dev)
 </button>
 
-<div id="edgeBar" class="fixed top-0 right-0 z-40 h-screen w-[10px] flex items-center justify-center bg-black/[0.04] hover:bg-black/[0.08] cursor-pointer">
-  <div id="edgeDots" class="flex flex-col gap-1.5"></div>
+<div id="edgeBar" class="fixed top-0 right-0 z-40 h-screen flex items-center justify-end cursor-pointer">
+  <div id="edgeTab" title="Open Buddy">
+    <span class="edge-chev">‹</span>
+    <div id="edgeDots" class="flex flex-col gap-1.5"></div>
+  </div>
 </div>
 
 <!-- ============ DRAWER ============ -->
@@ -503,9 +528,15 @@ function last7Days(){
 /* ----------------------- drawer open / close --------------------- */
 let openTimer=null, closeTimer=null;
 function openDrawer(){ if(NATIVE) nativeFit('drawer'); drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }
-function closeDrawer(){ if(state.pinned || NATIVE) return; drawer.classList.add('translate-x-full'); }
+function closeDrawer(){ if(state.pinned) return; drawer.classList.add('translate-x-full'); if(NATIVE) nativeFit('sliver'); }
 edgeBar.addEventListener('mouseenter', ()=>{ clearTimeout(closeTimer); openTimer=setTimeout(openDrawer,120); });
 edgeBar.addEventListener('mouseleave', ()=>{ clearTimeout(openTimer); });
+// Click the tab = a bulletproof toggle. Hover at the screen edge can be finicky
+// through a transparent window; a click on the visible pill always works.
+edgeBar.addEventListener('click', ()=>{
+  clearTimeout(openTimer); clearTimeout(closeTimer);
+  if(drawer.classList.contains('translate-x-full')) openDrawer(); else closeDrawer();
+});
 drawer.addEventListener('mouseenter', ()=>{ clearTimeout(closeTimer); clearTimeout(openTimer); });
 drawer.addEventListener('mouseleave', ()=>{ clearTimeout(openTimer); closeTimer=setTimeout(closeDrawer,220); });
 
@@ -577,6 +608,7 @@ function render(){
   const lvl=warnLevel();
   drawer.classList.toggle('lvl1', lvl===1);
   drawer.classList.toggle('lvl2', lvl===2);
+  edgeBar.classList.toggle('edge-alert', lvl>=1);   // escalation shows on the hidden tab too
 
   renderToday(); renderHist(); renderBar();
   listEl.innerHTML='';
@@ -1046,7 +1078,7 @@ window.__buddy = {
 /* ---- native (Tauri) window sizing: morning = full screen, daily = right-edge strip ---- */
 const NATIVE = !!(window.__TAURI__ && window.__TAURI__.window);
 function T(m){ try{ window.__TAURI__?.core?.invoke('trace',{msg:String(m)}); }catch(_){} }
-const SLIVER=14;   // hidden width — just the edge hot-zone
+const SLIVER=22;   // hidden width — wide enough to comfortably hover the visible tab
 const DRAWERW=420; // revealed/pinned width
 async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
   T('nativeFit('+mode+')');
@@ -1069,7 +1101,14 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
   }catch(e){ console.warn('[buddy] nativeFit', e); }
 }
 // resting state when no morning is up: always show the drawer (edge-reveal deferred)
-function settleNative(){ if(!NATIVE) return; openDrawer(); }
+// Resting state when no morning is up. Always flash the drawer open on launch so
+// Buddy is unmistakably visible, then — unless pinned — tuck it to the edge tab.
+function settleNative(){
+  if(!NATIVE) return;
+  openDrawer();
+  if(state.pinned) return;
+  setTimeout(()=>{ if(!state.pinned) closeDrawer(); }, 1600);
+}
 
 function boot(){
   cursor=0; kbActive=false; editingId=null;  // reset transient keyboard cursor on (re)boot
