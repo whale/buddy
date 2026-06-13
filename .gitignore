@@ -11,5 +11,4 @@ skills-lock.json
 # Tauri / Rust build artifacts (Phase C Mac shell)
 src-tauri/target/
 src-tauri/gen/
-src-tauri/Cargo.lock
 pnpm-lock.yaml

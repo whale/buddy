@@ -30,7 +30,7 @@ use tauri::{
 
 /// Width (in logical-ish physical px) of the Buddy strip on screen.
 /// Tweak to taste; the web layout is comfortable around 320–360.
-const STRIP_WIDTH: u32 = 340;
+const STRIP_WIDTH: u32 = 420;
 
 /// Position `win` flush against the right edge of whichever monitor it currently
 /// sits on (falls back to the primary monitor), spanning the full usable height.
@@ -57,10 +57,12 @@ fn position_right_edge(win: &WebviewWindow) {
 
     // Convert our logical strip width to physical pixels for this monitor.
     let width_px = (STRIP_WIDTH as f64 * scale).round() as u32;
-    let height_px = m_size.height;
+    // Sit below the menu bar (~25pt) so the window doesn't run off the top.
+    let top_px = (25.0 * scale).round() as i32;
+    let height_px = (m_size.height as i32 - top_px).max(200) as u32;
 
     let x = m_pos.x + (m_size.width as i32 - width_px as i32);
-    let y = m_pos.y;
+    let y = m_pos.y + top_px;
 
     if let Err(e) = win.set_size(PhysicalSize::new(width_px, height_px)) {
         eprintln!("[buddy] set_size failed: {e}");
@@ -99,6 +101,13 @@ fn toggle_window(app: &AppHandle) {
     }
 }
 
+/// Diagnostic: the webview console isn't forwarded to the terminal, so JS calls
+/// this to log into the same file we can read. (Temporary.)
+#[tauri::command]
+fn trace(msg: String) {
+    eprintln!("[buddy-js] {msg}");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
@@ -121,6 +130,7 @@ pub fn run() {
     }
 
     builder
+        .invoke_handler(tauri::generate_handler![trace])
         .setup(|app| {
             let handle = app.handle();
 
@@ -172,8 +182,12 @@ pub fn run() {
                 }
             }
 
-            // Position and reveal on launch.
-            show_window(&handle);
+            // Reveal on launch WITHOUT positioning — the web layer (nativeFit) owns
+            // sizing/position so the full-screen morning isn't snapped back to the strip.
+            if let Some(win) = handle.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
 
             // No Dock icon: behave like a menu-bar utility (macOS "Accessory").
             #[cfg(target_os = "macos")]
@@ -184,11 +198,13 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the window (e.g. Cmd+W) should just hide it, not quit —
-            // Buddy lives in the menu bar. Quit via the tray menu.
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            match event {
+                tauri::WindowEvent::Resized(sz) => eprintln!("[buddy-win] Resized {}x{}", sz.width, sz.height),
+                tauri::WindowEvent::Moved(p) => eprintln!("[buddy-win] Moved {},{}", p.x, p.y),
+                tauri::WindowEvent::Focused(f) => eprintln!("[buddy-win] Focused {}", f),
+                // Closing (e.g. Cmd+W) just hides — Buddy lives in the menu bar.
+                tauri::WindowEvent::CloseRequested { api, .. } => { api.prevent_close(); let _ = window.hide(); }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())

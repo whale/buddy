@@ -6,6 +6,11 @@
 <title>Buddy — prototype</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
+  /* Native (Tauri) mode: hide the web-demo scaffolding so only Buddy shows;
+     the real macOS desktop sits behind the transparent window. */
+  body.native #wallpaper, body.native #desktop, body.native #devMorning, body.native #edgeBar{ display:none !important; }
+  body.native{ background:transparent !important; }
+  body.native #drawer{ transform:none !important; }   /* always-visible drawer (edge-reveal deferred) */
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
   :root{
     --font:'Graphik','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; --red:#e5484d;
@@ -22,9 +27,8 @@
   [contenteditable]:focus{outline:none}
   [contenteditable].empty:before{content:attr(data-ph);color:rgba(0,0,0,.2)}
 
-  /* ---- press feedback: every pressable scales on :active (§3.4) ---- */
-  .pressable{ transition:transform .14s var(--ease-out); }
-  .pressable:active{ transform:scale(0.97); }
+  /* press feedback intentionally OFF — no click movement (text was shrinking/icons bouncing) */
+  .pressable:active{ transform:none; }
 
   /* ---- warning themes: whole view ----
      Red wash animates REAL background-color/color (they interpolate) — NOT
@@ -56,12 +60,14 @@
     #drawer.lvl2 .buddy-row:hover{ background-color:#e85a5f !important; } /* red + ~10% white */
   }
   #drawer.lvl2 .buddy-row{ background-color:var(--red) !important; }
+  /* focused/"now" on red: 15% black laid over the red to darken it */
+  #drawer.lvl2 .row-focused{ background-image: linear-gradient(rgba(0,0,0,.15),rgba(0,0,0,.15)) !important; }
 
   /* ---- keyboard cursor ring: a transient nav cursor, distinct from the
      grey "now"/focused STATE (§3.2). Inset ring so it reads on any bg. ---- */
-  .cursor-ring{ box-shadow: inset 0 0 0 2px rgba(0,0,0,.55); }
-  #drawer.lvl1 .cursor-ring{ box-shadow: inset 0 0 0 2px var(--red); }
-  #drawer.lvl2 .cursor-ring{ box-shadow: inset 0 0 0 2px #fff; }
+  /* keyboard cursor = a darker background, no border/box */
+  .cursor-ring{ background-color: rgba(0,0,0,.06); }
+  #drawer.lvl2 .cursor-ring{ background-image: linear-gradient(rgba(0,0,0,.10),rgba(0,0,0,.10)); }
 
   /* ---- Add + shade per level, full-opacity on hover ---- */
   .addtxt{ transition:color .1s ease; }
@@ -102,10 +108,10 @@
 
   /* Last-7-days crossfade — blur-masked so it reads as ONE motion (§3.4).
      blur ≤ 4px (Safari cost). Crossfade, no bar-travel tween. */
-  .hist-fade{ animation: hist-cf .22s var(--ease-out) both; }
+  .hist-fade{ animation: hist-cf .3s var(--ease-out) both; }
   @keyframes hist-cf{
-    from{ opacity:0; filter:blur(2px); }
-    to{   opacity:1; filter:blur(0); }
+    from{ opacity:0; transform:translateY(36px); filter:blur(3px); }
+    to{   opacity:1; transform:translateY(0);    filter:blur(0); }
   }
 
   /* Stagger grouped entrances 40–60ms (morning slots, history day-groups). */
@@ -126,13 +132,15 @@
   .parrot{
     position:absolute; width:24px; height:24px; line-height:24px;
     font-size:22px; text-align:center; will-change:transform, opacity;
-    top:-30px; opacity:0;
-    animation: parrot-fall var(--dur,1.8s) cubic-bezier(0.23,1,0.32,1) var(--delay,0ms) forwards;
+    right:8px; bottom:8px; opacity:0;
+    animation: parrot-burst var(--dur,1.8s) cubic-bezier(0.17,0.84,0.44,1) var(--delay,0ms) forwards;
   }
-  @keyframes parrot-fall{
-    0%{   transform: translate3d(0,0,0) rotate(0deg);            opacity:0; }
-    8%{   opacity:1; }
-    100%{ transform: translate3d(var(--dx,0), var(--dy,110vh), 0) rotate(var(--rot,90deg)); opacity:0; }
+  /* explode from the bottom-right corner, outward up-and-left, arcing back down a touch */
+  @keyframes parrot-burst{
+    0%{   transform: translate3d(0,0,0) rotate(0deg); opacity:0; }
+    6%{   opacity:1; }
+    55%{  transform: translate3d(calc(var(--dx,-60vw) * .85), var(--peak,-70vh), 0) rotate(calc(var(--rot,180deg) * .6)); opacity:1; }
+    100%{ transform: translate3d(var(--dx,-60vw), var(--dy,-45vh), 0) rotate(var(--rot,180deg)); opacity:0; }
   }
 
   /* ====================================================================
@@ -229,17 +237,19 @@
         </button>
       </div>
       <div class="h-px w-full bg-[#d9d9d9]"></div>
-      <div class="p-8">
-        <button id="confettiToggle" type="button" role="switch" aria-checked="true"
-          class="pressable w-full flex items-center justify-between gap-4 text-left">
-          <span class="text-[17px] font-medium text-black/80 tracking-[-0.34px]">Celebrate completed tasks 🎉</span>
-          <span id="confettiTrack" class="relative shrink-0 h-[28px] w-[48px] rounded-full bg-black transition-colors duration-200">
-            <span id="confettiKnob" class="absolute top-[3px] left-[3px] h-[22px] w-[22px] rounded-full bg-white shadow-sm transition-transform duration-200" style="transform:translateX(20px)"></span>
-          </span>
-        </button>
-        <p id="confettiOverride" class="mt-3 text-[13px] text-black/40 leading-snug hidden">
-          Off while your system is set to reduce motion.
-        </p>
+      <div class="flex flex-col">
+        <div class="border-b border-[#d9d9d9] px-8 py-5">
+          <div class="text-[18px] text-black/60 tracking-[-0.36px] mb-3">Celebrate completed tasks</div>
+          <div class="flex items-center gap-3">
+            <span class="text-[20px] leading-none">👍🏼</span>
+            <input id="celebrateSlider" type="range" min="0" max="100" value="100" class="flex-1 h-1.5 rounded-full appearance-none bg-black/15 accent-black cursor-pointer">
+            <span class="text-[20px] leading-none">🦜</span>
+          </div>
+          <p id="confettiOverride" class="mt-3 text-[13px] text-black/40 leading-snug hidden">Off while your system is set to reduce motion.</p>
+        </div>
+        <button id="exportBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Export my data</button>
+        <button id="expungeBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-[#e5484d] tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Erase all data…</button>
+        <button id="restartBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] hover:bg-black/[0.02]">Restart Buddy <span class="text-black/30">· dev</span></button>
       </div>
     </div>
   </div>
@@ -261,6 +271,7 @@
     <div class="w-[400px] bg-white border border-[#d9d9d9] rounded-[24px] overflow-hidden">
       <div id="morningSlots"></div>
     </div>
+    <button id="skipToday" class="mt-4 text-[14px] text-black/35 hover:text-black/60 transition-colors">Skip today</button>
   </div>
 </div>
 
@@ -279,9 +290,9 @@
    that are NOT persisted.
    ==================================================================== */
 let state = {
-  today:   { date:null, items:[] },
+  today:   { date:null, items:[], morningDone:false },
   history: [],
-  settings:{ confetti:true },
+  settings:{ celebrate:100 },
   pinned:  false,
   histOpen:false,
 };
@@ -294,6 +305,8 @@ Object.defineProperty(state,'items',{
 });
 
 let uid = 1; const nid = () => 'n'+(uid++);
+// After loading saved tasks (ids n1,n2,…), push uid past them so new ids never collide.
+function bumpUid(){ let mx=0; (state.today.items||[]).forEach(i=>{ const m=/^n(\d+)$/.exec(i.id||''); if(m) mx=Math.max(mx,+m[1]); }); uid=Math.max(uid, mx+1); }
 let editingId = null;
 let cursor = 0;                  // keyboard cursor index (0..items.length, last = Add row)
 let kbActive = false;           // true once a key has been used → cursor ring shows
@@ -320,7 +333,7 @@ const desktop=$('#desktop'), drawer=$('#drawer'), edgeBar=$('#edgeBar'), edgeDot
       listEl=$('#list'), morning=$('#morning'), morningSlots=$('#morningSlots'),
       confettiEl=$('#confetti'),
       settingsSheet=$('#settings'), gearBtn=$('#gearBtn'), settingsClose=$('#settingsClose'),
-      confettiToggle=$('#confettiToggle'), confettiKnob=$('#confettiKnob'), confettiTrack=$('#confettiTrack'),
+      celebrateSlider=$('#celebrateSlider'),
       confettiOverride=$('#confettiOverride');
 
 const todayWrap=document.createElement('div'); todayWrap.className='flex-1 min-h-0 flex flex-col';
@@ -359,9 +372,9 @@ function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch{ (memoryStore||(memo
 function serialize(){
   return JSON.stringify({
     version:1,
-    today:   { date:state.today.date, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null})) },
+    today:   { date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null})) },
     history: state.history,
-    settings:{ confetti:!!state.settings.confetti },
+    settings:{ celebrate: Math.max(0,Math.min(100, state.settings.celebrate??100)) },
     pinned:  !!state.pinned,
   });
 }
@@ -391,9 +404,9 @@ function isValidToday(t){
     && t.items.every(i=> i && typeof i.text==='string');
 }
 function freshBoot(){
-  state.today={ date:localDate(), items:[] };
+  state.today={ date:localDate(), items:[], morningDone:false };
   state.history=[];
-  state.settings={ confetti:true };
+  state.settings={ celebrate:100 };
   state.pinned=false;
   bootedFresh=true;
 }
@@ -409,12 +422,12 @@ function load(){
   }
   blob=migrate(blob);
   // Hydrate runtime state from the validated blob.
-  state.today   = { date:blob.today.date, items:blob.today.items.map(i=>({
+  state.today   = { date:blob.today.date, morningDone:!!blob.today.morningDone, items:blob.today.items.map(i=>({
                       id:i.id||nid(), text:String(i.text||''),
                       state:(i.state==='focused'||i.state==='done')?i.state:'neutral',
                       src:i.src??null })) };
   state.history = Array.isArray(blob.history) ? blob.history.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items)) : [];
-  state.settings= { confetti: blob.settings && typeof blob.settings.confetti==='boolean' ? blob.settings.confetti : true };
+  state.settings= { celebrate: (blob.settings && typeof blob.settings.celebrate==='number') ? Math.max(0,Math.min(100,blob.settings.celebrate)) : (blob.settings && blob.settings.confetti===false ? 0 : 100) };
   state.pinned  = !!blob.pinned;
 }
 
@@ -437,8 +450,8 @@ function maybeRollover(){
       items: state.today.items.map((it,i)=>({ id:`h-${epoch}-${i}`, text:it.text, done: it.state==='done' })),
     };
     state.history.unshift(record);
-    if(state.history.length>HISTORY_DAYS) state.history.length=HISTORY_DAYS;
-    state.today={ date:cur, items:[] };
+    // history is kept forever until the user erases it (Settings → Erase all data)
+    state.today={ date:cur, items:[], morningDone:false };
     return true;                              // → caller shows morning
   } else {
     // Empty/skipped day → just advance the date, archive nothing.
@@ -489,8 +502,8 @@ function last7Days(){
 
 /* ----------------------- drawer open / close --------------------- */
 let openTimer=null, closeTimer=null;
-function openDrawer(){ drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }
-function closeDrawer(){ if(state.pinned) return; drawer.classList.add('translate-x-full'); }
+function openDrawer(){ if(NATIVE) nativeFit('drawer'); drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }
+function closeDrawer(){ if(state.pinned || NATIVE) return; drawer.classList.add('translate-x-full'); }
 edgeBar.addEventListener('mouseenter', ()=>{ clearTimeout(closeTimer); openTimer=setTimeout(openDrawer,120); });
 edgeBar.addEventListener('mouseleave', ()=>{ clearTimeout(openTimer); });
 drawer.addEventListener('mouseenter', ()=>{ clearTimeout(closeTimer); clearTimeout(openTimer); });
@@ -602,7 +615,7 @@ function renderToday(){
     const enter = (it.id===justAddedId) ? ' item-enter' : '';
     row.className='buddy-row pressable bd '+bgClass+ring+enter+' group relative flex items-center cursor-pointer overflow-hidden '+(idx>0?'border-t border-[#d9d9d9]':'');
     row.dataset.idx=idx;
-    row.addEventListener('click',()=>{ if(editingId) return; cursor=idx; cycle(it); });
+    row.addEventListener('click',()=>{ if(editingId) return; kbActive=false; cursor=idx; cycle(it); });
 
     const txt=document.createElement('div');
     txt.dataset.tid=it.id; txt.dataset.ph='Untitled'; txt.style.fontSize='var(--fs)';
@@ -611,8 +624,8 @@ function renderToday(){
     txt.className='flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2] '+(it.state==='done'?'line-through':'');
     txt.textContent=it.text||''; if(!it.text)txt.classList.add('empty');
     txt.addEventListener('input',()=>{ it.text=txt.textContent.trim(); });
-    txt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); txt.blur(); } });
-    txt.addEventListener('blur',()=>{ it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable'); editingId=null; render(); });
+    txt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); const had=txt.textContent.trim(); txt.blur(); if(had && state.items.length<HARD_CAP){ const nit={id:nid(),text:'',state:'neutral'}; state.items.push(nit); render(); startEdit(nit.id); } } });
+    txt.addEventListener('blur',()=>{ it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable'); editingId=null; if(!it.text){ state.items=state.items.filter(x=>x.id!==it.id); } render(); });
     row.appendChild(txt);
 
     const onRed=lvl===2;
@@ -631,8 +644,8 @@ function renderToday(){
     todayWrap.appendChild(row);
   });
 
-  {
-    // Add is always visible; at the hard cap it's the faded "maxed out" state and won't add a 7th
+  if(state.items.length<HARD_CAP){
+    // Add hidden entirely at the hard cap (full red) — there is no 7th
     const add=document.createElement('div');
     add.style.cssText=rowStyle;
     const addRing = (kbActive && cursor===state.items.length) ? ' cursor-ring' : '';
@@ -658,7 +671,7 @@ function renderHist(){
       const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5 pr-9';
       if(added){
         const badge=document.createElement('span');
-        badge.className='todaybadge shrink-0 mr-3 inline-flex items-center rounded-md bg-black/[0.07] px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-black/50 leading-none';
+        badge.className='todaybadge shrink-0 mr-2 inline-flex items-center rounded bg-black/[0.07] px-1.5 py-[2px] text-[10px] font-semibold uppercase tracking-wide text-black/50 leading-none';
         badge.textContent='today';
         r.appendChild(badge);
       }
@@ -667,7 +680,8 @@ function renderHist(){
       t.textContent=it.text; r.appendChild(t);
       if(!it.done){
         const aff=document.createElement('button');
-        const base='chrome pressable absolute right-0 top-1/2 -translate-y-1/2 grid place-items-center opacity-0 group-hover/h:opacity-100 transition-opacity ';
+        aff.addEventListener('mousedown',e=>e.preventDefault());   // don't let a focus shift eat the first click
+        const base='chrome absolute right-0 top-1/2 -translate-y-1/2 grid place-items-center opacity-0 group-hover/h:opacity-100 transition-opacity ';
         if(added){ aff.className=base+'size-[32px] rounded-full text-black/50 hover:bg-black/5'; aff.innerHTML=UNDO; aff.title='Undo — remove from today';
           aff.addEventListener('click',()=>removeBySrc(it.id)); }
         else if(canAdd){ aff.className=base+'size-[32px] rounded-full text-black/50 hover:bg-black/5'; aff.innerHTML=PLUS; aff.title='Add to today';
@@ -724,15 +738,16 @@ function buildMorning(){
   }
 }
 function morningVals(){ return [...morningSlots.querySelectorAll('input')].map(i=>i.value.trim()); }
-function showMorning(){ buildMorning(); morning.classList.remove('hidden'); setTimeout(()=>morningSlots.querySelector('input')?.focus(),60); }
+function showMorning(){ T('showMorning'); buildMorning(); morning.classList.remove('hidden'); nativeFit('full'); setTimeout(()=>morningSlots.querySelector('input')?.focus(),60); }
 function startDay(){
   const vals=morningVals().filter(Boolean); if(!vals.length) return;
   state.items=vals.map(t=>({id:nid(),text:t,state:'neutral'}));
-  morning.classList.add('hidden'); render();
+  T('startDay'); state.today.morningDone=true; save(); morning.classList.add('hidden'); render();
   openDrawer(); setTimeout(()=>{ if(!state.pinned) closeDrawer(); },1500);
 }
-function skip(){ morning.classList.add('hidden'); render(); }
-morning.addEventListener('click',e=>{ if(e.target===morning || e.target===morning.firstElementChild){ if(morningVals().some(Boolean)) startDay(); else skip(); }});
+function skip(){ T('skip'); state.today.morningDone=true; save(); morning.classList.add('hidden'); render(); settleNative(); }
+// (removed) background-click dismissed the morning on stray activation clicks (acceptFirstMouse).
+// Dismiss only via the explicit "Skip today" link or by starting the day (Enter on the last slot).
 $('#devMorning').addEventListener('click',showMorning);
 
 /* ====================================================================
@@ -759,16 +774,20 @@ function addAndEdit(){
    - Cleanup: animationend AND a 2000ms hard backstop.
    - Skipped entirely under prefers-reduced-motion or settings.confetti=false.
    ==================================================================== */
-const PARROT_COUNT=100;
-let parrotMode='emoji';          // 'gif' once the asset is confirmed present
+let PARROTS=[];                  // auto-populated with whichever parrot gifs exist in assets/
+let burstTotal=0;
+let parrotMode='emoji';          // 'gif' once at least one parrot gif loads
 let confettiTimer=null;
 
-/* Probe the bundled GIF once at boot. If it loads, use <img>; else 🦜. */
-(function detectParrot(){
-  const img=new Image();
-  img.onload=()=>{ if(img.naturalWidth>0) parrotMode='gif'; };
-  img.onerror=()=>{ parrotMode='emoji'; };
-  img.src='assets/parrot.gif';
+/* Probe a set of party-parrot filenames; whichever are present become the variety pool.
+   Drop more <name>.gif into assets/ and add the name here and they just work. */
+const PARROT_CANDIDATES=['parrot','parrotdad','aussieparrot','cowboyparrot','dealwithitparrot','fiestaparrot','margaritaparrot','shuffleparrot'];
+(function detectParrots(){
+  PARROT_CANDIDATES.forEach(name=>{
+    const img=new Image();
+    img.onload=()=>{ if(img.naturalWidth>0){ const f=name+'.gif'; if(!PARROTS.includes(f)) PARROTS.push(f); parrotMode='gif'; } };
+    img.src='assets/'+name+'.gif';
+  });
 })();
 
 function clearConfetti(){
@@ -777,41 +796,48 @@ function clearConfetti(){
 }
 
 let endCount=0;
+/* Intensity 0..100 drives count, thumb↔parrot mix, and variety.
+   Burst up and to the LEFT; a lone thumb just floats up. Wide per-item delay
+   spread → a staccato pop/fade rather than all at once. */
 function fireConfetti(){
   if(reduced()) return;                        // reduced-motion → no burst
-  if(!state.settings.confetti) return;         // toggle off → no burst
+  const lvl = state.settings.celebrate ?? 100; // 0..100 (left end = one thumb, never silent)
   clearConfetti();                             // single burst in flight
-  endCount=0;                                  // reset per-burst animationend counter
+  const i=lvl/100;
+  const count=Math.max(1, Math.round(1 + i*i*199));   // 1 → ~200 (quadratic ramp)
+  const parrotRatio=i;                                // low → 👍🏼, high → 🦜
+  const useGif=parrotMode==='gif';
+  burstTotal=count; endCount=0;
 
   const frag=document.createDocumentFragment();
-  for(let i=0;i<PARROT_COUNT;i++){
-    const p=document.createElement(parrotMode==='gif'?'img':'span');
-    p.className='parrot';
-    if(parrotMode==='gif'){ p.src='assets/parrot.gif'; p.alt=''; }
-    else { p.textContent='🦜'; }
-    // random start x, horizontal drift, fall distance, rotation, stagger, duration
-    const startX=Math.random()*100;            // vw
-    const drift =(Math.random()*2-1)*30;       // ±30vw
-    const fall  =80+Math.random()*40;          // 80–120vh
-    const rot   =(Math.random()*2-1)*180;      // ±180deg
-    const delay =Math.random()*250;            // 0–250ms stagger
-    const dur   =1.4+Math.random()*0.6;        // 1.4–2.0s (~1.8s avg)
-    p.style.left=startX+'vw';
-    p.style.setProperty('--dx', drift+'vw');
-    p.style.setProperty('--dy', fall+'vh');
-    p.style.setProperty('--rot', rot+'deg');
-    p.style.setProperty('--delay', delay+'ms');
-    p.style.setProperty('--dur', dur+'s');
-    frag.appendChild(p);
+  for(let k=0;k<count;k++){
+    const parrot = Math.random() < parrotRatio;
+    let el;
+    if(parrot && useGif && PARROTS.length){ el=document.createElement('img'); el.src='assets/'+PARROTS[Math.floor(Math.random()*PARROTS.length)]; el.alt=''; }
+    else { el=document.createElement('span'); el.textContent = parrot ? '🦜' : '👍🏼'; }
+    el.className='parrot';
+    const dx   = count<=2 ? -(Math.random()*14) : -(10 + Math.random()*95);  // lone → floats up; many → flings left
+    const peak = -(40 + Math.random()*55);
+    const dy   = peak + (8 + Math.random()*32);
+    const rot  = (Math.random()*2-1)*260;
+    const delay= Math.random()*650;             // wide spread → staccato
+    const dur  = 1.1+Math.random()*0.9;
+    el.style.setProperty('--dx', dx+'vw');
+    el.style.setProperty('--peak', peak+'vh');
+    el.style.setProperty('--dy', dy+'vh');
+    el.style.setProperty('--rot', rot+'deg');
+    el.style.setProperty('--delay', delay+'ms');
+    el.style.setProperty('--dur', dur+'s');
+    frag.appendChild(el);
   }
   confettiEl.appendChild(frag);
 
-  // Cleanup belt-and-suspenders: last parrot's animationend OR 2000ms backstop.
+  // Cleanup: each item's animationend, plus a backstop past the widest delay+dur.
   confettiEl.addEventListener('animationend', onBurstEnd);
-  confettiTimer=setTimeout(()=>{ confettiEl.removeEventListener('animationend', onBurstEnd); clearConfetti(); }, 2000);
+  confettiTimer=setTimeout(()=>{ confettiEl.removeEventListener('animationend', onBurstEnd); clearConfetti(); }, 3400);
 }
 function onBurstEnd(){
-  if(++endCount>=PARROT_COUNT){
+  if(++endCount>=burstTotal){
     confettiEl.removeEventListener('animationend', onBurstEnd);
     clearConfetti();
   }
@@ -823,17 +849,14 @@ function onBurstEnd(){
    prefers-reduced-motion.
    ==================================================================== */
 let settingsOpen=false;
-function syncConfettiToggle(){
-  const on=!!state.settings.confetti;
+function syncCelebrate(){
   const overridden=reduced();
-  confettiToggle.setAttribute('aria-checked', String(on && !overridden));
-  // knob/track reflect the stored value; if reduced-motion overrides, show OFF + note
-  const effective = on && !overridden;
-  confettiKnob.style.transform = effective ? 'translateX(20px)' : 'translateX(0px)';
-  confettiTrack.style.backgroundColor = effective ? '#000' : 'rgba(0,0,0,.18)';
-  confettiToggle.disabled = overridden;
-  confettiToggle.classList.toggle('opacity-50', overridden);
-  confettiToggle.classList.toggle('cursor-not-allowed', overridden);
+  const v = state.settings.celebrate ?? 100;
+  if(celebrateSlider){
+    celebrateSlider.value = String(v);
+    celebrateSlider.disabled = overridden;
+    celebrateSlider.classList.toggle('opacity-50', overridden);
+  }
   confettiOverride.classList.toggle('hidden', !overridden);
 }
 function openSettings(){
@@ -841,7 +864,7 @@ function openSettings(){
   settingsSheet.classList.remove('closing');
   settingsSheet.setAttribute('data-open','true');
   settingsSheet.setAttribute('aria-hidden','false');
-  syncConfettiToggle();
+  syncCelebrate();
 }
 function closeSettings(){
   settingsOpen=false;
@@ -851,15 +874,34 @@ function closeSettings(){
 }
 gearBtn.addEventListener('click', e=>{ e.stopPropagation(); settingsOpen?closeSettings():openSettings(); });
 settingsClose.addEventListener('click', e=>{ e.stopPropagation(); closeSettings(); });
-confettiToggle.addEventListener('click', e=>{
-  e.stopPropagation();
-  if(reduced()) return;                        // overridden — inert
-  state.settings.confetti=!state.settings.confetti;
-  syncConfettiToggle();
-  save();
-});
+celebrateSlider.addEventListener('input', ()=>{ state.settings.celebrate=+celebrateSlider.value; save(); });
+celebrateSlider.addEventListener('change', ()=>{ fireConfetti(); });   // preview the chosen level on release
 // keep the toggle honest if the user flips system reduced-motion live
-RM.addEventListener?.('change', ()=>{ if(settingsOpen) syncConfettiToggle(); });
+RM.addEventListener?.('change', ()=>{ if(settingsOpen) syncCelebrate(); });
+
+// Export: download all data as JSON (works in-browser; native file-save needs the fs plugin — follow-up)
+$('#exportBtn').addEventListener('click', e=>{ e.stopPropagation();
+  try{
+    const data=serialize();
+    const blob=new Blob([data],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url;
+    a.download='buddy-'+new Date().toISOString().slice(0,10)+'.json';
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    if(window.__TAURI__){ navigator.clipboard?.writeText(data); }   // native fallback: also copy to clipboard
+  }catch(err){ console.warn('[buddy] export failed', err); }
+});
+// Erase everything (with confirm); suppress the unload-save so it actually sticks, then boot fresh
+$('#expungeBtn').addEventListener('click', e=>{ e.stopPropagation();
+  if(!confirm('Erase ALL of Buddy’s tasks and history on this Mac? This can’t be undone.')) return;
+  saveSuppressed=true;
+  try{ localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(BAK_KEY); }catch(_){}
+  location.reload();
+});
+// dev: restart the app (reloads the webview)
+$('#restartBtn')?.addEventListener('click', e=>{ e.stopPropagation(); state.today.morningDone=false; save(); closeSettings(); showMorning(); });
+// morning "Skip today"
+$('#skipToday')?.addEventListener('click', e=>{ e.stopPropagation(); skip(); });
 
 /* ====================================================================
    KEYBOARD LAYER  (§3.2) — one cursor model. The cursor RING is a
@@ -949,6 +991,7 @@ document.addEventListener('keydown', e=>{
    on focus, on tab-visible, and every 60s. Never while editing.
    ==================================================================== */
 function liveRolloverCheck(){
+  T('liveRollover');
   if(editingId!==null) return;               // defer until the edit commits
   const rolled=maybeRollover();
   if(rolled){
@@ -990,7 +1033,7 @@ window.__buddy = {
   fireConfetti: ()=>fireConfetti(),
   openSettings: ()=>openSettings(),
   closeSettings: ()=>closeSettings(),
-  setConfetti(v){ state.settings.confetti=!!v; syncConfettiToggle(); save(); },
+  setCelebrate(v){ state.settings.celebrate=+v; syncCelebrate(); save(); },
   get reduced(){ return reduced(); },
   get parrotMode(){ return parrotMode; },
   get confettiCount(){ return confettiEl.children.length; },
@@ -1000,18 +1043,50 @@ window.__buddy = {
 };
 
 /* --------------------------- boot -------------------------------- */
+/* ---- native (Tauri) window sizing: morning = full screen, daily = right-edge strip ---- */
+const NATIVE = !!(window.__TAURI__ && window.__TAURI__.window);
+function T(m){ try{ window.__TAURI__?.core?.invoke('trace',{msg:String(m)}); }catch(_){} }
+const SLIVER=14;   // hidden width — just the edge hot-zone
+const DRAWERW=420; // revealed/pinned width
+async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
+  T('nativeFit('+mode+')');
+  if(!NATIVE) return;
+  try{
+    const W=window.__TAURI__.window, D=window.__TAURI__.dpi||W;
+    const win=W.getCurrentWindow(), mon=await W.currentMonitor();
+    if(!mon || !D.PhysicalSize || !D.PhysicalPosition) return;
+    const sz=mon.size, p=mon.position, sf=mon.scaleFactor;
+    const top=Math.round(25*sf);          // sit below the menu bar (≈25pt)
+    const h=sz.height - top;
+    if(mode==='full'){
+      await win.setSize(new D.PhysicalSize(sz.width, h));
+      await win.setPosition(new D.PhysicalPosition(p.x, p.y + top));
+      return;
+    }
+    const w=Math.round((mode==='drawer'?DRAWERW:SLIVER)*sf);
+    await win.setSize(new D.PhysicalSize(w, h));
+    await win.setPosition(new D.PhysicalPosition(p.x + sz.width - w, p.y + top));
+  }catch(e){ console.warn('[buddy] nativeFit', e); }
+}
+// resting state when no morning is up: always show the drawer (edge-reveal deferred)
+function settleNative(){ if(!NATIVE) return; openDrawer(); }
+
 function boot(){
   cursor=0; kbActive=false; editingId=null;  // reset transient keyboard cursor on (re)boot
+  if(NATIVE) document.body.classList.add('native');
   load();                                    // corruption-guarded; bad blob → fresh
+  bumpUid();                                 // avoid id collisions with loaded tasks (the Add bug)
   const rolled=maybeRollover();              // same-day → restore; older → archive/advance
   if(state.history.length===0) seedDemoHistory();   // first-run panel populated
   setDate();
   applyPinnedUI();
-  syncConfettiToggle();                        // reflect stored settings.confetti
+  syncCelebrate();                        // reflect stored settings.confetti
   render();
   // Show morning only on a fresh/rolled day with no items — NOT on same-day restore.
   // Fresh first run (no stored blob) and a real day-rollover both qualify.
-  if((bootedFresh || rolled) && state.today.items.length===0) showMorning();
+  T('boot done='+state.today.morningDone+' n='+state.today.items.length);
+  // Show the morning until it's been handled today — survives the dev double-boot/reload.
+  if(!state.today.morningDone && state.today.items.length===0) showMorning(); else settleNative();
 }
 boot();
 </script>
