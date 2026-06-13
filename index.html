@@ -11,28 +11,12 @@
   body.native #wallpaper, body.native #desktop, body.native #devMorning{ display:none !important; }
   body.native{ background:transparent !important; }
 
-  /* ---- Edge-reveal handle (the HIDDEN state) ---------------------------
-     When the drawer is tucked away this tab is the ONLY thing on screen, so
-     it must be findable on ANY wallpaper and big enough to hover OR click.
-     (The old 14px fully-transparent sliver was invisible — "not coming up".)
-     Native: the whole window shrinks to --sliver px wide and this frosted
-     pill is painted flush-right inside it. Web: it rides the right edge of
-     the demo so what I verify in the browser matches the native build. ---- */
-  #edgeBar{ width:var(--sliver, 22px); }
-  #edgeTab{
-    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px;
-    padding:12px 5px; border-radius:13px 0 0 13px;
-    background:rgba(255,255,255,.80); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px);
-    border:1px solid rgba(0,0,0,.07); border-right:none;
-    box-shadow:-2px 2px 14px rgba(0,0,0,.22);
-    transition:background .15s ease, box-shadow .15s ease, transform .15s ease;
-  }
-  #edgeBar:hover #edgeTab{ background:rgba(255,255,255,.94); box-shadow:-3px 3px 18px rgba(0,0,0,.28); transform:translateX(-1px); }
-  #edgeTab .edge-chev{ font-size:11px; line-height:1; color:rgba(0,0,0,.42); }
-  /* escalation bleeds through even while hidden: a task gone red tints the tab */
-  #edgeBar.edge-alert #edgeTab{ background:var(--red); border-color:transparent; box-shadow:-2px 2px 16px rgba(229,72,77,.45); }
-  #edgeBar.edge-alert .edge-chev{ color:rgba(255,255,255,.9); }
-  #edgeBar.edge-alert #edgeDots span{ background:rgba(255,255,255,.92) !important; }
+  /* ---- HIDDEN state: no widget --------------------------------------------
+     Per the brief: the trigger is the right SCREEN EDGE itself, not a thing to
+     hover. So there's nothing to draw — the drawer simply tucks off-screen and
+     the whole edge reveals it (native: Rust cursor monitor; web: the mousemove
+     listener below, so the browser mirrors the native behaviour). ---- */
+  #edgeBar{ display:none !important; }
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
   :root{
     --font:'Graphik','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; --red:#e5484d;
@@ -529,16 +513,22 @@ function last7Days(){
 let openTimer=null, closeTimer=null;
 function openDrawer(){ if(NATIVE) nativeFit('drawer'); drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }
 function closeDrawer(){ if(state.pinned) return; drawer.classList.add('translate-x-full'); if(NATIVE) nativeFit('sliver'); }
-edgeBar.addEventListener('mouseenter', ()=>{ clearTimeout(closeTimer); openTimer=setTimeout(openDrawer,120); });
-edgeBar.addEventListener('mouseleave', ()=>{ clearTimeout(openTimer); });
-// Click the tab = a bulletproof toggle. Hover at the screen edge can be finicky
-// through a transparent window; a click on the visible pill always works.
-edgeBar.addEventListener('click', ()=>{
-  clearTimeout(openTimer); clearTimeout(closeTimer);
-  if(drawer.classList.contains('translate-x-full')) openDrawer(); else closeDrawer();
-});
 drawer.addEventListener('mouseenter', ()=>{ clearTimeout(closeTimer); clearTimeout(openTimer); });
 drawer.addEventListener('mouseleave', ()=>{ clearTimeout(openTimer); closeTimer=setTimeout(closeDrawer,220); });
+
+/* ---- Reveal trigger: the RIGHT SCREEN EDGE, not a widget --------------------
+   The mouse touching the far-right edge opens the drawer. In the browser we read
+   clientX hitting the viewport edge; in the native app the same reveal is driven
+   by the Rust cursor monitor (which can see the whole screen edge, not just this
+   window). `edgeArmed` debounces so one touch = one reveal. ---- */
+let edgeArmed=true;
+function morningUp(){ const m=$('#morning'); return m && !m.classList.contains('hidden'); }
+addEventListener('mousemove', e=>{
+  if(morningUp() || state.pinned) return;
+  if(e.clientX >= innerWidth-2){
+    if(edgeArmed){ edgeArmed=false; clearTimeout(closeTimer); openDrawer(); }
+  } else if(e.clientX < innerWidth-40){ edgeArmed=true; }
+});
 
 const pinBtn=$('#pinBtn');
 pinBtn.addEventListener('click', e=>{
@@ -1078,7 +1068,14 @@ window.__buddy = {
 /* ---- native (Tauri) window sizing: morning = full screen, daily = right-edge strip ---- */
 const NATIVE = !!(window.__TAURI__ && window.__TAURI__.window);
 function T(m){ try{ window.__TAURI__?.core?.invoke('trace',{msg:String(m)}); }catch(_){} }
-const SLIVER=22;   // hidden width — wide enough to comfortably hover the visible tab
+// Native reveal/toggle intents from Rust (cursor-edge monitor, tray, shortcut).
+if(NATIVE){
+  const ev=window.__TAURI__.event;
+  ev.listen('buddy://reveal', ()=>{ if(morningUp()||state.pinned) return; clearTimeout(closeTimer); openDrawer(); });
+  ev.listen('buddy://toggle', ()=>{ if(morningUp()) return;
+    drawer.classList.contains('translate-x-full') ? openDrawer() : closeDrawer(); });
+}
+const SLIVER=2;    // hidden width — just enough to keep the webview alive (no widget)
 const DRAWERW=420; // revealed/pinned width
 async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
   T('nativeFit('+mode+')');

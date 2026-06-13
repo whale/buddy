@@ -25,80 +25,14 @@
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewWindow,
+    AppHandle, Emitter, Manager,
 };
 
-/// Width (in logical-ish physical px) of the Buddy strip on screen.
-/// Tweak to taste; the web layout is comfortable around 320–360.
-const STRIP_WIDTH: u32 = 420;
-
-/// Position `win` flush against the right edge of whichever monitor it currently
-/// sits on (falls back to the primary monitor), spanning the full usable height.
-///
-/// NOTE: uses the full monitor size. It does NOT subtract the menu-bar / notch,
-/// so on a notched display the top ~25–32pt may sit under the menu bar until the
-/// NSPanel/safe-area work is done. Adjust `y` + `height` once measured on-device.
-fn position_right_edge(win: &WebviewWindow) {
-    // Prefer the monitor the window is on; fall back to primary; then bail quietly.
-    let monitor = win
-        .current_monitor()
-        .ok()
-        .flatten()
-        .or_else(|| win.primary_monitor().ok().flatten());
-
-    let Some(monitor) = monitor else {
-        eprintln!("[buddy] no monitor found; skipping reposition");
-        return;
-    };
-
-    let m_pos = monitor.position(); // top-left of this monitor in the virtual desktop
-    let m_size = monitor.size(); // physical pixels
-    let scale = monitor.scale_factor();
-
-    // Convert our logical strip width to physical pixels for this monitor.
-    let width_px = (STRIP_WIDTH as f64 * scale).round() as u32;
-    // Sit below the menu bar (~25pt) so the window doesn't run off the top.
-    let top_px = (25.0 * scale).round() as i32;
-    let height_px = (m_size.height as i32 - top_px).max(200) as u32;
-
-    let x = m_pos.x + (m_size.width as i32 - width_px as i32);
-    let y = m_pos.y + top_px;
-
-    if let Err(e) = win.set_size(PhysicalSize::new(width_px, height_px)) {
-        eprintln!("[buddy] set_size failed: {e}");
-    }
-    if let Err(e) = win.set_position(PhysicalPosition::new(x, y)) {
-        eprintln!("[buddy] set_position failed: {e}");
-    }
-}
-
-/// Show + position + focus the main window.
-fn show_window(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window("main") {
-        position_right_edge(&win);
-        let _ = win.show();
-        let _ = win.unminimize();
-        let _ = win.set_focus();
-    }
-}
-
-/// Hide the main window.
-fn hide_window(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.hide();
-    }
-}
-
-/// Toggle show/hide based on current visibility.
-fn toggle_window(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window("main") {
-        match win.is_visible() {
-            Ok(true) => {
-                let _ = win.hide();
-            }
-            _ => show_window(app),
-        }
-    }
+/// Tell the webview to toggle the drawer (from the tray icon or the global
+/// shortcut). The webview owns its own geometry via `nativeFit`, so the native
+/// side just emits an intent and lets JS open or tuck — no window juggling here.
+fn toggle_drawer(app: &AppHandle) {
+    let _ = app.emit("buddy://toggle", ());
 }
 
 /// Diagnostic: the webview console isn't forwarded to the terminal, so JS calls
@@ -122,7 +56,7 @@ pub fn run() {
                 .with_handler(|app, _shortcut, event| {
                     // Fire once, on key-down only (ignore the release event).
                     if event.state == ShortcutState::Pressed {
-                        show_window(app);
+                        toggle_drawer(app);
                     }
                 })
                 .build(),
@@ -132,7 +66,9 @@ pub fn run() {
     builder
         .invoke_handler(tauri::generate_handler![trace])
         .setup(|app| {
-            let handle = app.handle();
+            // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
+            // across the later `set_activation_policy` call (which needs `&mut app`).
+            let handle = app.handle().clone();
 
             // --- Menu-bar (tray) icon + menu ---
             let toggle_item = MenuItemBuilder::with_id("toggle", "Show / Hide Buddy").build(app)?;
@@ -154,7 +90,7 @@ pub fn run() {
                 // Show the menu only on right-click; left-click toggles the window.
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
-                    "toggle" => toggle_window(app),
+                    "toggle" => toggle_drawer(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -165,7 +101,7 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        toggle_window(tray.app_handle());
+                        toggle_drawer(tray.app_handle());
                     }
                 })
                 .build(app)?;
@@ -193,6 +129,49 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
+            // --- Global cursor-edge monitor (the real "hot edge") --------------
+            // A webview can only sense the mouse inside its own window, so the old
+            // thin strip made only a tiny hover target. This background thread reads
+            // the OS cursor position directly — so the WHOLE right screen edge is the
+            // trigger: slam the mouse right and Buddy reveals. No widget to find.
+            //
+            // It only emits the *reveal* intent; hiding stays in JS (drawer
+            // mouse-leave), so geometry has a single owner. `armed` debounces so we
+            // fire once per edge-touch, not 60×/sec.
+            #[cfg(target_os = "macos")]
+            {
+                let h = handle.clone();
+                std::thread::spawn(move || {
+                    use mouse_position::mouse_position::Mouse;
+                    let mut armed = true;
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(16));
+                        // Right edge of the primary monitor, in logical points
+                        // (the same space the OS reports the cursor in).
+                        let Some(mon) = h
+                            .get_webview_window("main")
+                            .and_then(|w| w.primary_monitor().ok().flatten())
+                        else {
+                            continue;
+                        };
+                        let scale = mon.scale_factor();
+                        let right = (mon.position().x as f64 + mon.size().width as f64) / scale;
+
+                        if let Mouse::Position { x, .. } = Mouse::get_mouse_position() {
+                            let x = x as f64;
+                            if x >= right - 2.0 {
+                                if armed {
+                                    armed = false;
+                                    let _ = h.emit("buddy://reveal", ());
+                                }
+                            } else if x < right - 40.0 {
+                                armed = true; // moved away → re-arm for the next touch
+                            }
+                        }
+                    }
+                });
             }
 
             Ok(())
