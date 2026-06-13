@@ -510,9 +510,15 @@ function last7Days(){
 }
 
 /* ----------------------- drawer open / close --------------------- */
-let openTimer=null, closeTimer=null;
-function openDrawer(){ if(NATIVE) nativeFit('drawer'); drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }
-function closeDrawer(){ if(state.pinned) return; drawer.classList.add('translate-x-full'); if(NATIVE) nativeFit('sliver'); }
+let openTimer=null, closeTimer=null, shrinkTimer=null;
+// Both guard against the morning: while the full-screen planner is up, nothing
+// may resize the window back to a drawer/sliver (that was the "Restart" bug —
+// the morning would flash then get clipped to a sliver by a stray mouse-leave).
+function openDrawer(){ if(morningUp()) return; if(NATIVE){ clearTimeout(shrinkTimer); nativeFit('drawer'); } drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }
+function closeDrawer(){ if(state.pinned || morningUp()) return; drawer.classList.add('translate-x-full');
+  // Let the drawer finish sliding out (.24s) BEFORE shrinking the window to the
+  // sliver — otherwise the 2px window clips the panel and it vanishes abruptly.
+  if(NATIVE){ clearTimeout(shrinkTimer); shrinkTimer=setTimeout(()=>nativeFit('sliver'), 300); } }
 drawer.addEventListener('mouseenter', ()=>{ clearTimeout(closeTimer); clearTimeout(openTimer); });
 drawer.addEventListener('mouseleave', ()=>{ clearTimeout(openTimer); closeTimer=setTimeout(closeDrawer,220); });
 

@@ -148,11 +148,20 @@ pub fn run() {
                 std::thread::spawn(move || {
                     use mouse_position::mouse_position::Mouse;
                     const DRAWER_W: f64 = 420.0; // matches DRAWERW in index.html
-                    let mut prev_zone: u8 = 1;
+                    const TICK_MS: u64 = 16;
+                    // Dwell times: the cursor must REST at the edge before revealing
+                    // (so a quick brush-past doesn't pop it), and rest off the drawer
+                    // a moment before hiding (so a small drift doesn't snap it shut).
+                    const REVEAL_DWELL: u32 = 500 / TICK_MS as u32; // ~31 ticks ≈ 500ms
+                    const HIDE_GRACE: u32 = 160 / TICK_MS as u32; //  ~10 ticks ≈ 160ms
+                    let mut edge_ticks = 0u32; // consecutive ticks at the edge
+                    let mut away_ticks = 0u32; // consecutive ticks off the drawer
+                    let mut edge_fired = false; // revealed during this edge visit
+                    let mut away_fired = false; // hidden during this away visit
                     loop {
-                        std::thread::sleep(std::time::Duration::from_millis(16));
+                        std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
                         // Right edge of the primary monitor, in logical points
-                        // (the same space the OS reports the cursor in).
+                        // (CGEvent reports the cursor in points too, so units match).
                         let Some(mon) = h
                             .get_webview_window("main")
                             .and_then(|w| w.primary_monitor().ok().flatten())
@@ -164,20 +173,30 @@ pub fn run() {
 
                         if let Mouse::Position { x, .. } = Mouse::get_mouse_position() {
                             let x = x as f64;
-                            let zone: u8 = if x >= right - 2.0 {
-                                2
-                            } else if x < right - DRAWER_W {
-                                0
-                            } else {
-                                1
-                            };
-                            if zone != prev_zone {
-                                match zone {
-                                    2 => { let _ = h.emit("buddy://reveal", ()); }
-                                    0 => { let _ = h.emit("buddy://hide", ()); }
-                                    _ => {}
+                            if x >= right - 2.0 {
+                                // At the edge → count toward reveal.
+                                away_ticks = 0;
+                                away_fired = false;
+                                edge_ticks += 1;
+                                if edge_ticks >= REVEAL_DWELL && !edge_fired {
+                                    edge_fired = true;
+                                    let _ = h.emit("buddy://reveal", ());
                                 }
-                                prev_zone = zone;
+                            } else if x < right - DRAWER_W {
+                                // Off the drawer entirely → count toward hide.
+                                edge_ticks = 0;
+                                edge_fired = false;
+                                away_ticks += 1;
+                                if away_ticks >= HIDE_GRACE && !away_fired {
+                                    away_fired = true;
+                                    let _ = h.emit("buddy://hide", ());
+                                }
+                            } else {
+                                // Over the open drawer → neutral; reset both dwells.
+                                edge_ticks = 0;
+                                away_ticks = 0;
+                                edge_fired = false;
+                                away_fired = false;
                             }
                         }
                     }
