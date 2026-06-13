@@ -1072,6 +1072,7 @@ function T(m){ try{ window.__TAURI__?.core?.invoke('trace',{msg:String(m)}); }ca
 if(NATIVE){
   const ev=window.__TAURI__.event;
   ev.listen('buddy://reveal', ()=>{ if(morningUp()||state.pinned) return; clearTimeout(closeTimer); openDrawer(); });
+  ev.listen('buddy://hide',   ()=>{ if(morningUp()||state.pinned) return; clearTimeout(openTimer); closeDrawer(); });
   ev.listen('buddy://toggle', ()=>{ if(morningUp()) return;
     drawer.classList.contains('translate-x-full') ? openDrawer() : closeDrawer(); });
 }

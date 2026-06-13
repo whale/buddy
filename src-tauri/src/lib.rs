@@ -131,21 +131,24 @@ pub fn run() {
                 let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
 
-            // --- Global cursor-edge monitor (the real "hot edge") --------------
-            // A webview can only sense the mouse inside its own window, so the old
-            // thin strip made only a tiny hover target. This background thread reads
-            // the OS cursor position directly — so the WHOLE right screen edge is the
-            // trigger: slam the mouse right and Buddy reveals. No widget to find.
-            //
-            // It only emits the *reveal* intent; hiding stays in JS (drawer
-            // mouse-leave), so geometry has a single owner. `armed` debounces so we
-            // fire once per edge-touch, not 60×/sec.
+            // --- Global cursor monitor: owns BOTH reveal and hide --------------
+            // A webview can only sense the mouse inside its own window, and its
+            // mouse-leave fires unreliably the instant the cursor crosses the
+            // (transparent, non-focused) window border — that was the finicky
+            // "won't tuck back" bug. So one poll of the REAL OS cursor drives
+            // everything. We classify the cursor into three zones and act only on
+            // the transition INTO a zone (not 60×/sec):
+            //   zone 2 = touching the right screen edge → reveal
+            //   zone 1 = over the open drawer            → stay
+            //   zone 0 = left of the drawer              → hide
+            // Same poll, both directions → rock-solid, no web mouse-leave needed.
             #[cfg(target_os = "macos")]
             {
                 let h = handle.clone();
                 std::thread::spawn(move || {
                     use mouse_position::mouse_position::Mouse;
-                    let mut armed = true;
+                    const DRAWER_W: f64 = 420.0; // matches DRAWERW in index.html
+                    let mut prev_zone: u8 = 1;
                     loop {
                         std::thread::sleep(std::time::Duration::from_millis(16));
                         // Right edge of the primary monitor, in logical points
@@ -161,13 +164,20 @@ pub fn run() {
 
                         if let Mouse::Position { x, .. } = Mouse::get_mouse_position() {
                             let x = x as f64;
-                            if x >= right - 2.0 {
-                                if armed {
-                                    armed = false;
-                                    let _ = h.emit("buddy://reveal", ());
+                            let zone: u8 = if x >= right - 2.0 {
+                                2
+                            } else if x < right - DRAWER_W {
+                                0
+                            } else {
+                                1
+                            };
+                            if zone != prev_zone {
+                                match zone {
+                                    2 => { let _ = h.emit("buddy://reveal", ()); }
+                                    0 => { let _ = h.emit("buddy://hide", ()); }
+                                    _ => {}
                                 }
-                            } else if x < right - 40.0 {
-                                armed = true; // moved away → re-arm for the next touch
+                                prev_zone = zone;
                             }
                         }
                     }
