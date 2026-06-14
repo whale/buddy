@@ -60,13 +60,13 @@
   .divider{ transition:background-color .2s ease; }
   .bd{ transition:border-color .2s ease; }
   /* level 1 — at the limit: every text turns red, backgrounds stay white */
-  #drawer.lvl1 .chrome{ color:var(--red) !important; }
+  .lvl1 .chrome{ color:var(--red) !important; }
   /* level 2 — over the limit: the entire view turns red, text white */
-  #drawer.lvl2 .bcard{ background-color:var(--red) !important; }
-  #drawer.lvl2 .barwhite{ background-color:var(--red) !important; }
-  #drawer.lvl2 .chrome{ color:#fff !important; }
-  #drawer.lvl2 .divider{ background-color:rgba(255,255,255,.30) !important; }
-  #drawer.lvl2 .bd{ border-color:rgba(255,255,255,.30) !important; }
+  .lvl2 .bcard{ background-color:var(--red) !important; }
+  .lvl2 .barwhite{ background-color:var(--red) !important; }
+  .lvl2 .chrome{ color:#fff !important; }
+  .lvl2 .divider{ background-color:rgba(255,255,255,.30) !important; }
+  .lvl2 .bd{ border-color:rgba(255,255,255,.30) !important; }
 
   /* ---- state variables: ONE source of truth for the 3 escalation looks ----
      lvl0 normal · lvl1 red-text · lvl2 red-bg. Both the drawer and the
@@ -75,12 +75,14 @@
     --card:#fff; --ink:#000; --ink-dim:rgba(0,0,0,.45);
     --chrome-ink:rgba(0,0,0,.45); --chrome-hover:rgba(0,0,0,.06);
     --sel-bg:#000; --sel-ink:#fff; --seg-track:rgba(0,0,0,.05); --line:#d9d9d9;
+    --addtxt:rgba(0,0,0,.20); --addtxt-hover:#000;
   }
-  #drawer.lvl1, #morning.lvl1{ --chrome-ink:var(--red); --sel-bg:var(--red); --sel-ink:#fff; }
+  #drawer.lvl1, #morning.lvl1{ --chrome-ink:var(--red); --sel-bg:var(--red); --sel-ink:#fff; --addtxt:rgba(0,0,0,.60); }
   #drawer.lvl2, #morning.lvl2{
     --card:var(--red); --ink:#fff; --ink-dim:rgba(255,255,255,.6);
     --chrome-ink:#fff; --chrome-hover:rgba(0,0,0,.18);
-    --sel-bg:#fff; --sel-ink:var(--red); --seg-track:rgba(255,255,255,.20); --line:rgba(255,255,255,.30); }
+    --sel-bg:#fff; --sel-ink:var(--red); --seg-track:rgba(255,255,255,.20); --line:rgba(255,255,255,.30);
+    --addtxt:rgba(255,255,255,.60); --addtxt-hover:#fff; }
 
   /* Header chrome icons (pin / calendar / settings): identical default, hover and
      selected looks, all driven by the variables above. */
@@ -90,13 +92,13 @@
 
   /* Settings sheet adopts the state colours (red bg + light text) on red-bg. */
   #settings{ background:var(--card); transition:background-color .2s ease; }
-  #drawer.lvl2 #settings [class*="text-black"]{ color:rgba(255,255,255,.92) !important; }
-  #drawer.lvl2 #settings [class*="bg-[#d9d9d9]"]{ background-color:rgba(255,255,255,.30) !important; }
-  #drawer.lvl2 #settings [class*="border-[#d9d9d9]"]{ border-color:rgba(255,255,255,.30) !important; }
-  #drawer.lvl2 #settings .buddy-range::-webkit-slider-thumb{ background:#fff; }
-  #drawer.lvl2 #settings .buddy-range::-webkit-slider-runnable-track{ background:rgba(255,255,255,.30); }
-  #drawer.lvl2 #settings .buddy-range::-moz-range-thumb{ background:#fff; }
-  #drawer.lvl2 #settings .buddy-range::-moz-range-track{ background:rgba(255,255,255,.30); }
+  .lvl2 #settings [class*="text-black"]{ color:rgba(255,255,255,.92) !important; }
+  .lvl2 #settings [class*="bg-[#d9d9d9]"]{ background-color:rgba(255,255,255,.30) !important; }
+  .lvl2 #settings [class*="border-[#d9d9d9]"]{ border-color:rgba(255,255,255,.30) !important; }
+  .lvl2 #settings .buddy-range::-webkit-slider-thumb{ background:#fff; }
+  .lvl2 #settings .buddy-range::-webkit-slider-runnable-track{ background:rgba(255,255,255,.30); }
+  .lvl2 #settings .buddy-range::-moz-range-thumb{ background:#fff; }
+  .lvl2 #settings .buddy-range::-moz-range-track{ background:rgba(255,255,255,.30); }
 
   /* ---- row hover affordance (gated behind real hover — §3.4) ---- */
   .buddy-row{ transition:background-color .1s ease; }
@@ -104,37 +106,33 @@
   @media (hover:hover) and (pointer:fine){
     .row-neutral:hover{ background-color:rgba(0,0,0,.02); }   /* 2% black */
     .row-focused:hover{ background-color:#f7f7f7; }           /* selected: lightens slightly on hover, stays grey (still reads as selected) */
-    #drawer.lvl2 .buddy-row:hover{ background-color:#e85a5f !important; } /* red + ~10% white */
+    .lvl2 .buddy-row:hover{ background-color:#e85a5f !important; } /* red + ~10% white */
   }
-  #drawer.lvl2 .buddy-row{ background-color:var(--red) !important; }
+  .lvl2 .buddy-row{ background-color:var(--red) !important; }
   /* focused/"now" on red: 15% black laid over the red to darken it */
-  #drawer.lvl2 .row-focused{ background-image: linear-gradient(rgba(0,0,0,.15),rgba(0,0,0,.15)) !important; }
+  .lvl2 .row-focused{ background-image: linear-gradient(rgba(0,0,0,.15),rgba(0,0,0,.15)) !important; }
 
   /* ---- keyboard cursor ring: a transient nav cursor, distinct from the
      grey "now"/focused STATE (§3.2). Inset ring so it reads on any bg. ---- */
   /* keyboard cursor = a darker background, no border/box */
   .cursor-ring{ background-color: rgba(0,0,0,.06); }
-  #drawer.lvl2 .cursor-ring{ background-image: linear-gradient(rgba(0,0,0,.10),rgba(0,0,0,.10)); }
+  .lvl2 .cursor-ring{ background-image: linear-gradient(rgba(0,0,0,.10),rgba(0,0,0,.10)); }
 
   /* ---- Add + shade per level, full-opacity on hover ---- */
   .addtxt{ transition:color .1s ease; }
-  #drawer:not(.lvl1):not(.lvl2) .addtxt{ color:rgba(0,0,0,.20); }
-  #drawer.lvl1 .addtxt{ color:rgba(0,0,0,.60); }            /* all-red-text: Add stays 60% black */
-  #drawer.lvl2 .addtxt{ color:rgba(255,255,255,.60); }      /* all-red-bg: Add is 60% white */
+  .addtxt{ color:var(--addtxt); }
   @media (hover:hover) and (pointer:fine){
-    #drawer:not(.lvl1):not(.lvl2) .addrow:hover .addtxt{ color:#000; }
-    #drawer.lvl1 .addrow:hover .addtxt{ color:#000; }
-    #drawer.lvl2 .addrow:hover .addtxt{ color:#fff; }
+    .addrow:hover .addtxt{ color:var(--addtxt-hover); }
   }
 
   /* ---- today badge: reversed so it reads on red ---- */
-  #drawer.lvl2 .todaybadge{ background:rgba(0,0,0,.22) !important; color:rgba(255,255,255,.92) !important; }
+  .lvl2 .todaybadge{ background:rgba(0,0,0,.22) !important; color:rgba(255,255,255,.92) !important; }
 
   /* ---- Last 7 days header: link affordance ---- */
   .barhdr{ transition:background-color .1s ease; }
   @media (hover:hover) and (pointer:fine){
     .barhdr:hover{ background-color:rgba(0,0,0,.02); }
-    #drawer.lvl2 .barhdr:hover{ background-color:rgba(255,255,255,.10); }
+    .lvl2 .barhdr:hover{ background-color:rgba(255,255,255,.10); }
   }
 
   /* ====================================================================
@@ -318,20 +316,32 @@
 <div id="confetti" aria-hidden="true"></div>
 
 <!-- ============ MORNING ============ -->
-<div id="morning" class="fixed inset-0 z-[100] hidden bg-white">
-  <div class="h-full w-full flex flex-col items-center justify-center gap-2 p-2">
-    <div class="w-[400px] flex items-end justify-between p-8">
-      <div class="flex flex-col gap-3 w-[110px]">
-        <div id="mWeekday" class="text-[24px] font-medium tracking-[-0.48px] leading-none">Thursday</div>
-        <div id="mMonth" class="text-[18px] text-black/60 tracking-[-0.36px] leading-none">November</div>
+<div id="morning" class="fixed inset-0 z-[100] hidden" style="background:var(--card)">
+  <div class="h-full w-[400px] mx-auto flex flex-col gap-2 px-2 py-[5vh]">
+    <!-- date header -->
+    <div class="shrink-0 flex items-end justify-between px-8 pt-2 pb-2">
+      <div class="flex flex-col gap-3 w-[120px]">
+        <div id="mWeekday" class="text-[24px] font-medium tracking-[-0.48px] leading-none" style="color:var(--ink)">Thursday</div>
+        <div id="mMonth" class="text-[18px] tracking-[-0.36px] leading-none" style="color:var(--ink-dim)">November</div>
       </div>
-      <div id="mNum" class="text-[62px] font-medium tracking-[-1.24px] leading-none">24</div>
+      <div id="mNum" class="text-[62px] font-medium tracking-[-1.24px] leading-none" style="color:var(--ink)">24</div>
     </div>
-    <div class="w-[400px] bg-white border border-[#d9d9d9] rounded-[24px] overflow-hidden">
-      <div id="morningSlots"></div>
+    <!-- Add undone (toggles to Nevermind) -->
+    <div id="morningUndone" class="shrink-0 hidden rounded-[24px] overflow-hidden border" style="background:var(--card); border-color:var(--line)">
+      <button id="undoneBtn" class="addrow pressable w-full flex items-center justify-between px-8 py-7">
+        <span id="undoneLabel" class="addtxt text-[22px] font-medium tracking-[-0.44px]">Add undone</span>
+        <span id="undoneIcon" class="addtxt grid place-items-center"></span>
+      </button>
     </div>
-    <div id="morningResume" class="w-[400px] hidden"></div>
-    <button id="skipToday" class="mt-4 text-[14px] text-black/35 hover:text-black/60 transition-colors">Skip today</button>
+    <!-- main box: live task list (same behaviours as the drawer) -->
+    <div class="flex-1 min-h-0 rounded-[24px] overflow-hidden border" style="background:var(--card); border-color:var(--line)">
+      <div id="morningList" class="h-full flex flex-col overflow-y-auto no-sb"></div>
+    </div>
+    <!-- footer -->
+    <div class="shrink-0 flex items-center justify-between px-3 pt-2">
+      <button id="skipToday" class="text-[16px] tracking-[-0.32px] transition-colors" style="color:var(--ink-dim)">Skip</button>
+      <button id="buddyBtn" class="pressable rounded-full px-7 py-3 text-[18px] font-medium" style="background:var(--sel-bg); color:var(--sel-ink)">Buddy!</button>
+    </div>
   </div>
 </div>
 
@@ -396,7 +406,7 @@ function syncChrome(){
 
 const $ = s => document.querySelector(s);
 const desktop=$('#desktop'), drawer=$('#drawer'), edgeBar=$('#edgeBar'), edgeDots=$('#edgeDots'),
-      listEl=$('#list'), morning=$('#morning'), morningSlots=$('#morningSlots'),
+      listEl=$('#list'), morning=$('#morning'),
       confettiEl=$('#confetti'),
       settingsSheet=$('#settings'), gearBtn=$('#gearBtn'), settingsClose=$('#settingsClose'),
       celebrateSlider=$('#celebrateSlider'),
@@ -679,7 +689,8 @@ function removeBySrc(key){ state.items=state.items.filter(x=>x.src!==key); rende
 
 /* --------------------------- editing ----------------------------- */
 function startEdit(id){
-  const el=todayWrap.querySelector(`[data-tid="${id}"]`);
+  const wrap = morningUp() ? morningList : todayWrap;   // edit the visible copy
+  const el=wrap.querySelector(`[data-tid="${id}"]`);
   if(!el) return;
   editingId=id;
   el.setAttribute('contenteditable','true'); el.classList.remove('empty'); el.focus();
@@ -688,16 +699,19 @@ function startEdit(id){
 }
 
 /* ------------------- fit: distribute height, shrink font/padding --- */
-function fitToday(){
-  if(!todayWrap.isConnected) return;
-  const rows=todayWrap.querySelectorAll('.buddy-row');
+function fitWrap(wrap){
+  if(!wrap || !wrap.isConnected) return;
+  const rows=wrap.querySelectorAll('.buddy-row');
   if(!rows.length) return;
-  const h=todayWrap.clientHeight / rows.length;
-  todayWrap.style.setProperty('--fs',   clamp(13, h*0.30, 24).toFixed(1)+'px');
-  todayWrap.style.setProperty('--vpad', Math.round(clamp(10, h*0.22, 30))+'px');
-  todayWrap.style.setProperty('--px',   Math.round(clamp(20, h*0.32, 32))+'px');
+  const h=wrap.clientHeight / rows.length;
+  wrap.style.setProperty('--fs',   clamp(13, h*0.30, 24).toFixed(1)+'px');
+  wrap.style.setProperty('--vpad', Math.round(clamp(10, h*0.22, 30))+'px');
+  wrap.style.setProperty('--px',   Math.round(clamp(20, h*0.32, 32))+'px');
 }
+const morningList=$('#morningList');
+function fitToday(){ fitWrap(todayWrap); if(morningUp()) fitWrap(morningList); }
 new ResizeObserver(()=>requestAnimationFrame(fitToday)).observe(todayWrap);
+if(morningList) new ResizeObserver(()=>requestAnimationFrame(()=>fitWrap(morningList))).observe(morningList);
 window.addEventListener('resize',()=>requestAnimationFrame(fitToday));
 
 /* --------------------------- rendering --------------------------- */
@@ -706,8 +720,11 @@ function render(){
   const lvl=warnLevel();
   drawer.classList.toggle('lvl1', lvl===1);
   drawer.classList.toggle('lvl2', lvl===2);
+  morning.classList.toggle('lvl1', lvl===1);        // morning carries the same escalation theming
+  morning.classList.toggle('lvl2', lvl===2);
   edgeBar.classList.toggle('edge-alert', lvl>=1);   // escalation shows on the hidden tab too
   syncChrome();                                     // pin / calendar / settings selected states
+  if(morningUp()){ renderToday(morningList, 3); renderMorningUndone(); requestAnimationFrame(()=>fitWrap(morningList)); }
 
   renderToday(); renderHist(); renderHistHeader();
   listEl.innerHTML='';
@@ -735,9 +752,12 @@ function render(){
 }
 function warnLevel(){ const n=state.items.length; return n>=HARD_CAP?2 : n===SOFT_CAP?1 : 0; }
 
-function renderToday(){
+// Renders the live task list into `wrap`. minRows pads empty "Add" rows so the
+// morning shows ≥3 slots; the drawer passes 1 (just one Add row). Same rows,
+// same behaviours (cycle/edit/sleep/remove, escalation colours) in both places.
+function renderToday(wrap=todayWrap, minRows=1){
   const lvl=warnLevel();
-  todayWrap.innerHTML='';
+  wrap.innerHTML='';
   const rowStyle='flex:1 1 auto; min-height:0; padding:var(--vpad) var(--px);';
   state.items.forEach((it,idx)=>{
     const row=document.createElement('div');
@@ -775,19 +795,22 @@ function renderToday(){
     acts.appendChild(mkBtn(XLG,'Remove',()=>removeItem(it.id)));
     row.appendChild(acts);
 
-    todayWrap.appendChild(row);
+    wrap.appendChild(row);
   });
 
-  if(state.items.length<HARD_CAP){
-    // Add hidden entirely at the hard cap (full red) — there is no 7th
+  // Empty "Add" rows — one in the drawer, padded to minRows in the morning. None
+  // at the hard cap (full red — there is no 7th).
+  const addRows = state.items.length<HARD_CAP ? Math.max(1, minRows-state.items.length) : 0;
+  for(let k=0;k<addRows;k++){
+    const first = state.items.length===0 && k===0;
     const add=document.createElement('div');
     add.style.cssText=rowStyle;
-    const addRing = (kbActive && cursor===state.items.length) ? ' cursor-ring' : '';
-    add.className='buddy-row addrow pressable row-neutral bd'+addRing+' group relative flex items-center cursor-pointer overflow-hidden '+(state.items.length?'border-t border-[#d9d9d9]':'');
+    const addRing = (k===0 && kbActive && cursor===state.items.length) ? ' cursor-ring' : '';
+    add.className='buddy-row addrow pressable row-neutral bd'+addRing+' group relative flex items-center cursor-pointer overflow-hidden '+(first?'':'border-t border-[#d9d9d9]');
     add.innerHTML='<div class="addtxt flex gap-[18px] font-medium tracking-[-0.48px]" style="font-size:var(--fs)"><span>Add</span><span>+</span></div>';
     add.addEventListener('mousedown',e=>e.preventDefault());   // keep the click from stealing focus
     add.addEventListener('click',()=>{ addAndEdit(); });
-    todayWrap.appendChild(add);
+    wrap.appendChild(add);
   }
 }
 
@@ -907,70 +930,46 @@ function renderDots(){
 }
 
 /* --------------------------- morning ----------------------------- */
-function buildMorning(){
-  morningSlots.innerHTML='';
-  morningSlots.classList.add('stagger');   // 3 slots stagger in (§3.4)
-  for(let i=0;i<3;i++){
-    const wrap=document.createElement('div');
-    wrap.className='relative flex items-center h-[129px] px-8 '+(i>0?'border-t border-[#d9d9d9]':'');
-    const inp=document.createElement('input');
-    inp.type='text'; inp.dataset.i=i; inp.placeholder=' ';
-    inp.className='peer w-full bg-transparent text-[24px] font-medium tracking-[-0.48px] text-black outline-none';
-    const plus=document.createElement('div');
-    plus.className='pointer-events-none absolute left-8 flex gap-[18px] text-[24px] font-medium tracking-[-0.48px] text-black/20 peer-[:not(:placeholder-shown)]:opacity-0';
-    plus.innerHTML='<span>Add</span><span>+</span>';
-    inp.addEventListener('keydown',e=>{
-      if(e.key==='Enter'){ e.preventDefault(); const next=morningSlots.querySelector(`input[data-i="${i+1}"]`); if(next) next.focus(); else startDay(); }
-      if(e.key==='Escape'){ skip(); }
-    });
-    wrap.append(inp,plus); morningSlots.appendChild(wrap);
-  }
-}
-function morningVals(){ return [...morningSlots.querySelectorAll('input')].map(i=>i.value.trim()); }
-// "Resume N tasks from yesterday": shown under the slots when the most recent
-// day left unfinished tasks. Tapping it opens the history panel to pull forward.
+// Count of yesterday's unfinished tasks (drives the "Add undone" card).
 function yesterdayUnfinished(){
   if((state.settings.historyDays||0)<=0) return 0;
   const rec=state.history[0];
   return rec ? rec.items.filter(it=>!it.done).length : 0;
 }
-function renderMorningResume(){
-  const box=$('#morningResume'); if(!box) return;
-  box.innerHTML='';
-  const cnt=yesterdayUnfinished();
-  if(cnt<=0){ box.classList.add('hidden'); return; }
+// "Add undone" ⇄ "Nevermind": adds yesterday's unfinished tasks into the live
+// box (then offers to undo). undoneIds tracks exactly what we added.
+let undoneAdded=false, undoneIds=[];
+function renderMorningUndone(){
+  const box=$('#morningUndone'); if(!box) return;
+  if(yesterdayUnfinished()<=0){ box.classList.add('hidden'); return; }
   box.classList.remove('hidden');
-  const btn=document.createElement('button');
-  btn.className='pressable w-full flex items-center gap-[14px] px-8 py-4 text-[16px] text-black/45 hover:text-black/70 transition-colors tracking-[-0.32px]';
-  btn.innerHTML='<span class="grid place-items-center size-[18px] shrink-0">'+PLUS+'</span><span>Resume '+cnt+' task'+(cnt>1?'s':'')+' from yesterday</span>';
-  btn.addEventListener('mousedown',e=>e.preventDefault());
-  btn.addEventListener('click',e=>{ e.stopPropagation(); resumeFromYesterday(); });
-  box.appendChild(btn);
+  $('#undoneLabel').textContent = undoneAdded ? 'Nevermind' : 'Add undone';
+  $('#undoneIcon').innerHTML = undoneAdded ? UNDO : PLUS;
 }
-function showMorning(){ T('showMorning'); buildMorning(); renderMorningResume(); morning.classList.remove('hidden'); nativeFit('full'); setTimeout(()=>morningSlots.querySelector('input')?.focus(),60); }
-// Commit whatever's typed (appending to any woken/slept tasks already present).
-function commitMorning(vals){
-  vals.forEach(t=>{ if(state.items.length<HARD_CAP) state.items.push({id:nid(),text:t,state:'neutral'}); });
-  state.today.morningDone=true; save(); morning.classList.add('hidden');
+function toggleUndone(){
+  if(!undoneAdded){
+    const rec=state.history[0];
+    undoneIds=[];
+    (rec?rec.items.filter(it=>!it.done):[]).forEach(it=>{
+      if(state.items.length<HARD_CAP){ const nit={id:nid(),text:it.text,state:'neutral'}; state.items.push(nit); undoneIds.push(nit.id); }
+    });
+    undoneAdded=true;
+  } else {
+    state.items=state.items.filter(x=>!undoneIds.includes(x.id));
+    undoneIds=[]; undoneAdded=false;
+  }
+  save(); render();
 }
-function startDay(){
-  const vals=morningVals().filter(Boolean);
-  if(!vals.length && state.items.length===0) return;   // nothing typed and nothing carried → stay on morning
-  T('startDay'); commitMorning(vals); render();
-  openDrawer(); setTimeout(()=>{ if(!state.pinned) closeDrawer(); },1500);
-}
-// Resume: commit any typed slots, then drop yesterday's UNFINISHED tasks straight
-// into today (up to the cap), and head into the day.
-function resumeFromYesterday(){
-  T('resume'); commitMorning(morningVals().filter(Boolean));
-  const rec=state.history[0];
-  const undone = rec ? rec.items.filter(it=>!it.done) : [];
-  undone.forEach(it=>{ if(state.items.length<HARD_CAP) state.items.push({id:nid(),text:it.text,state:'neutral'}); });
-  render(); openDrawer(); setTimeout(()=>{ if(!state.pinned) closeDrawer(); },1500);
+function showMorning(){ T('showMorning'); undoneAdded=false; undoneIds=[]; morning.classList.remove('hidden'); render(); nativeFit('full'); }
+// "Buddy!" — the plan is already live in state.items; commit the day, then show
+// the drawer for ~2s before it tucks to the edge.
+function buddyStart(){
+  T('buddy'); state.today.morningDone=true; save(); morning.classList.add('hidden'); render();
+  openDrawer(); setTimeout(()=>{ if(!state.pinned) closeDrawer(); }, 2000);
 }
 function skip(){ T('skip'); state.today.morningDone=true; save(); morning.classList.add('hidden'); render(); settleNative(); }
-// (removed) background-click dismissed the morning on stray activation clicks (acceptFirstMouse).
-// Dismiss only via the explicit "Skip today" link or by starting the day (Enter on the last slot).
+$('#undoneBtn')?.addEventListener('click', e=>{ e.stopPropagation(); toggleUndone(); });
+$('#buddyBtn')?.addEventListener('click', e=>{ e.stopPropagation(); buddyStart(); });
 $('#devMorning').addEventListener('click',showMorning);
 
 /* ====================================================================
