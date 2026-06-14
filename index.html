@@ -748,7 +748,7 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
   // Drawer rows fill the panel height; morning rows are a fixed comfortable
   // height so the box stays compact and scrolls only when it gets long.
   const rowStyle = morning
-    ? 'flex:0 0 auto; min-height:86px; padding:0 var(--px);'
+    ? 'flex:0 0 auto; min-height:120px; padding:0 var(--px);'   // tall enough for the row's edit/sleep/remove icon stack
     : 'flex:1 1 auto; min-height:0; padding:var(--vpad) var(--px);';
   state.items.forEach((it,idx)=>{
     const row=document.createElement('div');
