@@ -128,13 +128,6 @@
   /* ---- today badge: reversed so it reads on red ---- */
   .lvl2 .todaybadge{ background:rgba(0,0,0,.22) !important; color:rgba(255,255,255,.92) !important; }
 
-  /* ---- Last 7 days header: link affordance ---- */
-  .barhdr{ transition:background-color .1s ease; }
-  @media (hover:hover) and (pointer:fine){
-    .barhdr:hover{ background-color:rgba(0,0,0,.02); }
-    .lvl2 .barhdr:hover{ background-color:rgba(255,255,255,.10); }
-  }
-
   /* ====================================================================
      ANIMATIONS (§3.4) — transitions for interruptible UI, keyframes only
      for the one-shot confetti. Only transform/opacity (GPU). <300ms.
@@ -168,9 +161,6 @@
   .stagger > *:nth-child(5){ animation-delay:200ms; }
   .stagger > *:nth-child(6){ animation-delay:250ms; }
   .stagger > *:nth-child(7){ animation-delay:300ms; }
-
-  /* chevron rotate on Last-7 open */
-  .chev{ transition: transform .2s var(--ease-out); }
 
   /* ---- Confetti: 100 party-parrots, one-shot keyframe burst (§3.3) ---- */
   #confetti{ position:fixed; inset:0; z-index:200; pointer-events:none; overflow:hidden; }
@@ -420,11 +410,9 @@ const todayWrap=document.createElement('div'); todayWrap.className='flex-1 min-h
 const histBody =document.createElement('div');
 const last7    =document.createElement('div');
 
-const PENCIL='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
 const XICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 const PLUS='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
 const UNDO='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';
-const CHEV='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
 // Row action icons — smaller glyphs inside the unchanged 30px circle targets.
 // Edit (pencil) + Sleep (calendar→arrow) shrink to 14px; Remove uses the larger
 // lucide X at 20px.
@@ -455,10 +443,9 @@ function setDate(){
 /* ====================================================================
    PERSISTENCE  — localStorage, debounced + force-flush
    ==================================================================== */
-const STORAGE_KEY='buddy.v1', BAK_KEY='buddy.v1.bak', HISTORY_DAYS=30;
+const STORAGE_KEY='buddy.v1', BAK_KEY='buddy.v1.bak';
 let memoryStore=null;            // fallback when localStorage is unavailable
 let saveTimer=null;
-let bootedFresh=false;           // true when load() found no/invalid stored blob
 
 function lsGet(k){ try{ return localStorage.getItem(k); }catch{ return memoryStore?memoryStore[k]:null; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch{ (memoryStore||(memoryStore={}))[k]=v; } }
@@ -505,10 +492,8 @@ function freshBoot(){
   state.deferred=[];
   state.settings={ celebrate:100, historyDays:7 };
   state.pinned=false;
-  bootedFresh=true;
 }
 function load(){
-  bootedFresh=false;
   const raw=lsGet(STORAGE_KEY);
   if(raw==null){ freshBoot(); return; }
   let blob;
@@ -583,9 +568,6 @@ function seedDemoHistory(){
     });
   });
 }
-
-/* `src` now links to a STABLE history item id (persisted). */
-const isAdded = key => state.items.some(it=>it.src===key);
 
 /* Build the last N calendar days (excluding today) for the panel,
    matching history records by date. N comes from settings.historyDays. */
@@ -689,7 +671,6 @@ function setNow(it){
   render();
 }
 function removeItem(id){ state.items=state.items.filter(x=>x.id!==id); render(); }
-function removeBySrc(key){ state.items=state.items.filter(x=>x.src!==key); render(); }
 
 /* --------------------------- editing ----------------------------- */
 function startEdit(id){
