@@ -35,7 +35,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": "app",
+    "targets": ["app", "dmg"],
+    "category": "public.app-category.productivity",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -43,7 +44,8 @@
       "icons/icon.png"
     ],
     "macOS": {
-      "minimumSystemVersion": "13.0"
+      "minimumSystemVersion": "13.0",
+      "entitlements": "entitlements.plist"
     }
   }
 }

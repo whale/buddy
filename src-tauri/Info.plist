@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Menu-bar utility: no Dock icon. -->
+  <key>LSUIElement</key>
+  <true/>
+  <!-- Shown in the permission prompt when Buddy opens a bug-report email in Apple Mail. -->
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Buddy uses this to open a pre-filled bug-report email in Apple Mail.</string>
+</dict>
+</plist>

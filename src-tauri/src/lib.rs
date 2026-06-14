@@ -64,11 +64,11 @@ fn percent_encode(s: &str) -> String {
         .collect()
 }
 
-/// Report a bug: the webview hands us a PNG screenshot of ONLY Buddy's UI (data
-/// URL) plus a logs string. The screenshot goes on the CLIPBOARD (so the user
-/// pastes it with ⌘V) and the logs go in the email BODY, then we open a
-/// pre-addressed draft in the default mail client. Works with any mail app — no
-/// Mail-only scripting, no automation permission.
+/// Report a bug: the webview hands us a PNG screenshot of ONLY Buddy's UI plus a
+/// logs string. Preferred path — write a zip and open an Apple Mail draft with it
+/// ALREADY ATTACHED (no paste). If Mail scripting isn't available (other mail app
+/// or permission denied), fall back to: screenshot on the clipboard + logs in the
+/// body of a default-client draft (paste with ⌘V).
 #[tauri::command]
 fn report_bug(screenshot: String, logs: String) -> Result<(), String> {
     use base64::{engine::general_purpose, Engine as _};
@@ -81,21 +81,32 @@ fn report_bug(screenshot: String, logs: String) -> Result<(), String> {
     let dir = std::env::temp_dir().join(format!("buddy-bug-{ts}"));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
-    // Write the screenshot, then copy it to the clipboard so the user can paste it.
     let png = dir.join("buddy-screenshot.png");
+    let txt = dir.join("buddy-logs.txt");
     let b64 = screenshot.split(',').last().unwrap_or("");
     if let Ok(bytes) = general_purpose::STANDARD.decode(b64) {
-        if let Ok(mut f) = std::fs::File::create(&png) {
-            let _ = f.write_all(&bytes);
-            let set_clip = format!(
-                "set the clipboard to (read (POSIX file \"{}\") as \u{00AB}class PNGf\u{00BB})",
-                png.to_string_lossy()
-            );
-            let _ = std::process::Command::new("osascript").arg("-e").arg(&set_clip).status();
-        }
+        if let Ok(mut f) = std::fs::File::create(&png) { let _ = f.write_all(&bytes); }
     }
+    let _ = std::fs::write(&txt, logs.as_bytes());
 
-    // Open a mail draft with the diagnostics in the body (keep it short for the URL).
+    // Preferred: Apple Mail draft with the zip attached, nothing to paste.
+    let zip = dir.join("buddy-bug-report.zip");
+    let _ = std::process::Command::new("zip").arg("-j").arg(&zip).arg(&png).arg(&txt).output();
+    let mail_script = format!(
+        "tell application \"Mail\"\nset m to make new outgoing message with properties {{subject:\"Buddy bug report\", visible:true}}\ntell m\nmake new to recipient at end of to recipients with properties {{address:\"hi+buddy@whale.fyi\"}}\nset content to \"Describe what happened here — the screenshot and logs are attached. Thank you!\"\ndelay 0.5\nmake new attachment with properties {{file name:POSIX file \"{}\"}} at after the last paragraph\nend tell\nactivate\nend tell",
+        zip.to_string_lossy()
+    );
+    let mail_ok = std::process::Command::new("osascript")
+        .arg("-e").arg(&mail_script)
+        .status().map(|s| s.success()).unwrap_or(false);
+    if mail_ok { return Ok(()); }
+
+    // Fallback (other mail apps): screenshot on the clipboard, logs in the body.
+    let set_clip = format!(
+        "set the clipboard to (read (POSIX file \"{}\") as \u{00AB}class PNGf\u{00BB})",
+        png.to_string_lossy()
+    );
+    let _ = std::process::Command::new("osascript").arg("-e").arg(&set_clip).status();
     let diag: String = logs.chars().take(2500).collect();
     let body = format!(
         "Describe what happened:\n\n\n\n— Paste your screenshot here (\u{2318}V) —\n\n\n--- diagnostics ---\n{diag}"
