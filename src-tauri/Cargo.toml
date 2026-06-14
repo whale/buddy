@@ -27,6 +27,11 @@ tauri-plugin-global-shortcut = "2"
 # trigger (a webview can only see the mouse inside its own window).
 mouse_position = "0.1"
 
+# "Reserve space when pinned": Accessibility-API window nudging (macOS only).
+[target."cfg(target_os = \"macos\")".dependencies]
+core-foundation = "0.10"
+core-graphics = "0.24"
+
 [profile.release]
 codegen-units = 1
 lto = true

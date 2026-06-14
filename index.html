@@ -292,6 +292,15 @@
           <input id="historyDaysSlider" type="range" min="0" max="14" value="7" class="w-full buddy-range cursor-pointer">
           <div class="flex items-center justify-between mt-2 text-[13px] text-black/35 tracking-[-0.26px]"><span>No days</span><span>14 days</span></div>
         </div>
+        <div class="border-b border-[#d9d9d9] px-8 py-5">
+          <button id="reserveBtn" role="switch" aria-checked="false" class="pressable w-full flex items-center justify-between">
+            <span class="text-[18px] text-black/60 tracking-[-0.36px] text-left">Reserve space when pinned</span>
+            <span id="reserveTrack" class="relative shrink-0 w-[44px] h-[26px] rounded-full bg-black/15 transition-colors">
+              <span id="reserveKnob" class="absolute top-[3px] left-[3px] size-[20px] rounded-full bg-white shadow transition-transform"></span>
+            </span>
+          </button>
+          <p class="mt-2 text-[13px] text-black/35 tracking-[-0.26px] leading-snug">Pushes other windows out of Buddy's column. Asks for Accessibility permission the first time.</p>
+        </div>
         <button id="exportBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Export my done tasks</button>
         <button id="restartBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Restart Buddy <span class="text-black/30">· dev</span></button>
         <button id="quitBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] hover:bg-black/[0.02]">Quit Buddy</button>
@@ -357,7 +366,7 @@ let state = {
   today:   { date:null, items:[], morningDone:false },
   history: [],
   deferred:[],                       // tasks "slept till tomorrow": {id,text,wake:"YYYY-MM-DD"}
-  settings:{ celebrate:100, historyDays:7 },   // historyDays 0(off)..14
+  settings:{ celebrate:100, historyDays:7, reserveSpace:false },   // historyDays 0(off)..14; reserveSpace pushes other windows out when pinned
   pinned:  false,
   histOpen:false,
   histTab:'future',                  // 'future' (pushed-forward) | 'past' (completed)
@@ -457,7 +466,7 @@ function serialize(){
     today:   { date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null})) },
     history: state.history,
     deferred:(state.deferred||[]).map(d=>({id:d.id,text:d.text,wake:d.wake})),
-    settings:{ celebrate: Math.max(0,Math.min(100, state.settings.celebrate??100)), historyDays: clamp(0, state.settings.historyDays??7, 14) },
+    settings:{ celebrate: Math.max(0,Math.min(100, state.settings.celebrate??100)), historyDays: clamp(0, state.settings.historyDays??7, 14), reserveSpace: !!state.settings.reserveSpace },
     pinned:  !!state.pinned,
   });
 }
@@ -490,7 +499,7 @@ function freshBoot(){
   state.today={ date:localDate(), items:[], morningDone:false };
   state.history=[];
   state.deferred=[];
-  state.settings={ celebrate:100, historyDays:7 };
+  state.settings={ celebrate:100, historyDays:7, reserveSpace:false };
   state.pinned=false;
 }
 function load(){
@@ -511,7 +520,8 @@ function load(){
   state.history = Array.isArray(blob.history) ? blob.history.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items)) : [];
   state.deferred= Array.isArray(blob.deferred) ? blob.deferred.filter(d=>d&&typeof d.text==='string').map(d=>({id:d.id||nid(),text:String(d.text),wake:String(d.wake||'')})) : [];
   state.settings= { celebrate: (blob.settings && typeof blob.settings.celebrate==='number') ? Math.max(0,Math.min(100,blob.settings.celebrate)) : (blob.settings && blob.settings.confetti===false ? 0 : 100),
-                    historyDays: (blob.settings && Number.isFinite(blob.settings.historyDays)) ? clamp(0, blob.settings.historyDays|0, 14) : 7 };
+                    historyDays: (blob.settings && Number.isFinite(blob.settings.historyDays)) ? clamp(0, blob.settings.historyDays|0, 14) : 7,
+                    reserveSpace: !!(blob.settings && blob.settings.reserveSpace) };
   state.pinned  = !!blob.pinned;
 }
 
@@ -639,14 +649,14 @@ pinBtn.addEventListener('click', e=>{
   state.pinned=!state.pinned;
   if(state.pinned){ openDrawer(); desktop.style.width='calc(100vw - 416px)'; }
   else { desktop.style.width='100vw'; closeDrawer(); }
-  syncChrome(); save();
+  syncChrome(); applyReserve(); save();
 });
 
 /* Reflect pinned state in the UI (used at boot to restore a pinned session). */
 function applyPinnedUI(){
   if(state.pinned){ desktop.style.width='calc(100vw - 416px)'; openDrawer(); }
   else { desktop.style.width='100vw'; }
-  syncChrome();
+  syncChrome(); applyReserve();
 }
 
 /* --------------------------- state cycle ------------------------- */
@@ -1078,12 +1088,25 @@ function syncHistoryDays(){
   if(s) s.value=String(n);
   if(head) head.textContent = n<=0 ? 'No days of history' : (n+' day'+(n>1?'s':'')+' of history');
 }
+// Reserve-space toggle: reflect the switch, and tell the native side whether to
+// push other windows out (only when pinned AND the toggle is on).
+function syncReserve(){
+  const on=!!state.settings.reserveSpace, t=$('#reserveTrack'), k=$('#reserveKnob'), b=$('#reserveBtn');
+  if(!b) return;
+  b.setAttribute('aria-checked', on?'true':'false');
+  t.style.backgroundColor = on ? '#000' : 'rgba(0,0,0,.15)';
+  k.style.transform = on ? 'translateX(18px)' : 'translateX(0)';
+}
+function applyReserve(){
+  if(!NATIVE) return;
+  try{ window.__TAURI__.core.invoke('set_reserve', { on: !!(state.pinned && state.settings.reserveSpace) }); }catch(_){}
+}
 function openSettings(){
   settingsOpen=true;
   settingsSheet.classList.remove('closing');
   settingsSheet.setAttribute('data-open','true');
   settingsSheet.setAttribute('aria-hidden','false');
-  syncCelebrate(); syncHistoryDays(); syncChrome();
+  syncCelebrate(); syncHistoryDays(); syncReserve(); syncChrome();
 }
 function closeSettings(){
   settingsOpen=false;
@@ -1105,6 +1128,11 @@ $('#historyDaysSlider')?.addEventListener('input', ()=>{
   state.settings.historyDays = clamp(0, +$('#historyDaysSlider').value, 14);
   if(state.settings.historyDays<=0) state.histOpen=false;
   syncHistoryDays(); updateHistBtn(); save(); render();
+});
+// Reserve-space toggle
+$('#reserveBtn')?.addEventListener('click', e=>{ e.stopPropagation();
+  state.settings.reserveSpace = !state.settings.reserveSpace;
+  syncReserve(); save(); applyReserve();
 });
 // Calendar icon: toggles the history panel. If Settings is open, switch to it.
 $('#histBtn')?.addEventListener('click', e=>{ e.stopPropagation();

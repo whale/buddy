@@ -134,6 +134,177 @@ end tell"#
     Ok(())
 }
 
+// ============ "Reserve space when pinned" — Accessibility window nudging ============
+// When ON, a background loop watches other apps' on-screen windows and pushes any
+// that intrude into Buddy's right-edge column back out (shrink if wide, else slide
+// left). It's an approximation (can't touch fullscreen/non-resizable windows) and
+// needs the user's Accessibility permission. Off by default.
+#[cfg(target_os = "macos")]
+mod reserve {
+    use core_foundation::base::{CFRelease, CFTypeRef, TCFType};
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
+    use core_foundation::string::{CFString, CFStringRef};
+    use core_foundation::array::CFArrayRef;
+    use core_graphics::geometry::{CGPoint, CGRect, CGSize};
+    use std::os::raw::c_void;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    static ACTIVE: AtomicBool = AtomicBool::new(false);
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    const STRIP: f64 = 452.0; // Buddy's pinned width, in points
+    const MIN_W: f64 = 240.0; // never shrink a window narrower than this
+    const AX_POINT: u32 = 1; // kAXValueCGPointType
+    const AX_SIZE: u32 = 2; // kAXValueCGSizeType
+    const CF_SINT32: i32 = 3; // kCFNumberSInt32Type
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXUIElementCreateApplication(pid: i32) -> CFTypeRef;
+        fn AXUIElementCopyAttributeValue(el: CFTypeRef, attr: CFStringRef, out: *mut CFTypeRef) -> i32;
+        fn AXUIElementSetAttributeValue(el: CFTypeRef, attr: CFStringRef, val: CFTypeRef) -> i32;
+        fn AXValueCreate(ty: u32, ptr: *const c_void) -> CFTypeRef;
+        fn AXValueGetValue(val: CFTypeRef, ty: u32, ptr: *mut c_void) -> bool;
+        fn AXIsProcessTrusted() -> bool;
+        fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> bool;
+    }
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGMainDisplayID() -> u32;
+        fn CGDisplayBounds(display: u32) -> CGRect;
+        fn CGWindowListCopyWindowInfo(option: u32, rel: u32) -> CFArrayRef;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFArrayGetCount(a: CFArrayRef) -> isize;
+        fn CFArrayGetValueAtIndex(a: CFArrayRef, idx: isize) -> *const c_void;
+        fn CFDictionaryGetValue(d: *const c_void, key: *const c_void) -> *const c_void;
+        fn CFNumberGetValue(n: *const c_void, ty: i32, value: *mut c_void) -> bool;
+    }
+
+    fn cfs(v: &str) -> CFString { CFString::new(v) }
+
+    fn prompt_trust() -> bool {
+        unsafe {
+            let dict = CFDictionary::from_CFType_pairs(&[(
+                cfs("AXTrustedCheckOptionPrompt").as_CFType(),
+                CFBoolean::true_value().as_CFType(),
+            )]);
+            AXIsProcessTrustedWithOptions(dict.as_concrete_TypeRef())
+        }
+    }
+
+    unsafe fn copy_attr(el: CFTypeRef, attr: &str) -> Option<CFTypeRef> {
+        let mut out: CFTypeRef = std::ptr::null();
+        if AXUIElementCopyAttributeValue(el, cfs(attr).as_concrete_TypeRef(), &mut out) == 0 && !out.is_null() {
+            Some(out)
+        } else {
+            None
+        }
+    }
+    unsafe fn ax_point(win: CFTypeRef, attr: &str) -> Option<CGPoint> {
+        let v = copy_attr(win, attr)?;
+        let mut p = CGPoint { x: 0.0, y: 0.0 };
+        let ok = AXValueGetValue(v, AX_POINT, &mut p as *mut _ as *mut c_void);
+        CFRelease(v);
+        if ok { Some(p) } else { None }
+    }
+    unsafe fn ax_size(win: CFTypeRef, attr: &str) -> Option<CGSize> {
+        let v = copy_attr(win, attr)?;
+        let mut sz = CGSize { width: 0.0, height: 0.0 };
+        let ok = AXValueGetValue(v, AX_SIZE, &mut sz as *mut _ as *mut c_void);
+        CFRelease(v);
+        if ok { Some(sz) } else { None }
+    }
+    unsafe fn ax_set(win: CFTypeRef, attr: &str, ty: u32, ptr: *const c_void) {
+        let v = AXValueCreate(ty, ptr);
+        if !v.is_null() {
+            AXUIElementSetAttributeValue(win, cfs(attr).as_concrete_TypeRef(), v);
+            CFRelease(v);
+        }
+    }
+
+    unsafe fn owner_pids(own: i32) -> Vec<i32> {
+        let arr = CGWindowListCopyWindowInfo(1 /* onScreenOnly */, 0);
+        if arr.is_null() { return vec![]; }
+        let key = cfs("kCGWindowOwnerPID");
+        let keyref = key.as_concrete_TypeRef() as *const c_void;
+        let mut pids: Vec<i32> = vec![];
+        let n = CFArrayGetCount(arr);
+        for i in 0..n {
+            let dict = CFArrayGetValueAtIndex(arr, i);
+            if dict.is_null() { continue; }
+            let val = CFDictionaryGetValue(dict, keyref);
+            if val.is_null() { continue; }
+            let mut pid: i32 = 0;
+            if CFNumberGetValue(val, CF_SINT32, &mut pid as *mut _ as *mut c_void)
+                && pid > 0 && pid != own && !pids.contains(&pid)
+            {
+                pids.push(pid);
+            }
+        }
+        CFRelease(arr as CFTypeRef);
+        pids
+    }
+
+    unsafe fn nudge(strip_left: f64) {
+        let own = std::process::id() as i32;
+        for pid in owner_pids(own) {
+            let app = AXUIElementCreateApplication(pid);
+            if app.is_null() { continue; }
+            if let Some(wins) = copy_attr(app, "AXWindows") {
+                let warr = wins as CFArrayRef;
+                let wc = CFArrayGetCount(warr);
+                for j in 0..wc {
+                    let win = CFArrayGetValueAtIndex(warr, j) as CFTypeRef;
+                    if win.is_null() { continue; }
+                    if let (Some(pos), Some(sz)) = (ax_point(win, "AXPosition"), ax_size(win, "AXSize")) {
+                        if pos.x + sz.width > strip_left + 1.0 {
+                            if pos.x < strip_left - MIN_W {
+                                let ns = CGSize { width: strip_left - pos.x, height: sz.height };
+                                ax_set(win, "AXSize", AX_SIZE, &ns as *const _ as *const c_void);
+                            } else {
+                                let np = CGPoint { x: (strip_left - sz.width).max(0.0), y: pos.y };
+                                ax_set(win, "AXPosition", AX_POINT, &np as *const _ as *const c_void);
+                            }
+                        }
+                    }
+                }
+                CFRelease(wins);
+            }
+            CFRelease(app);
+        }
+    }
+
+    pub fn set(on: bool) {
+        ACTIVE.store(on, Ordering::SeqCst);
+        if on {
+            prompt_trust(); // shows the one-time Accessibility prompt if not yet granted
+            if !STARTED.swap(true, Ordering::SeqCst) {
+                std::thread::spawn(|| loop {
+                    std::thread::sleep(Duration::from_millis(700));
+                    if !ACTIVE.load(Ordering::SeqCst) { continue; }
+                    unsafe {
+                        if !AXIsProcessTrusted() { continue; }
+                        let b = CGDisplayBounds(CGMainDisplayID());
+                        nudge(b.origin.x + b.size.width - STRIP);
+                    }
+                });
+            }
+        }
+    }
+}
+
+/// Toggle "reserve space when pinned" (JS calls this when pin/setting changes).
+#[tauri::command]
+fn set_reserve(on: bool) {
+    #[cfg(target_os = "macos")]
+    reserve::set(on);
+    #[cfg(not(target_os = "macos"))]
+    let _ = on;
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
@@ -156,7 +327,7 @@ pub fn run() {
     }
 
     builder
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, report_bug])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, report_bug, set_reserve])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).
