@@ -48,6 +48,14 @@
       0 1px 4px rgba(0,0,0,.04),
       0 6px 16px rgba(0,0,0,.06),
       0 14px 34px rgba(0,0,0,.09); }
+
+  /* Settings sliders: thin grey track + a solid black draggable thumb. */
+  .buddy-range{ -webkit-appearance:none; appearance:none; height:18px; background:transparent; }
+  .buddy-range::-webkit-slider-runnable-track{ height:6px; border-radius:9999px; background:rgba(0,0,0,.15); }
+  .buddy-range::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:18px; height:18px; margin-top:-6px; border-radius:9999px; background:#000; cursor:pointer; }
+  .buddy-range::-moz-range-track{ height:6px; border-radius:9999px; background:rgba(0,0,0,.15); }
+  .buddy-range::-moz-range-thumb{ width:18px; height:18px; border:none; border-radius:9999px; background:#000; cursor:pointer; }
+  .buddy-range:disabled{ opacity:.5; }
   .chrome{ transition:color .2s ease; }
   .divider{ transition:background-color .2s ease; }
   .bd{ transition:border-color .2s ease; }
@@ -220,7 +228,7 @@
     <div class="flex items-center justify-between px-8 py-6">
       <div class="flex items-center gap-2">
         <button id="pinBtn" title="Pin open"
-          class="pressable size-[39px] grid place-items-center rounded-full transition-colors bg-black/5 text-black/60 hover:bg-black/10 hover:text-black">
+          class="pressable size-[39px] grid place-items-center rounded-full transition-colors text-black/45 hover:bg-black/5 hover:text-black/80">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
         </button>
         <button id="gearBtn" title="Settings"
@@ -248,7 +256,7 @@
 
     <!-- Settings sheet: slides up over the list (same language as history) -->
     <div id="settings" class="sheet absolute inset-0 z-20 bg-white flex flex-col" data-open="false" aria-hidden="true">
-      <div class="flex items-center justify-between px-8 py-6">
+      <div class="flex items-center justify-between pl-8 pr-5 py-6">
         <span class="text-[18px] font-medium text-black/80 tracking-[-0.36px]">Settings</span>
         <button id="settingsClose" title="Close"
           class="pressable size-[39px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 hover:text-black/80 transition-colors">
@@ -261,7 +269,7 @@
           <div class="text-[18px] text-black/60 tracking-[-0.36px] mb-3">Celebrate completed tasks</div>
           <div class="flex items-center gap-3">
             <span class="text-[20px] leading-none">👍🏼</span>
-            <input id="celebrateSlider" type="range" min="0" max="100" value="100" class="flex-1 h-1.5 rounded-full appearance-none bg-black/15 accent-black cursor-pointer">
+            <input id="celebrateSlider" type="range" min="0" max="100" value="100" class="flex-1 buddy-range cursor-pointer">
             <span class="text-[20px] leading-none">🦜</span>
           </div>
           <p id="confettiOverride" class="mt-3 text-[13px] text-black/40 leading-snug hidden">Off while your system is set to reduce motion.</p>
@@ -269,9 +277,9 @@
         <div class="border-b border-[#d9d9d9] px-8 py-5">
           <div class="flex items-center justify-between mb-3">
             <span class="text-[18px] text-black/60 tracking-[-0.36px]">Days of history</span>
-            <span id="historyDaysLabel" class="text-[15px] text-black/40 tracking-[-0.3px]">7 days</span>
+            <span id="historyDaysLabel" class="text-[18px] text-black/60 tracking-[-0.36px]">7 days</span>
           </div>
-          <input id="historyDaysSlider" type="range" min="0" max="14" value="7" class="w-full h-1.5 rounded-full appearance-none bg-black/15 accent-black cursor-pointer">
+          <input id="historyDaysSlider" type="range" min="0" max="14" value="7" class="w-full buddy-range cursor-pointer">
         </div>
         <button id="exportBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Export my data</button>
         <button id="expungeBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-[#e5484d] tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Erase all data…</button>
@@ -326,6 +334,7 @@ let state = {
   settings:{ celebrate:100, historyDays:7 },   // historyDays 0(off)..14
   pinned:  false,
   histOpen:false,
+  histTab:'future',                  // 'future' (pushed-forward) | 'past' (completed)
 };
 /* `state.items` is an alias for `state.today.items` so all existing
    render/cycle/edit code keeps working unchanged. */
@@ -355,7 +364,7 @@ function localDate(d=new Date()){
   return `${y}-${m}-${day}`;
 }
 
-const PIN_OFF='bg-black/5 text-black/60 hover:bg-black/10 hover:text-black';
+const PIN_OFF='text-black/45 hover:bg-black/5 hover:text-black/80';
 const PIN_ON ='bg-black text-white hover:bg-[#d9d9d9] hover:text-black';
 const PIN_BASE='size-[39px] grid place-items-center rounded-full transition-colors ';
 
@@ -376,21 +385,20 @@ const XICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke=
 const PLUS='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
 const UNDO='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';
 const CHEV='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
-// "Sleep till tomorrow" — a calendar with a forward (right) arrow inside.
-const SLEEP='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/><path d="M8 2v4"/><path d="M16 2v4"/><path d="M9.5 16h5"/><path d="m12.5 14 2 2-2 2"/></svg>';
-// History button: a disc (same stroke weight as the gear) with the day-count centered.
-function histDiscSVG(n){
-  const fs = String(n).length>1 ? 9 : 11;
-  return '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+
-    '<circle cx="12" cy="12" r="9"/>'+
-    '<text x="12" y="12" text-anchor="middle" dominant-baseline="central" font-size="'+fs+'" font-weight="600" fill="currentColor" stroke="none" style="font-family:var(--font)">'+n+'</text></svg>';
-}
+// Row action icons — smaller glyphs inside the unchanged 30px circle targets.
+// Edit (pencil) + Sleep (calendar→arrow) shrink to 14px; Remove uses the larger
+// lucide X at 20px.
+const EDIT_SM='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
+const SLEEP_SM='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/><path d="M8 2v4"/><path d="M16 2v4"/><path d="M9.5 16h5"/><path d="m12.5 14 2 2-2 2"/></svg>';
+const XLG='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+// History button: the lucide calendar icon (replaces the day-count disc).
+const CAL='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>';
 function updateHistBtn(){
   const btn=$('#histBtn'); if(!btn) return;
   const n=state.settings.historyDays||0;
   btn.style.display = n>0 ? '' : 'none';
-  btn.innerHTML = histDiscSVG(n);
-  btn.title = 'Last '+n+' days';
+  btn.innerHTML = CAL;
+  btn.title = 'History';
 }
 
 /* ----------------------------- date ------------------------------ */
@@ -724,16 +732,16 @@ function renderToday(){
     const onRed=lvl===2;
     // Row actions stacked VERTICALLY on the right: edit, sleep-till-tomorrow, remove.
     const acts=document.createElement('div');
-    acts.className='absolute right-1.5 top-1/2 -translate-y-1/2 flex flex-col items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity';
+    acts.className='absolute right-1.5 top-1/2 -translate-y-1/2 flex flex-col items-center gap-[5px] opacity-0 group-hover:opacity-100 transition-opacity';
     const mkBtn=(icon,title,fn)=>{ const b=document.createElement('button'); b.title=title;
       b.className='size-[30px] grid place-items-center rounded-full '+(onRed?'text-white hover:bg-white/20':'text-black/40 hover:bg-black/5');
       b.innerHTML=icon;
       b.addEventListener('mousedown',e=>e.preventDefault());
       b.addEventListener('click',e=>{ e.stopPropagation(); fn(); });
       return b; };
-    acts.appendChild(mkBtn(PENCIL,'Edit',()=>startEdit(it.id)));
-    acts.appendChild(mkBtn(SLEEP,'Sleep till tomorrow',()=>sleepItem(it.id)));
-    acts.appendChild(mkBtn(XICON,'Remove',()=>removeItem(it.id)));
+    acts.appendChild(mkBtn(EDIT_SM,'Edit',()=>startEdit(it.id)));
+    acts.appendChild(mkBtn(SLEEP_SM,'Sleep till tomorrow',()=>sleepItem(it.id)));
+    acts.appendChild(mkBtn(XLG,'Remove',()=>removeItem(it.id)));
     row.appendChild(acts);
 
     todayWrap.appendChild(row);
@@ -755,56 +763,90 @@ function renderToday(){
 function renderHist(){
   histBody.innerHTML='';
   histBody.className='stagger';     // day-groups stagger in on open (§3.4)
-  const canAdd = state.items.length < HARD_CAP;
-  lastNDays(state.settings.historyDays||7).forEach((day,di)=>{
+  if(state.histTab==='future') renderFuture(); else renderPast();
+}
+function histEmpty(msg){
+  const e=document.createElement('div');
+  e.className='px-8 py-10 text-[16px] text-black/35 tracking-[-0.32px]';
+  e.textContent=msg; return e;
+}
+// PAST: tasks COMPLETED in the recent days (undone items aren't shown — they
+// move forward instead). Grouped by day; only days with completions appear.
+function renderPast(){
+  const days=lastNDays(state.settings.historyDays||7)
+    .map(d=>({ name:d.name, items:d.items.filter(it=>it.done) }))
+    .filter(d=>d.items.length);
+  if(!days.length){ histBody.appendChild(histEmpty('No completed tasks yet.')); return; }
+  days.forEach((day,di)=>{
     const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
     const h=document.createElement('div');
-    h.className='chrome text-[18px] font-medium tracking-[-0.36px] '+(day.items.length?'text-black mb-1':'text-black/35');
+    h.className='chrome text-[18px] font-medium tracking-[-0.36px] text-black mb-1';
     h.textContent=day.name; grp.appendChild(h);
     day.items.forEach(it=>{
-      const added=isAdded(it.id);
-      const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5 pr-9';
-      if(added){
-        const badge=document.createElement('span');
-        badge.className='todaybadge shrink-0 mr-2 inline-flex items-center rounded bg-black/[0.07] px-1.5 py-[2px] text-[10px] font-semibold uppercase tracking-wide text-black/50 leading-none';
-        badge.textContent='today';
-        r.appendChild(badge);
-      }
+      const r=document.createElement('div'); r.className='hrow relative flex items-center py-1.5';
       const t=document.createElement('div');
-      t.className='chrome text-[18px] tracking-[-0.36px] '+(it.done?'line-through text-black/35':'text-black/70');
+      t.className='chrome text-[18px] tracking-[-0.36px] line-through text-black/35';
       t.textContent=it.text; r.appendChild(t);
-      if(!it.done){
-        const aff=document.createElement('button');
-        aff.addEventListener('mousedown',e=>e.preventDefault());   // don't let a focus shift eat the first click
-        const base='chrome absolute right-0 top-1/2 -translate-y-1/2 grid place-items-center opacity-0 group-hover/h:opacity-100 transition-opacity ';
-        if(added){ aff.className=base+'size-[32px] rounded-full text-black/50 hover:bg-black/5'; aff.innerHTML=UNDO; aff.title='Undo — remove from today';
-          aff.addEventListener('click',()=>removeBySrc(it.id)); }
-        else if(canAdd){ aff.className=base+'size-[32px] rounded-full text-black/50 hover:bg-black/5'; aff.innerHTML=PLUS; aff.title='Add to today';
-          aff.addEventListener('click',()=>{ state.items.push({id:nid(),text:it.text,state:'neutral',src:it.id}); render(); }); }
-        else { aff.className=base+'text-[18px] leading-none'; aff.textContent='😈'; aff.title="You've got too many today"; aff.style.cursor='not-allowed'; }
-        r.appendChild(aff);
-      }
       grp.appendChild(r);
     });
     histBody.appendChild(grp);
   });
 }
+// FUTURE: tasks pushed forward (slept), grouped by the day they'll return.
+// Each can be deleted (×) so it WON'T come back.
+function renderFuture(){
+  if(!state.deferred || !state.deferred.length){ histBody.appendChild(histEmpty('Nothing pushed forward.')); return; }
+  const groups={};
+  state.deferred.forEach(d=>{ (groups[d.wake]||(groups[d.wake]=[])).push(d); });
+  const tmr=tomorrowDate();
+  Object.keys(groups).sort().forEach((date,di)=>{
+    const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
+    const h=document.createElement('div');
+    h.className='chrome text-[18px] font-medium tracking-[-0.36px] text-black mb-1';
+    h.textContent = date===tmr ? 'Tomorrow' : DOW[new Date(date+'T00:00:00').getDay()];
+    grp.appendChild(h);
+    groups[date].forEach(d=>{
+      const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5 pr-9';
+      const t=document.createElement('div');
+      t.className='chrome text-[18px] tracking-[-0.36px] text-black/70';
+      t.textContent=d.text; r.appendChild(t);
+      const del=document.createElement('button'); del.title='Delete — won’t come back';
+      del.className='chrome absolute right-0 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 opacity-0 group-hover/h:opacity-100 transition-opacity';
+      del.innerHTML=XICON;
+      del.addEventListener('mousedown',e=>e.preventDefault());
+      del.addEventListener('click',()=>deleteDeferred(d.id));
+      r.appendChild(del);
+      grp.appendChild(r);
+    });
+    histBody.appendChild(grp);
+  });
+}
+function deleteDeferred(id){ state.deferred=state.deferred.filter(d=>d.id!==id); render(); }
 
-// Sticky header shown at the top of the OPEN history panel: a "Last N days"
-// title + a chevron to collapse back to today (the disc icon also toggles it).
+// Sticky header of the OPEN history panel: a [ Future | Past ] segmented toggle.
 function renderHistHeader(){
   last7.innerHTML='';
-  const n=state.settings.historyDays||7;
-  const header=document.createElement('div');
-  header.className='flex items-center justify-between px-8 py-6';
-  header.innerHTML='<span class="chrome text-[18px] text-black/60 tracking-[-0.36px]">Last '+n+' days</span>';
+  const wrap=document.createElement('div');
+  wrap.className='flex items-center justify-between px-8 py-5';
+  const seg=document.createElement('div');
+  seg.className='flex items-center gap-1 p-1 rounded-full bg-black/[0.05]';
+  const mkSeg=(tab,label)=>{
+    const b=document.createElement('button');
+    const active=state.histTab===tab;
+    b.className='chrome px-4 py-1.5 rounded-full text-[15px] tracking-[-0.3px] transition-colors '+
+      (active?'bg-white text-black shadow-sm':'text-black/45 hover:text-black/70');
+    b.textContent=label;
+    b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; render(); } });
+    return b;
+  };
+  seg.append(mkSeg('future','Future'), mkSeg('past','Past'));
   const close=document.createElement('button'); close.title='Close';
   close.className='chrome pressable size-[32px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 hover:text-black/80';
   close.innerHTML=CHEV;
   close.addEventListener('click',()=>{ state.histOpen=false; render(); });
-  header.appendChild(close);
+  wrap.append(seg, close);
   const divider=document.createElement('div'); divider.className='divider h-px w-full bg-[#d9d9d9]';
-  last7.append(header, divider);
+  last7.append(wrap, divider);
 }
 
 function renderDots(){
@@ -870,10 +912,14 @@ function startDay(){
   T('startDay'); commitMorning(vals); render();
   openDrawer(); setTimeout(()=>{ if(!state.pinned) closeDrawer(); },1500);
 }
-// Resume: commit any typed slots, then open the history panel to pull forward.
+// Resume: commit any typed slots, then drop yesterday's UNFINISHED tasks straight
+// into today (up to the cap), and head into the day.
 function resumeFromYesterday(){
   T('resume'); commitMorning(morningVals().filter(Boolean));
-  state.histOpen=true; render(); openDrawer();
+  const rec=state.history[0];
+  const undone = rec ? rec.items.filter(it=>!it.done) : [];
+  undone.forEach(it=>{ if(state.items.length<HARD_CAP) state.items.push({id:nid(),text:it.text,state:'neutral'}); });
+  render(); openDrawer(); setTimeout(()=>{ if(!state.pinned) closeDrawer(); },1500);
 }
 function skip(){ T('skip'); state.today.morningDone=true; save(); morning.classList.add('hidden'); render(); settleNative(); }
 // (removed) background-click dismissed the morning on stray activation clicks (acceptFirstMouse).
