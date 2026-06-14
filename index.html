@@ -77,7 +77,7 @@
     --sel-bg:#000; --sel-ink:#fff; --seg-track:rgba(0,0,0,.05); --line:#d9d9d9;
     --addtxt:rgba(0,0,0,.20); --addtxt-hover:#000;
   }
-  #drawer.lvl1, #morning.lvl1{ --chrome-ink:var(--red); --sel-bg:var(--red); --sel-ink:#fff; --addtxt:rgba(0,0,0,.60); }
+  #drawer.lvl1, #morning.lvl1{ --chrome-ink:var(--red); --sel-bg:var(--red); --sel-ink:#fff; }
   #drawer.lvl2, #morning.lvl2{
     --card:var(--red); --ink:#fff; --ink-dim:rgba(255,255,255,.6);
     --chrome-ink:#fff; --chrome-hover:rgba(0,0,0,.18);
@@ -279,10 +279,10 @@
 
     <!-- Settings sheet: slides up over the list (same language as history) -->
     <div id="settings" class="sheet absolute inset-0 z-20 bg-white flex flex-col" data-open="false" aria-hidden="true">
-      <div class="flex items-center justify-between pl-8 pr-5 py-6">
+      <div class="flex items-center justify-between pl-8 pr-5 py-5">
         <span class="text-[18px] font-medium text-black/80 tracking-[-0.36px]">Settings</span>
         <button id="settingsClose" title="Close"
-          class="pressable size-[39px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 hover:text-black/80 transition-colors">
+          class="pressable chrome-btn size-[36px] grid place-items-center rounded-full">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
         </button>
       </div>
@@ -317,7 +317,7 @@
 
 <!-- ============ MORNING ============ -->
 <div id="morning" class="fixed inset-0 z-[100] hidden" style="background:var(--card)">
-  <div class="h-full w-[400px] mx-auto flex flex-col gap-2 px-2 py-[5vh]">
+  <div class="h-full w-[400px] mx-auto flex flex-col justify-center gap-2 px-2 py-[4vh]">
     <!-- date header -->
     <div class="shrink-0 flex items-end justify-between px-8 pt-2 pb-2">
       <div class="flex flex-col gap-3 w-[120px]">
@@ -333,9 +333,9 @@
         <span id="undoneIcon" class="addtxt grid place-items-center"></span>
       </button>
     </div>
-    <!-- main box: live task list (same behaviours as the drawer) -->
-    <div class="flex-1 min-h-0 rounded-[24px] overflow-hidden border" style="background:var(--card); border-color:var(--line)">
-      <div id="morningList" class="h-full flex flex-col overflow-y-auto no-sb"></div>
+    <!-- main box: live task list — sizes to content, caps + scrolls when tall -->
+    <div class="shrink min-h-0 max-h-[70vh] rounded-[24px] overflow-hidden border" style="background:var(--card); border-color:var(--line)">
+      <div id="morningList" class="max-h-[70vh] flex flex-col overflow-y-auto no-sb"></div>
     </div>
     <!-- footer -->
     <div class="shrink-0 flex items-center justify-between px-3 pt-2">
@@ -346,6 +346,10 @@
 </div>
 
 <script>
+/* Capture recent console output into a ring buffer for bug reports. */
+const LOGBUF=[];
+['log','warn','error'].forEach(k=>{ const orig=console[k].bind(console);
+  console[k]=(...a)=>{ try{ LOGBUF.push('['+k+'] '+a.map(x=>{ try{return typeof x==='string'?x:JSON.stringify(x);}catch(_){return String(x);} }).join(' ')); if(LOGBUF.length>200) LOGBUF.shift(); }catch(_){ } orig(...a); }; });
 /* ====================================================================
    STATE MODEL
    --------------------------------------------------------------------
@@ -709,9 +713,11 @@ function fitWrap(wrap){
   wrap.style.setProperty('--px',   Math.round(clamp(20, h*0.32, 32))+'px');
 }
 const morningList=$('#morningList');
-function fitToday(){ fitWrap(todayWrap); if(morningUp()) fitWrap(morningList); }
+// Morning rows are a FIXED comfortable height (the box sizes to its content and
+// stays compact when there are few tasks) — unlike the drawer, which fills height.
+if(morningList){ morningList.style.setProperty('--fs','22px'); morningList.style.setProperty('--vpad','30px'); morningList.style.setProperty('--px','32px'); }
+function fitToday(){ fitWrap(todayWrap); }
 new ResizeObserver(()=>requestAnimationFrame(fitToday)).observe(todayWrap);
-if(morningList) new ResizeObserver(()=>requestAnimationFrame(()=>fitWrap(morningList))).observe(morningList);
 window.addEventListener('resize',()=>requestAnimationFrame(fitToday));
 
 /* --------------------------- rendering --------------------------- */
@@ -724,7 +730,7 @@ function render(){
   morning.classList.toggle('lvl2', lvl===2);
   edgeBar.classList.toggle('edge-alert', lvl>=1);   // escalation shows on the hidden tab too
   syncChrome();                                     // pin / calendar / settings selected states
-  if(morningUp()){ renderToday(morningList, 3); renderMorningUndone(); requestAnimationFrame(()=>fitWrap(morningList)); }
+  if(morningUp()){ renderToday(morningList, 3, true); renderMorningUndone(); }
 
   renderToday(); renderHist(); renderHistHeader();
   listEl.innerHTML='';
@@ -755,10 +761,14 @@ function warnLevel(){ const n=state.items.length; return n>=HARD_CAP?2 : n===SOF
 // Renders the live task list into `wrap`. minRows pads empty "Add" rows so the
 // morning shows ≥3 slots; the drawer passes 1 (just one Add row). Same rows,
 // same behaviours (cycle/edit/sleep/remove, escalation colours) in both places.
-function renderToday(wrap=todayWrap, minRows=1){
+function renderToday(wrap=todayWrap, minRows=1, morning=false){
   const lvl=warnLevel();
   wrap.innerHTML='';
-  const rowStyle='flex:1 1 auto; min-height:0; padding:var(--vpad) var(--px);';
+  // Drawer rows fill the panel height; morning rows are a fixed comfortable
+  // height so the box stays compact and scrolls only when it gets long.
+  const rowStyle = morning
+    ? 'flex:0 0 auto; min-height:86px; padding:0 var(--px);'
+    : 'flex:1 1 auto; min-height:0; padding:var(--vpad) var(--px);';
   state.items.forEach((it,idx)=>{
     const row=document.createElement('div');
     row.style.cssText=rowStyle;
@@ -894,7 +904,7 @@ function deleteDeferred(id){ state.deferred=state.deferred.filter(d=>d.id!==id);
 function renderHistHeader(){
   last7.innerHTML='';
   const wrap=document.createElement('div');
-  wrap.className='flex items-center justify-between px-8 py-5';
+  wrap.className='flex items-center justify-between pl-8 pr-5 py-5';   // match the Settings header exactly
   const seg=document.createElement('div');
   seg.className='flex items-center gap-1 p-1 rounded-full';
   seg.style.background='var(--seg-track)';
@@ -911,7 +921,7 @@ function renderHistHeader(){
   seg.append(mkSeg('future','Future'), mkSeg('past','Past'));
   // ✕ close — same affordance as Settings.
   const close=document.createElement('button'); close.title='Close';
-  close.className='chrome-btn pressable size-[32px] grid place-items-center rounded-full';
+  close.className='chrome-btn pressable size-[36px] grid place-items-center rounded-full';
   close.innerHTML=XICON;
   close.addEventListener('click',()=>{ state.histOpen=false; render(); });
   wrap.append(seg, close);
@@ -1310,6 +1320,41 @@ if(NATIVE){
   ev.listen('buddy://hide',   ()=>{ if(morningUp()||state.pinned) return; clearTimeout(openTimer); closeDrawer(); });
   ev.listen('buddy://toggle', ()=>{ if(morningUp()) return;
     drawer.classList.contains('translate-x-full') ? openDrawer() : closeDrawer(); });
+  ev.listen('buddy://report-bug', ()=> reportBug());
+}
+/* ---- Report a bug (tray menu) -------------------------------------------------
+   Capture a screenshot of ONLY Buddy's own UI (the webview DOM via html2canvas —
+   never the rest of the screen), plus recent logs, then hand both to Rust which
+   saves them and opens a pre-addressed mail draft. ---- */
+function ensureHtml2canvas(){
+  if(window.html2canvas) return Promise.resolve();
+  return new Promise((res,rej)=>{ const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    s.onload=res; s.onerror=rej; document.head.appendChild(s); });
+}
+function buildBugLogs(){
+  return [
+    'Buddy bug report',
+    'version: '+($('#appVersion')?.textContent||'?'),
+    'when: '+new Date().toISOString(),
+    'platform: '+navigator.userAgent,
+    // counts only — never the task text (the screenshot is the visual report)
+    'today: '+state.items.length+' tasks (focused '+state.items.filter(i=>i.state==='focused').length+', done '+state.items.filter(i=>i.state==='done').length+')',
+    'deferred: '+(state.deferred?.length||0)+' · historyDays: '+state.settings.historyDays+' · pinned: '+state.pinned+' · morningDone: '+state.today.morningDone,
+    '',
+    '--- recent logs ---',
+    ...LOGBUF.slice(-120)
+  ].join('\n');
+}
+async function reportBug(){
+  try{
+    await ensureHtml2canvas();
+    const target = morningUp() ? $('#morning') : $('#drawer');
+    const canvas = await window.html2canvas(target, { backgroundColor:null, scale:2, logging:false });
+    const png = canvas.toDataURL('image/png');
+    if(NATIVE) window.__TAURI__.core.invoke('report_bug', { screenshot:png, logs:buildBugLogs() });
+    return png;   // (web prototype: returned for inspection)
+  }catch(e){ console.warn('[buddy] report bug failed', e); }
 }
 const SLIVER=2;    // hidden width — just enough to keep the webview alive (no widget)
 const DRAWERW=452; // revealed/pinned window width — wider than the 416 drawer so the card's soft left (screen-facing) drop shadow has room to fade instead of being clipped by the window edge

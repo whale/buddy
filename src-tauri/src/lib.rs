@@ -54,6 +54,51 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Percent-encode for a mailto: URL (unreserved chars pass through).
+fn percent_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{:02X}", b),
+        })
+        .collect()
+}
+
+/// Report a bug: the webview hands us a PNG screenshot of ONLY Buddy's UI (data
+/// URL) plus a logs string. We write both to a temp folder, reveal it in Finder,
+/// and open a pre-addressed mail draft so the user can attach + send.
+#[tauri::command]
+fn report_bug(screenshot: String, logs: String) -> Result<(), String> {
+    use base64::{engine::general_purpose, Engine as _};
+    use std::io::Write;
+
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!("buddy-bug-{ts}"));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let b64 = screenshot.split(',').last().unwrap_or("");
+    if let Ok(bytes) = general_purpose::STANDARD.decode(b64) {
+        let mut f = std::fs::File::create(dir.join("buddy-screenshot.png")).map_err(|e| e.to_string())?;
+        f.write_all(&bytes).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(dir.join("buddy-logs.txt"), logs.as_bytes()).map_err(|e| e.to_string())?;
+
+    // Reveal the folder so the user can drag the two files into the email.
+    let _ = std::process::Command::new("open").arg(&dir).spawn();
+
+    let body = "Describe what happened:\n\n\n\n---\nYour screenshot + logs are in the folder that just opened — please drag both files into this email before sending. Thank you!";
+    let mailto = format!(
+        "mailto:hi+buddy@whale.fyi?subject={}&body={}",
+        percent_encode("Buddy bug report"),
+        percent_encode(body)
+    );
+    let _ = std::process::Command::new("open").arg(mailto).spawn();
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
@@ -76,7 +121,7 @@ pub fn run() {
     }
 
     builder
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, report_bug])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).
@@ -84,9 +129,10 @@ pub fn run() {
 
             // --- Menu-bar (tray) icon + menu ---
             let toggle_item = MenuItemBuilder::with_id("toggle", "Show / Hide Buddy").build(app)?;
+            let report_item = MenuItemBuilder::with_id("report", "Report a bug…").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Quit Buddy").build(app)?;
             let menu = MenuBuilder::new(app)
-                .items(&[&toggle_item])
+                .items(&[&toggle_item, &report_item])
                 .separator()
                 .items(&[&quit_item])
                 .build()?;
@@ -104,6 +150,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "toggle" => toggle_drawer(app),
+                    "report" => { let _ = app.emit("buddy://report-bug", ()); }
                     "quit" => app.exit(0),
                     _ => {}
                 })
