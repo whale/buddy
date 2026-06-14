@@ -12,3 +12,6 @@ skills-lock.json
 src-tauri/target/
 src-tauri/gen/
 pnpm-lock.yaml
+
+# Apple signing / notarization creds — never commit
+.env
