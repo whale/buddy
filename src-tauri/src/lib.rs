@@ -92,7 +92,8 @@ pub fn run() {
                 .build()?;
 
             let _tray = TrayIconBuilder::with_id("buddy-tray")
-                .icon(app.default_window_icon().cloned().expect("no window icon"))
+                // lucide "sticker" glyph (black on transparent → templated by macOS)
+                .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")).expect("tray icon"))
                 // `icon_as_template(true)` makes macOS tint a black-on-transparent
                 // icon for light/dark menu bars. Our placeholder tray PNG is built
                 // that way. If you swap in a colored icon, set this to false.
