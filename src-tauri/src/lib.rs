@@ -194,6 +194,11 @@ pub fn run() {
                                 if edge_ticks >= REVEAL_DWELL && !edge_fired {
                                     edge_fired = true;
                                     let _ = h.emit("buddy://reveal", ());
+                                    // Bring Buddy to the front so its icons get hover/clicks
+                                    // even when it reveals over another app.
+                                    if let Some(w) = h.get_webview_window("main") {
+                                        let _ = w.set_focus();
+                                    }
                                 }
                             } else if x < right - DRAWER_W {
                                 // Off the drawer entirely → count toward hide.

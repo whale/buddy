@@ -67,11 +67,6 @@
   #drawer.lvl2 .chrome{ color:#fff !important; }
   #drawer.lvl2 .divider{ background-color:rgba(255,255,255,.30) !important; }
   #drawer.lvl2 .bd{ border-color:rgba(255,255,255,.30) !important; }
-  #drawer.lvl2 #pinBtn{ background-color:rgba(255,255,255,.20) !important; color:#fff !important; }
-  /* pin hover while red: solid white chip, red icon */
-  @media (hover:hover) and (pointer:fine){
-    #drawer.lvl2 #pinBtn:hover{ background-color:#fff !important; color:var(--red) !important; }
-  }
 
   /* ---- row hover affordance (gated behind real hover — §3.4) ---- */
   .buddy-row{ transition:background-color .1s ease; }
@@ -228,15 +223,15 @@
     <div class="flex items-center justify-between px-8 py-6">
       <div class="flex items-center gap-2">
         <button id="pinBtn" title="Pin open"
-          class="pressable size-[39px] grid place-items-center rounded-full transition-colors text-black/45 hover:bg-black/5 hover:text-black/80">
+          class="pressable chrome size-[39px] grid place-items-center rounded-full transition-colors text-black/45 hover:bg-black/5 hover:text-black/80">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
         </button>
+        <button id="histBtn" title="History"
+          class="pressable chrome size-[39px] grid place-items-center rounded-full transition-colors text-black/45 hover:bg-black/5 hover:text-black/80"></button>
         <button id="gearBtn" title="Settings"
           class="pressable chrome size-[39px] grid place-items-center rounded-full transition-colors text-black/45 hover:bg-black/5 hover:text-black/80">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
-        <button id="histBtn" title="Last 7 days"
-          class="pressable chrome size-[39px] grid place-items-center rounded-full transition-colors text-black/45 hover:bg-black/5 hover:text-black/80"></button>
       </div>
       <span class="chrome text-[18px] text-black/60 tracking-[-0.36px]">Buddy</span>
     </div>
@@ -275,14 +270,11 @@
           <p id="confettiOverride" class="mt-3 text-[13px] text-black/40 leading-snug hidden">Off while your system is set to reduce motion.</p>
         </div>
         <div class="border-b border-[#d9d9d9] px-8 py-5">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-[18px] text-black/60 tracking-[-0.36px]">Days of history</span>
-            <span id="historyDaysLabel" class="text-[18px] text-black/60 tracking-[-0.36px]">7 days</span>
-          </div>
+          <div id="historyDaysHeading" class="text-[18px] text-black/60 tracking-[-0.36px] mb-3">7 days of history</div>
           <input id="historyDaysSlider" type="range" min="0" max="14" value="7" class="w-full buddy-range cursor-pointer">
+          <div class="flex items-center justify-between mt-2 text-[13px] text-black/35 tracking-[-0.26px]"><span>No days</span><span>14 days</span></div>
         </div>
-        <button id="exportBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Export my data</button>
-        <button id="expungeBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-[#e5484d] tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Erase all data…</button>
+        <button id="exportBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Export my done tasks</button>
         <button id="restartBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Restart Buddy <span class="text-black/30">· dev</span></button>
         <button id="quitBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] hover:bg-black/[0.02]">Quit Buddy</button>
       </div>
@@ -364,9 +356,16 @@ function localDate(d=new Date()){
   return `${y}-${m}-${day}`;
 }
 
-const PIN_OFF='text-black/45 hover:bg-black/5 hover:text-black/80';
-const PIN_ON ='bg-black text-white hover:bg-[#d9d9d9] hover:text-black';
-const PIN_BASE='size-[39px] grid place-items-center rounded-full transition-colors ';
+// Shared chrome-icon states for pin / calendar / settings — identical default,
+// hover, and selected (active) looks across all three.
+const ICON_BASE='pressable chrome size-[39px] grid place-items-center rounded-full transition-colors ';
+const ICON_OFF ='text-black/45 hover:bg-black/5 hover:text-black/80';
+const ICON_ON  ='bg-black text-white hover:bg-black/80';
+function syncChrome(){
+  pinBtn.className =ICON_BASE+(state.pinned  ?ICON_ON:ICON_OFF);
+  histBtn.className=ICON_BASE+(state.histOpen?ICON_ON:ICON_OFF);
+  gearBtn.className=ICON_BASE+(settingsOpen  ?ICON_ON:ICON_OFF);
+}
 
 const $ = s => document.querySelector(s);
 const desktop=$('#desktop'), drawer=$('#drawer'), edgeBar=$('#edgeBar'), edgeDots=$('#edgeDots'),
@@ -586,7 +585,10 @@ let openTimer=null, closeTimer=null, shrinkTimer=null;
 // Both guard against the morning: while the full-screen planner is up, nothing
 // may resize the window back to a drawer/sliver (that was the "Restart" bug —
 // the morning would flash then get clipped to a sliver by a stray mouse-leave).
-function openDrawer(){ if(morningUp()) return; if(NATIVE){ clearTimeout(shrinkTimer); nativeFit('drawer'); } drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }
+function openDrawer(){ if(morningUp()) return; if(NATIVE){ clearTimeout(shrinkTimer); nativeFit('drawer'); nativeFocus(); } drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }
+// Bring Buddy to the front + make it key so its icons receive hover/clicks even
+// when it reveals over another app (otherwise the foreground app keeps the mouse).
+function nativeFocus(){ if(!NATIVE) return; try{ window.__TAURI__.window.getCurrentWindow().setFocus(); }catch(_){} }
 function closeDrawer(){ if(state.pinned || morningUp()) return; drawer.classList.add('translate-x-full');
   // Let the drawer finish sliding out (.24s) BEFORE shrinking the window to the
   // sliver — otherwise the 2px window clips the panel and it vanishes abruptly.
@@ -608,19 +610,20 @@ addEventListener('mousemove', e=>{
   } else if(e.clientX < innerWidth-40){ edgeArmed=true; }
 });
 
-const pinBtn=$('#pinBtn');
+const pinBtn=$('#pinBtn'), histBtn=$('#histBtn');
 pinBtn.addEventListener('click', e=>{
   e.stopPropagation();
   state.pinned=!state.pinned;
-  if(state.pinned){ openDrawer(); desktop.style.width='calc(100vw - 416px)'; pinBtn.className=PIN_BASE+PIN_ON; }
-  else { desktop.style.width='100vw'; pinBtn.className=PIN_BASE+PIN_OFF; closeDrawer(); }
-  save();
+  if(state.pinned){ openDrawer(); desktop.style.width='calc(100vw - 416px)'; }
+  else { desktop.style.width='100vw'; closeDrawer(); }
+  syncChrome(); save();
 });
 
 /* Reflect pinned state in the UI (used at boot to restore a pinned session). */
 function applyPinnedUI(){
-  if(state.pinned){ desktop.style.width='calc(100vw - 416px)'; pinBtn.className=PIN_BASE+PIN_ON; openDrawer(); }
-  else { desktop.style.width='100vw'; pinBtn.className=PIN_BASE+PIN_OFF; }
+  if(state.pinned){ desktop.style.width='calc(100vw - 416px)'; openDrawer(); }
+  else { desktop.style.width='100vw'; }
+  syncChrome();
 }
 
 /* --------------------------- state cycle ------------------------- */
@@ -677,6 +680,7 @@ function render(){
   drawer.classList.toggle('lvl1', lvl===1);
   drawer.classList.toggle('lvl2', lvl===2);
   edgeBar.classList.toggle('edge-alert', lvl>=1);   // escalation shows on the hidden tab too
+  syncChrome();                                     // pin / calendar / settings selected states
 
   renderToday(); renderHist(); renderHistHeader();
   listEl.innerHTML='';
@@ -806,10 +810,22 @@ function renderFuture(){
     h.textContent = date===tmr ? 'Tomorrow' : DOW[new Date(date+'T00:00:00').getDay()];
     grp.appendChild(h);
     groups[date].forEach(d=>{
-      const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5 pr-9';
+      const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5 pr-[72px]';
       const t=document.createElement('div');
-      t.className='chrome text-[18px] tracking-[-0.36px] text-black/70';
+      t.className='chrome text-[18px] tracking-[-0.36px] text-black/70 outline-none';
       t.textContent=d.text; r.appendChild(t);
+      // Edit (left): inline-edit the future task's text.
+      const edit=document.createElement('button'); edit.title='Edit';
+      edit.className='chrome absolute right-9 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 opacity-0 group-hover/h:opacity-100 transition-opacity';
+      edit.innerHTML=EDIT_SM;
+      edit.addEventListener('mousedown',e=>e.preventDefault());
+      edit.addEventListener('click',()=>{ t.contentEditable='true'; t.focus();
+        const sel=getSelection(); sel.selectAllChildren(t); sel.collapseToEnd(); });
+      t.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); t.blur(); } });
+      t.addEventListener('blur',()=>{ t.contentEditable='false'; const v=t.textContent.trim();
+        if(v){ d.text=v; } else { t.textContent=d.text; } save(); render(); });
+      r.appendChild(edit);
+      // Delete (right): drop it so it won't come back.
       const del=document.createElement('button'); del.title='Delete — won’t come back';
       del.className='chrome absolute right-0 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 opacity-0 group-hover/h:opacity-100 transition-opacity';
       del.innerHTML=XICON;
@@ -1037,22 +1053,23 @@ function syncCelebrate(){
 }
 function syncHistoryDays(){
   const n=state.settings.historyDays??7;
-  const s=$('#historyDaysSlider'), lbl=$('#historyDaysLabel');
+  const s=$('#historyDaysSlider'), head=$('#historyDaysHeading');
   if(s) s.value=String(n);
-  if(lbl) lbl.textContent = n<=0 ? 'Off' : (n+' day'+(n>1?'s':''));
+  if(head) head.textContent = n<=0 ? 'No days of history' : (n+' day'+(n>1?'s':'')+' of history');
 }
 function openSettings(){
   settingsOpen=true;
   settingsSheet.classList.remove('closing');
   settingsSheet.setAttribute('data-open','true');
   settingsSheet.setAttribute('aria-hidden','false');
-  syncCelebrate(); syncHistoryDays();
+  syncCelebrate(); syncHistoryDays(); syncChrome();
 }
 function closeSettings(){
   settingsOpen=false;
   settingsSheet.classList.add('closing');
   settingsSheet.setAttribute('data-open','false');
   settingsSheet.setAttribute('aria-hidden','true');
+  syncChrome();
 }
 gearBtn.addEventListener('click', e=>{ e.stopPropagation(); settingsOpen?closeSettings():openSettings(); });
 settingsClose.addEventListener('click', e=>{ e.stopPropagation(); closeSettings(); });
@@ -1073,23 +1090,24 @@ $('#histBtn')?.addEventListener('click', e=>{ e.stopPropagation();
 RM.addEventListener?.('change', ()=>{ if(settingsOpen) syncCelebrate(); });
 
 // Export: download all data as JSON (works in-browser; native file-save needs the fs plugin — follow-up)
+// Export my DONE tasks → a readable markdown log (download + clipboard on native).
 $('#exportBtn').addEventListener('click', e=>{ e.stopPropagation();
   try{
-    const data=serialize();
-    const blob=new Blob([data],{type:'application/json'});
+    const lines=['# Buddy — done tasks',''];
+    const todayDone=state.today.items.filter(it=>it.state==='done');
+    if(todayDone.length){ lines.push('## Today'); todayDone.forEach(it=>lines.push('- '+it.text)); lines.push(''); }
+    state.history.forEach(day=>{
+      const done=day.items.filter(it=>it.done);
+      if(done.length){ lines.push('## '+(day.weekday||day.date)+' — '+day.date); done.forEach(it=>lines.push('- '+it.text)); lines.push(''); }
+    });
+    const data=lines.join('\n');
+    const blob=new Blob([data],{type:'text/markdown'});
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a'); a.href=url;
-    a.download='buddy-'+new Date().toISOString().slice(0,10)+'.json';
+    a.download='buddy-done-'+new Date().toISOString().slice(0,10)+'.md';
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     if(window.__TAURI__){ navigator.clipboard?.writeText(data); }   // native fallback: also copy to clipboard
   }catch(err){ console.warn('[buddy] export failed', err); }
-});
-// Erase everything (with confirm); suppress the unload-save so it actually sticks, then boot fresh
-$('#expungeBtn').addEventListener('click', e=>{ e.stopPropagation();
-  if(!confirm('Erase ALL of Buddy’s tasks and history on this Mac? This can’t be undone.')) return;
-  saveSuppressed=true;
-  try{ localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(BAK_KEY); }catch(_){}
-  location.reload();
 });
 // dev: restart the app (reloads the webview)
 $('#restartBtn')?.addEventListener('click', e=>{ e.stopPropagation(); state.today.morningDone=false; save(); closeSettings(); showMorning(); });
@@ -1098,7 +1116,7 @@ $('#restartBtn')?.addEventListener('click', e=>{ e.stopPropagation(); state.toda
 $('#quitBtn')?.addEventListener('click', e=>{ e.stopPropagation();
   window.__TAURI__?.core?.invoke('quit'); });
 // Show the running version, pinned at the bottom of Settings.
-(async()=>{ let v='0.1.0';
+(async()=>{ let v='0.2.0';
   try{ const t=window.__TAURI__; if(t&&t.core) v=await t.core.invoke('app_version'); }catch(_){}
   const el=$('#appVersion'); if(el) el.textContent='v'+v;
 })();
