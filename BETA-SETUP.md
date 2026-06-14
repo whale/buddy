@@ -1,53 +1,58 @@
 # Beta setup — getting Buddy onto other people's Macs
 
-The app is now **wired up** to be signed, notarized, and packaged as a `.dmg`.
-What's left needs your Apple account. Do the three things below, paste me the
-three values at the end, and I'll do the rest (build + notarize + DMG).
+The app is **wired up correctly** to be signed, notarized, and packaged as a
+universal `.dmg` (runs on both Intel and Apple-Silicon Macs). What's left needs
+your Apple account. Do the two tasks below, send me three values, and I'll build it.
 
 > Why: macOS blocks apps from unknown developers. "Signing" + "notarizing" is how
-> Apple marks Buddy as trusted so testers can open it without scary warnings.
+> Apple marks Buddy as trusted so testers can open it with no scary warning.
 
-## 1. Make a Developer ID certificate (one time)
+## Task 1 — Developer ID certificate (one time, in Xcode)
 
 1. Open **Xcode**.
 2. Menu bar → **Xcode → Settings…** → **Accounts** tab.
-3. Click your Apple ID on the left → button **Manage Certificates…**
-4. Click the **+** (bottom-left) → choose **Developer ID Application**.
-5. Done — it's now in your keychain. Close the window.
+3. Click your Apple ID on the left → **Manage Certificates…** (bottom-right).
+4. Click the **+** (bottom-left) → **Developer ID Application**.
+5. A new row appears → **Done**. *(If it's greyed out, you already have one — fine.)*
 
-*(No Xcode? Tell me and I'll give you the website version.)*
+## Task 2 — App Store Connect API key (one time)
 
-## 2. Make an app-specific password (one time)
+1. Go to **https://appstoreconnect.apple.com/access/integrations/api**
+   *(App Store Connect → Users and Access → **Integrations** tab.)*
+2. Make sure **Team Keys** is selected. (First time: click to enable/Request Access, agree.)
+3. Click **+** (Generate API Key) → name it **Buddy notarize** → Access **Developer** → **Generate**.
+4. Click **Download API Key** → a file **`AuthKey_XXXXXX.p8`** goes to your Downloads. ⚠️ You can only download it **once** — don't delete it.
+5. Note two codes on that page:
+   - **Issuer ID** — long code above the keys table (like `69a6de7e-1a2b-…`)
+   - **Key ID** — the 10-character code in the **Key ID** column (like `ABCD123456`)
 
-1. Go to **https://appleid.apple.com** and sign in.
-2. Find **Sign-In and Security** → **App-Specific Passwords**.
-3. Click **+**, name it **Buddy notarize**, click Create.
-4. **Copy the password it shows** (looks like `abcd-efgh-ijkl-mnop`). You won't see it again.
+## Send me three things
+- The **`AuthKey_XXXXXX.p8`** file — just confirm it's in your **Downloads** (or tell me the path)
+- The **Issuer ID**
+- The **Key ID**
 
-## 3. Find your Team ID
+I'll move the key into a private, git-ignored spot (never uploaded), wire up the
+credentials, and run the build.
 
-1. Go to **https://developer.apple.com/account** → **Membership details**.
-2. Copy the **Team ID** (a 10-character code like `AB12CD34EF`).
+## What I do after that
+- `rustup target add aarch64-apple-darwin x86_64-apple-darwin`
+- `pnpm tauri build --target universal-apple-darwin --bundles dmg`
+  (signs with your Developer ID → notarizes via Apple → staples → outputs a **universal** DMG)
+- Verify it: `xcrun stapler validate <dmg>` and `spctl -a -vvv -t install <dmg>`
+  must say **"Notarized Developer ID"** before it goes out.
+- Upload `Buddy_<version>_universal.dmg` to a **private GitHub Release** and invite testers.
 
-## 4. Send me three things
+**Tester experience:** download the DMG → open it → drag Buddy to Applications →
+double-click. macOS shows a normal one-time "downloaded from the internet — open?"
+(it'll even say Apple checked it and found nothing) — **not** the "unidentified
+developer" block. On first use they grant Accessibility / Input Monitoring (for the
+edge-reveal + reserve features) in System Settings.
 
-Paste me:
-- Your **Apple ID email**
-- The **app-specific password** from step 2
-- Your **Team ID** from step 3
-
-I'll put them in a local, git-ignored `.env` (never committed), then run the
-signed + notarized build. The result is a **Buddy.dmg** that anyone can download
-and open.
-
-## After that (I'll handle these)
-
-- `pnpm tauri build` → signs with your Developer ID + notarizes via Apple → outputs
-  `src-tauri/target/release/bundle/dmg/Buddy_<version>_aarch64.dmg`.
-- Verify with `spctl` + `stapler` (must say "Notarized Developer ID").
-- Upload the DMG to a **private GitHub Release** and invite your testers.
-
-## Still to harden before a *wider* (public) release
-- Bundle Tailwind locally (it currently loads from a CDN — fine for a small beta,
-  but should be bundled + the CSP tightened for public). Tracked separately.
-- A friendly first-run screen explaining the Accessibility permission.
+## Notes
+- Notarization is automatic during `tauri build` (uses your API key). No separate
+  upload step.
+- The signing certificate is auto-detected from your keychain. If the build can't
+  find it, I'll have you run `security find-identity -p codesigning -v` and paste
+  the `Developer ID Application: …` line.
+- Before a *wider/public* release (not needed for a small closed beta): bundle
+  Tailwind locally + a friendly first-run permission screen.
