@@ -4,7 +4,7 @@
   "version": "0.2.10",
   "identifier": "fyi.whale.buddy",
   "build": {
-    "frontendDist": "../"
+    "frontendDist": "../dist"
   },
   "app": {
     "macOSPrivateApi": true,
