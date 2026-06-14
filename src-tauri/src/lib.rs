@@ -65,8 +65,10 @@ fn percent_encode(s: &str) -> String {
 }
 
 /// Report a bug: the webview hands us a PNG screenshot of ONLY Buddy's UI (data
-/// URL) plus a logs string. We write both to a temp folder, reveal it in Finder,
-/// and open a pre-addressed mail draft so the user can attach + send.
+/// URL) plus a logs string. We write both, ZIP them, and open a pre-addressed
+/// Mail draft with the zip ALREADY ATTACHED (via AppleScript) so the user just
+/// adds a note and hits send. Falls back to revealing the zip + a mailto draft
+/// if Mail scripting isn't available.
 #[tauri::command]
 fn report_bug(screenshot: String, logs: String) -> Result<(), String> {
     use base64::{engine::general_purpose, Engine as _};
@@ -79,23 +81,56 @@ fn report_bug(screenshot: String, logs: String) -> Result<(), String> {
     let dir = std::env::temp_dir().join(format!("buddy-bug-{ts}"));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
+    let png = dir.join("buddy-screenshot.png");
+    let txt = dir.join("buddy-logs.txt");
     let b64 = screenshot.split(',').last().unwrap_or("");
     if let Ok(bytes) = general_purpose::STANDARD.decode(b64) {
-        let mut f = std::fs::File::create(dir.join("buddy-screenshot.png")).map_err(|e| e.to_string())?;
+        let mut f = std::fs::File::create(&png).map_err(|e| e.to_string())?;
         f.write_all(&bytes).map_err(|e| e.to_string())?;
     }
-    std::fs::write(dir.join("buddy-logs.txt"), logs.as_bytes()).map_err(|e| e.to_string())?;
+    std::fs::write(&txt, logs.as_bytes()).map_err(|e| e.to_string())?;
 
-    // Reveal the folder so the user can drag the two files into the email.
-    let _ = std::process::Command::new("open").arg(&dir).spawn();
+    // Zip the screenshot + logs into a single attachment (-j = flat, no folders).
+    let zip = dir.join("buddy-bug-report.zip");
+    let _ = std::process::Command::new("zip")
+        .arg("-j")
+        .arg(&zip)
+        .arg(&png)
+        .arg(&txt)
+        .output();
+    let zip_str = zip.to_string_lossy().to_string();
 
-    let body = "Describe what happened:\n\n\n\n---\nYour screenshot + logs are in the folder that just opened — please drag both files into this email before sending. Thank you!";
-    let mailto = format!(
-        "mailto:hi+buddy@whale.fyi?subject={}&body={}",
-        percent_encode("Buddy bug report"),
-        percent_encode(body)
+    // Open a Mail draft with the zip attached, ready to send (not sent).
+    let script = format!(
+        r#"tell application "Mail"
+  set m to make new outgoing message with properties {{subject:"Buddy bug report", visible:true}}
+  tell m
+    make new to recipient at end of to recipients with properties {{address:"hi+buddy@whale.fyi"}}
+    set content to "Describe what happened here — your screenshot and logs are attached. Thank you!"
+    delay 0.5
+    make new attachment with properties {{file name:POSIX file "{zip_str}"}} at after the last paragraph
+  end tell
+  activate
+end tell"#
     );
-    let _ = std::process::Command::new("open").arg(mailto).spawn();
+    let mail_ok = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    if !mail_ok {
+        // Fallback: highlight the zip in Finder + open a plain mail draft to drag it into.
+        let _ = std::process::Command::new("open").arg("-R").arg(&zip).spawn();
+        let body = "Describe what happened, then drag the buddy-bug-report.zip that's highlighted in Finder into this email. Thank you!";
+        let mailto = format!(
+            "mailto:hi+buddy@whale.fyi?subject={}&body={}",
+            percent_encode("Buddy bug report"),
+            percent_encode(body)
+        );
+        let _ = std::process::Command::new("open").arg(mailto).spawn();
+    }
     Ok(())
 }
 
