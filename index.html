@@ -269,7 +269,7 @@
 
     <!-- Settings sheet: slides up over the list (same language as history) -->
     <div id="settings" class="sheet absolute inset-0 z-20 bg-white flex flex-col" data-open="false" aria-hidden="true">
-      <div class="flex items-center justify-between pl-8 pr-5 py-5">
+      <div class="flex items-center justify-between pl-8 pr-5 h-[68px]">
         <span class="text-[18px] font-medium text-black/80 tracking-[-0.36px]">Settings</span>
         <button id="settingsClose" title="Close"
           class="pressable chrome-btn size-[36px] grid place-items-center rounded-full">
@@ -895,7 +895,7 @@ function deleteDeferred(id){ state.deferred=state.deferred.filter(d=>d.id!==id);
 function renderHistHeader(){
   last7.innerHTML='';
   const wrap=document.createElement('div');
-  wrap.className='flex items-center justify-between pl-8 pr-5 py-5';   // match the Settings header exactly
+  wrap.className='flex items-center justify-between pl-8 pr-5 h-[68px]';   // identical fixed height to the Settings header
   const seg=document.createElement('div');
   seg.className='flex items-center gap-1 p-1 rounded-full';
   seg.style.background='var(--seg-track)';
