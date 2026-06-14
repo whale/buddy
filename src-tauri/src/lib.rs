@@ -167,6 +167,7 @@ mod reserve {
         fn CFArrayGetValueAtIndex(a: CFArrayRef, idx: isize) -> *const c_void;
         fn CFDictionaryGetValue(d: *const c_void, key: *const c_void) -> *const c_void;
         fn CFNumberGetValue(n: *const c_void, ty: i32, value: *mut c_void) -> bool;
+        fn CFBooleanGetValue(b: CFTypeRef) -> bool;
     }
 
     fn cfs(v: &str) -> CFString { CFString::new(v) }
@@ -210,18 +211,36 @@ mod reserve {
             CFRelease(v);
         }
     }
+    unsafe fn ax_string(win: CFTypeRef, attr: &str) -> Option<String> {
+        let v = copy_attr(win, attr)?;
+        Some(CFString::wrap_under_create_rule(v as CFStringRef).to_string())
+    }
+    unsafe fn ax_is_true(win: CFTypeRef, attr: &str) -> bool {
+        if let Some(v) = copy_attr(win, attr) { let b = CFBooleanGetValue(v); CFRelease(v); b } else { false }
+    }
 
+    // Pids of apps that own a NORMAL window (window layer 0). Layer 0 = ordinary
+    // app windows; the volume/brightness HUD, menu bar, Dock, notifications,
+    // Control Center, Spotlight, etc. all live on higher layers, so they're
+    // skipped here and never touched.
     unsafe fn owner_pids(own: i32) -> Vec<i32> {
         let arr = CGWindowListCopyWindowInfo(1 /* onScreenOnly */, 0);
         if arr.is_null() { return vec![]; }
-        let key = cfs("kCGWindowOwnerPID");
-        let keyref = key.as_concrete_TypeRef() as *const c_void;
+        let pid_key = cfs("kCGWindowOwnerPID");
+        let pid_ref = pid_key.as_concrete_TypeRef() as *const c_void;
+        let layer_key = cfs("kCGWindowLayer");
+        let layer_ref = layer_key.as_concrete_TypeRef() as *const c_void;
         let mut pids: Vec<i32> = vec![];
         let n = CFArrayGetCount(arr);
         for i in 0..n {
             let dict = CFArrayGetValueAtIndex(arr, i);
             if dict.is_null() { continue; }
-            let val = CFDictionaryGetValue(dict, keyref);
+            // Only normal-layer windows.
+            let lval = CFDictionaryGetValue(dict, layer_ref);
+            let mut layer: i32 = -1;
+            if !lval.is_null() { CFNumberGetValue(lval, CF_SINT32, &mut layer as *mut _ as *mut c_void); }
+            if layer != 0 { continue; }
+            let val = CFDictionaryGetValue(dict, pid_ref);
             if val.is_null() { continue; }
             let mut pid: i32 = 0;
             if CFNumberGetValue(val, CF_SINT32, &mut pid as *mut _ as *mut c_void)
@@ -245,6 +264,10 @@ mod reserve {
                 for j in 0..wc {
                     let win = CFArrayGetValueAtIndex(warr, j) as CFTypeRef;
                     if win.is_null() { continue; }
+                    // Only real document windows — skip dialogs, sheets, popovers,
+                    // panels (non-AXStandardWindow) and minimized windows.
+                    if ax_string(win, "AXSubrole").as_deref() != Some("AXStandardWindow") { continue; }
+                    if ax_is_true(win, "AXMinimized") { continue; }
                     if let (Some(pos), Some(sz)) = (ax_point(win, "AXPosition"), ax_size(win, "AXSize")) {
                         if pos.x + sz.width > strip_left + 1.0 {
                             if pos.x < strip_left - MIN_W {
