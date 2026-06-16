@@ -871,7 +871,7 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     const txt=document.createElement('div');
     txt.dataset.tid=it.id; txt.dataset.ph='Untitled'; txt.style.fontSize='var(--fs)';
     txt.style.paddingRight='44px';   // reserve room for the vertical icon stack (narrower than the old side-by-side icons → more text room)
-    txt.style.color = it.state==='done' ? 'rgba(0,0,0,.3)' : (lvl===2 ? '#fff' : lvl===1 ? RED : '#000');   // done stays neutral grey even in a red list
+    txt.style.color = it.state==='done' ? 'var(--ink-dim)' : (lvl===2 ? '#fff' : lvl===1 ? RED : '#000');   // done = dim ink (adapts: grey on white, light on red); active uses the escalation colours
     txt.className='flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2] '+(it.state==='done'?'line-through':'');
     txt.textContent=it.text||''; if(!it.text)txt.classList.add('empty');
     txt.addEventListener('input',()=>{ it.text=txt.textContent.trim(); });
@@ -921,24 +921,26 @@ function buildDonezoRow(it, idx, morning){
   const row=document.createElement('div');
   row.dataset.flip=it.id; row.dataset.idx=idx;
   row.style.cssText='flex:0 0 auto; min-height:0; padding:'+(morning?'18px':'16px')+' var(--px);';
-  row.className='donezo-row pressable group relative flex items-center overflow-hidden cursor-pointer'
+  // `bd` + --ink/--ink-dim so the row adapts to escalation: dark on white,
+  // light on the red (lvl2) background — never hardcode text-black here.
+  row.className='donezo-row pressable bd group relative flex items-center overflow-hidden cursor-pointer'
     +(idx>0?' border-t border-[#d9d9d9]':'')
     +(it.id===donezoEnterId?' donezo-enter':'');
   const lab=document.createElement('div');
   lab.className='flex items-baseline gap-2 min-w-0 flex-1';
   lab.style.paddingRight='44px';
   const tag=document.createElement('span');
-  tag.className='font-semibold tracking-[-0.3px] text-black shrink-0'; tag.style.fontSize='15px';
+  tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:15px;color:var(--ink)';
   tag.textContent='Donezo.';
   const ttl=document.createElement('span');
-  ttl.className='line-through text-black/35 truncate'; ttl.style.fontSize='15px';
+  ttl.className='line-through truncate'; ttl.style.cssText='font-size:15px;color:var(--ink-dim)';
   ttl.textContent=it.text||'';
   lab.append(tag, ttl); row.appendChild(lab);
   const acts=document.createElement('div');
   acts.className='absolute top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover:opacity-100 transition-opacity';
   acts.style.right=ICON_RIGHT;
   const b=document.createElement('button'); b.title='Restore to list';
-  b.className='size-[30px] grid place-items-center rounded-full text-black/40 hover:bg-black/5';
+  b.className='size-[30px] grid place-items-center rounded-full hover:bg-black/10'; b.style.color='var(--ink-dim)';
   b.innerHTML=UNDO;
   b.addEventListener('mousedown',e=>e.preventDefault());
   b.addEventListener('click',e=>{ e.stopPropagation(); restoreItem(it.id); });
@@ -977,12 +979,12 @@ function renderPast(){
     day.items.forEach(it=>{
       const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(day.today?' pr-[44px]':'');
       const lab=document.createElement('div'); lab.className='flex items-baseline gap-2 min-w-0 flex-1';
-      const tag=document.createElement('span'); tag.className='font-semibold tracking-[-0.3px] text-black shrink-0'; tag.style.fontSize='18px'; tag.textContent='Donezo.';
-      const t=document.createElement('span'); t.className='tracking-[-0.36px] line-through text-black/35 truncate'; t.style.fontSize='18px'; t.textContent=it.text;
+      const tag=document.createElement('span'); tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:18px;color:var(--ink)'; tag.textContent='Donezo.';
+      const t=document.createElement('span'); t.className='tracking-[-0.36px] line-through truncate'; t.style.cssText='font-size:18px;color:var(--ink-dim)'; t.textContent=it.text;
       lab.append(tag,t); r.appendChild(lab);
       if(day.today){
         const u=document.createElement('button'); u.title='Restore to list';
-        u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 opacity-0 group-hover/h:opacity-100 transition-opacity';
+        u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full hover:bg-black/10 opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
         u.style.right=ICON_RIGHT;
         u.innerHTML=UNDO;
         u.addEventListener('mousedown',e=>e.preventDefault());
@@ -1551,6 +1553,19 @@ window.__buddy = {
       ok('undo: restores to active', state.items.find(i=>i.id==='s2')&&state.items.find(i=>i.id==='s2').state!=='done');
       ok('rows do NOT reuse data-tid (FLIP collision guard)',
          ![...todayWrap.querySelectorAll('.buddy-row')].some(r=>r.dataset&&r.dataset.tid));
+      // Escalation legibility: at lvl2 (red bg) the done/Donezo text MUST adapt to
+      // light via --ink-dim, not stay dark. Catches hardcoded text-black on red.
+      const dn=Date.now()-5000;
+      state.today.items=[{id:'r1',text:'one',state:'neutral'},{id:'r2',text:'two',state:'neutral'},
+        {id:'r3',text:'three',state:'neutral'},{id:'r4',text:'four',state:'neutral'},
+        {id:'r5',text:'five',state:'neutral'},{id:'r6',text:'six',state:'neutral'},
+        {id:'rd',text:'done one',state:'done',doneAt:dn}];
+      editingId=null; render();
+      const dr=todayWrap.querySelector('.donezo-row .line-through');
+      const ch=(dr?getComputedStyle(dr).color:'').match(/\d+/g);
+      const lum=ch?(+ch[0]+ +ch[1]+ +ch[2]):0;
+      ok('lvl2: Donezo text adapts to LIGHT on red (not hardcoded dark)',
+         warnLevel()===2 && lum>500, 'lvl='+warnLevel()+' color='+(dr&&getComputedStyle(dr).color));
     }catch(e){ ok('ran without throwing', false, e&&e.message); }
     state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
     editingId=null; render(); saveSuppressed=wasSup;
