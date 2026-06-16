@@ -788,11 +788,11 @@ let prevHistOpen=false;          // detect the open↔close transition for the c
 // FLIP helpers: capture row tops by id before a rebuild; after, translate each
 // moved row back to its old spot and transition to 0 so it glides.
 function captureFlip(wrap){ const m=new Map();
-  if(wrap) for(const el of wrap.children){ if(el.dataset&&el.dataset.tid) m.set(el.dataset.tid, el.getBoundingClientRect().top); }
+  if(wrap) for(const el of wrap.children){ if(el.dataset&&el.dataset.flip) m.set(el.dataset.flip, el.getBoundingClientRect().top); }
   return m; }
 function playFlip(wrap, prev){
   if(!prev || !wrap || reducedMotion()) return;
-  for(const el of wrap.children){ const tid=el.dataset&&el.dataset.tid; if(!tid||!prev.has(tid)) continue;
+  for(const el of wrap.children){ const tid=el.dataset&&el.dataset.flip; if(!tid||!prev.has(tid)) continue;
     const delta = prev.get(tid) - el.getBoundingClientRect().top;
     if(Math.abs(delta)<2) continue;
     el.style.transform='translateY('+delta+'px)'; el.style.transition='none';
@@ -859,7 +859,7 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     const idx=state.items.indexOf(it);
     if(isDonezo(it)){ wrap.appendChild(buildDonezoRow(it, i, morning)); return; }
     const row=document.createElement('div');
-    row.dataset.tid=it.id;          // lets the FLIP glide match this row across re-renders
+    row.dataset.flip=it.id;         // FLIP identity — NOT data-tid (that belongs to the editable text field; sharing it broke startEdit)
     row.style.cssText=rowStyle;
     const bgClass = it.state==='focused' ? 'row-focused' : 'row-neutral';
     const ring = (kbActive && cursor===idx) ? ' cursor-ring' : '';
@@ -919,7 +919,7 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
 // the calendar's "Today" group — both derive from the same `state.items`.
 function buildDonezoRow(it, idx, morning){
   const row=document.createElement('div');
-  row.dataset.tid=it.id; row.dataset.idx=idx;
+  row.dataset.flip=it.id; row.dataset.idx=idx;
   row.style.cssText='flex:0 0 auto; min-height:0; padding:'+(morning?'18px':'16px')+' var(--px);';
   row.className='donezo-row pressable group relative flex items-center overflow-hidden cursor-pointer'
     +(idx>0?' border-t border-[#d9d9d9]':'')
@@ -1516,6 +1516,47 @@ window.__buddy = {
   get cursor(){ return cursor; },
   get kbActive(){ return kbActive; },
   cycle: it => cycle(it),
+  // Smoke test: exercise the CORE interactions and assert outcomes. Run before
+  // every release build (window.__buddy.smokeTest()). Catches regressions in
+  // add/edit focus, completion, undo, and the FLIP attribute — even when a
+  // change looks purely cosmetic. Snapshots and restores your real state.
+  async smokeTest(){
+    const R=[]; const ok=(name,cond,detail)=>R.push({name,pass:!!cond,detail:detail||''});
+    const snap=JSON.parse(JSON.stringify({today:state.today,history:state.history,deferred:state.deferred,settings:state.settings,pinned:state.pinned}));
+    const wasSup=saveSuppressed; saveSuppressed=true;
+    try{
+      state.today={ date:localDate(), morningDone:true, items:[
+        {id:'s1',text:'alpha',state:'neutral'},{id:'s2',text:'beta',state:'focused'} ] };
+      editingId=null; render();
+      addAndEdit();
+      ok('add creates a new item', state.items.length===3, 'len='+state.items.length);
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));   // startEdit is rAF-deferred
+      let ae=document.activeElement;
+      ok('add: cursor lands in the new text field',
+         ae&&ae.getAttribute&&ae.getAttribute('contenteditable')==='true'&&ae.dataset&&ae.dataset.tid===editingId,
+         'active='+(ae&&ae.tagName)+' tid='+(ae&&ae.dataset&&ae.dataset.tid)+' editing='+editingId);
+      if(ae&&ae.blur) ae.blur();
+      startEdit('s1');
+      ae=document.activeElement;
+      ok('edit: cursor lands in the task text',
+         ae&&ae.getAttribute&&ae.getAttribute('contenteditable')==='true'&&ae.dataset&&ae.dataset.tid==='s1',
+         'active='+(ae&&ae.tagName)+' tid='+(ae&&ae.dataset&&ae.dataset.tid));
+      if(ae&&ae.blur) ae.blur();
+      const before=activeCount();
+      cycle(state.items.find(i=>i.id==='s2'));
+      const d=state.items.find(i=>i.id==='s2');
+      ok('complete: marks done + doneAt', d&&d.state==='done'&&typeof d.doneAt==='number');
+      ok('complete: drops from the red (active) count', activeCount()===before-1);
+      restoreItem('s2');
+      ok('undo: restores to active', state.items.find(i=>i.id==='s2')&&state.items.find(i=>i.id==='s2').state!=='done');
+      ok('rows do NOT reuse data-tid (FLIP collision guard)',
+         ![...todayWrap.querySelectorAll('.buddy-row')].some(r=>r.dataset&&r.dataset.tid));
+    }catch(e){ ok('ran without throwing', false, e&&e.message); }
+    state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
+    editingId=null; render(); saveSuppressed=wasSup;
+    const failed=R.filter(r=>!r.pass);
+    return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
+  },
 };
 
 /* --------------------------- boot -------------------------------- */
