@@ -374,10 +374,11 @@ pub fn run() {
 
             // --- Menu-bar (tray) icon + menu ---
             let toggle_item = MenuItemBuilder::with_id("toggle", "Show / Hide Buddy").build(app)?;
+            let settings_item = MenuItemBuilder::with_id("settings", "Settings…").build(app)?;
             let report_item = MenuItemBuilder::with_id("report", "Report a bug…").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Quit Buddy").build(app)?;
             let menu = MenuBuilder::new(app)
-                .items(&[&toggle_item, &report_item])
+                .items(&[&toggle_item, &settings_item, &report_item])
                 .separator()
                 .items(&[&quit_item])
                 .build()?;
@@ -396,6 +397,7 @@ pub fn run() {
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "toggle" => toggle_drawer(app),
+                    "settings" => { let _ = app.emit("buddy://settings", ()); }
                     "report" => { let _ = app.emit("buddy://report-bug", ()); }
                     "quit" => app.exit(0),
                     _ => {}
