@@ -27,6 +27,7 @@ use tauri::{
     tray::TrayIconBuilder,
     AppHandle, Emitter, Manager,
 };
+use tauri_plugin_updater::UpdaterExt;
 
 /// Tell the webview to toggle the drawer (from the tray icon or the global
 /// shortcut). The webview owns its own geometry via `nativeFit`, so the native
@@ -314,6 +315,34 @@ fn set_reserve(on: bool) {
     let _ = on;
 }
 
+/// Auto-updater: ask GitHub Releases whether a newer signed build exists.
+/// Returns Some(version) if an update is available, None if we're current.
+#[tauri::command]
+async fn check_for_update(app: AppHandle) -> Result<Option<String>, String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    match updater.check().await {
+        Ok(Some(update)) => Ok(Some(update.version)),
+        Ok(None) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Auto-updater: download + install the available update, then relaunch into it.
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "No update available".to_string())?;
+    update
+        .download_and_install(|_chunk, _total| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
+    app.restart();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
@@ -336,7 +365,8 @@ pub fn run() {
     }
 
     builder
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, report_bug, set_reserve])
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, report_bug, set_reserve, check_for_update, install_update])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).
