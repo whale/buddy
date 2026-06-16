@@ -140,10 +140,12 @@
      Asymmetric: enter ~160ms, exit ~120ms (exit faster). */
   .item-enter{ animation: item-in .16s var(--ease-out) both; }
   @keyframes item-in{ from{ opacity:0; transform:translateY(8px); } to{ opacity:1; transform:none; } }
-  /* Done → Donezo morph: the struck row slides out to the right, the Donezo row fades in from the right. */
-  .donezo-leaving{ transition: transform .15s var(--ease-out), opacity .15s var(--ease-out); transform:translateX(16px); opacity:0; pointer-events:none; }
-  .donezo-enter{ animation: donezo-in .22s var(--ease-out) both; }
-  @keyframes donezo-in{ from{ opacity:0; transform:translateX(16px); } to{ opacity:1; transform:none; } }
+  /* Done → Donezo morph: the row GLIDES to the Donezo group (FLIP handles the travel);
+     the content just cross-fades in so the task→Donezo swap isn't an abrupt pop. */
+  .donezo-enter{ animation: donezo-in .3s var(--ease-out) both; }
+  @keyframes donezo-in{ from{ opacity:.35; } to{ opacity:1; } }
+  #updateBanner.banner-in{ animation: banner-down .28s var(--ease-out) both; }
+  @keyframes banner-down{ from{ opacity:0; transform:translateY(-8px); } to{ opacity:1; transform:none; } }
 
   /* Settings / history sheets: translateY(100%). enter ~220ms / exit ~180ms. */
   .sheet{ transition: transform .22s var(--ease-out); will-change:transform; }
@@ -245,6 +247,22 @@
 
 <!-- ============ DRAWER ============ -->
 <aside id="drawer" class="ease-d fixed top-0 right-0 z-50 h-screen w-[416px] translate-x-full flex flex-col items-end gap-2 p-2">
+  <!-- Update banner: slides in above everything when a new version is ready -->
+  <div id="updateBanner" class="bcard w-[400px] shrink-0 bg-white rounded-[24px] overflow-hidden hidden">
+    <div class="flex items-center justify-between gap-3 px-6 py-4">
+      <div class="flex items-center gap-3 min-w-0">
+        <span class="size-[34px] shrink-0 grid place-items-center rounded-full bg-black text-white">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        </span>
+        <div class="min-w-0">
+          <div id="updateTitle" class="text-[15px] font-semibold tracking-[-0.3px] text-black truncate">Update ready</div>
+          <div id="updateSub" class="text-[13px] text-black/45 tracking-[-0.26px] truncate">A new version of Buddy is available</div>
+        </div>
+      </div>
+      <button id="updateInstall" class="pressable shrink-0 px-4 py-2 rounded-full bg-black text-white text-[14px] font-medium tracking-[-0.28px] hover:bg-black/85">Install</button>
+    </div>
+    <div id="updateProgress" class="h-[3px] bg-black/10 hidden"><div id="updateBar" class="h-full bg-black w-0 transition-[width] duration-300"></div></div>
+  </div>
   <!-- Card 1: Buddy pill + date -->
   <div class="bcard w-[400px] shrink-0 bg-white rounded-[24px] overflow-hidden">
     <div class="flex items-center justify-between px-8 py-6">
@@ -632,7 +650,17 @@ let openTimer=null, closeTimer=null, shrinkTimer=null;
 // Both guard against the morning: while the full-screen planner is up, nothing
 // may resize the window back to a drawer/sliver (that was the "Restart" bug —
 // the morning would flash then get clipped to a sliver by a stray mouse-leave).
-function openDrawer(){ if(morningUp()) return; if(NATIVE){ clearTimeout(shrinkTimer); nativeFit('drawer'); nativeFocus(); } drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }
+function openDrawer(){ if(morningUp()) return;
+  if(NATIVE){
+    clearTimeout(shrinkTimer); nativeFocus();
+    // Resize the window to full drawer width FIRST, then slide — so the drawer
+    // never slides into a half-resized, repainting transparent window (the white
+    // seam). The drawer stays off-screen during the resize, so nothing shows.
+    nativeFit('drawer').then(()=>{ drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); });
+  } else {
+    drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday);
+  }
+}
 // Bring Buddy to the front + make it key so its icons receive hover/clicks even
 // when it reveals over another app (otherwise the foreground app keeps the mouse).
 function nativeFocus(){ if(!NATIVE) return; try{ window.__TAURI__.window.getCurrentWindow().setFocus(); }catch(_){} }
@@ -713,10 +741,7 @@ function scheduleDonezo(id){
   setTimeout(()=>{
     const it=state.items.find(x=>x.id===id);
     if(!it || it.state!=='done' || !it.doneAt) return;     // un-done during the window → never morph
-    const row=[...todayWrap.children].find(r=>r.dataset.tid===id && !r.classList.contains('donezo-row'));
-    if(row && !reducedMotion()){ row.classList.add('donezo-leaving');
-      setTimeout(()=>{ donezoEnterId=id; render(); }, 150); }
-    else { donezoEnterId=id; render(); }
+    donezoEnterId=id; render();                            // FLIP glides it up to the Donezo group
   }, DONEZO_DELAY);
 }
 // ↩ undo: restore a done task to the active list (reuses its id; blocked at the cap).
@@ -760,6 +785,20 @@ window.addEventListener('resize',()=>requestAnimationFrame(fitToday));
 
 /* --------------------------- rendering --------------------------- */
 let prevHistOpen=false;          // detect the open↔close transition for the crossfade
+// FLIP helpers: capture row tops by id before a rebuild; after, translate each
+// moved row back to its old spot and transition to 0 so it glides.
+function captureFlip(wrap){ const m=new Map();
+  if(wrap) for(const el of wrap.children){ if(el.dataset&&el.dataset.tid) m.set(el.dataset.tid, el.getBoundingClientRect().top); }
+  return m; }
+function playFlip(wrap, prev){
+  if(!prev || !wrap || reducedMotion()) return;
+  for(const el of wrap.children){ const tid=el.dataset&&el.dataset.tid; if(!tid||!prev.has(tid)) continue;
+    const delta = prev.get(tid) - el.getBoundingClientRect().top;
+    if(Math.abs(delta)<2) continue;
+    el.style.transform='translateY('+delta+'px)'; el.style.transition='none';
+    requestAnimationFrame(()=>{ el.style.transition='transform .34s var(--ease-drawer)'; el.style.transform=''; });
+  }
+}
 function render(){
   const lvl=warnLevel();
   drawer.classList.toggle('lvl1', lvl===1);
@@ -770,6 +809,10 @@ function render(){
   syncChrome();                                     // pin / calendar / settings selected states
   if(morningUp()){ renderToday(morningList, 3, true); renderMorningUndone(); }
 
+  // FLIP: remember where each row was, so after the rebuild every row that moved
+  // (the completed row gliding to the top, and the rows that shift to fill the gap)
+  // glides smoothly to its new spot instead of jumping.
+  const flipPrev = (!state.histOpen && !prevHistOpen && !morningUp()) ? captureFlip(todayWrap) : null;
   renderToday(); renderHist(); renderHistHeader();
   listEl.innerHTML='';
   // Blur-masked crossfade ONLY on the actual open↔close transition (§3.4),
@@ -787,6 +830,7 @@ function render(){
     listEl.className='h-full flex flex-col overflow-hidden';
     if(toggled) todayWrap.classList.add('hist-fade');
     listEl.append(todayWrap);
+    if(flipPrev) playFlip(todayWrap, flipPrev);
   }
   prevHistOpen=state.histOpen;
   justAddedId=null;                // enter animation is one-shot, consumed above
@@ -808,15 +852,19 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
   const rowStyle = morning
     ? 'flex:0 0 auto; min-height:120px; padding:0 var(--px);'   // tall enough for the row's edit/sleep/remove icon stack
     : 'flex:1 1 auto; min-height:0; padding:var(--vpad) var(--px);';
-  state.items.forEach((it,idx)=>{
-    if(isDonezo(it)){ wrap.appendChild(buildDonezoRow(it, idx, morning)); return; }
+  // Donezo (completed past the savor beat) sort to the TOP, newest first; active work below.
+  const donez=state.items.filter(it=>isDonezo(it)).sort((a,b)=>(b.doneAt||0)-(a.doneAt||0));
+  const order=[...donez, ...state.items.filter(it=>!isDonezo(it))];
+  order.forEach((it,i)=>{
+    const idx=state.items.indexOf(it);
+    if(isDonezo(it)){ wrap.appendChild(buildDonezoRow(it, i, morning)); return; }
     const row=document.createElement('div');
-    row.dataset.tid=it.id;          // lets scheduleDonezo find this row to slide it out
+    row.dataset.tid=it.id;          // lets the FLIP glide match this row across re-renders
     row.style.cssText=rowStyle;
     const bgClass = it.state==='focused' ? 'row-focused' : 'row-neutral';
     const ring = (kbActive && cursor===idx) ? ' cursor-ring' : '';
     const enter = (it.id===justAddedId) ? ' item-enter' : '';
-    row.className='buddy-row pressable bd '+bgClass+ring+enter+' group relative flex items-center cursor-pointer overflow-hidden '+(idx>0?'border-t border-[#d9d9d9]':'');
+    row.className='buddy-row pressable bd '+bgClass+ring+enter+' group relative flex items-center cursor-pointer overflow-hidden '+(i>0?'border-t border-[#d9d9d9]':'');
     row.dataset.idx=idx;
     row.addEventListener('click',()=>{ if(editingId) return; kbActive=false; cursor=idx; cycle(it); });
 
@@ -1301,6 +1349,33 @@ $('#quitBtn')?.addEventListener('click', e=>{ e.stopPropagation();
     }catch(err){ set('idle','Check for Updates','check failed'); }
   });
 })();
+// Update banner: auto-check on launch; if a newer version exists, slide in a clear
+// banner with an Install button (the unmissable path, vs the Settings row).
+(function(){
+  const banner=$('#updateBanner'), title=$('#updateTitle'), sub=$('#updateSub'),
+        install=$('#updateInstall'), prog=$('#updateProgress'), bar=$('#updateBar');
+  if(!banner) return;
+  const T=()=>window.__TAURI__;
+  let installing=false;
+  function show(ver){
+    title.textContent='Buddy '+ver+' is ready';
+    sub.textContent='A new version is available';
+    banner.classList.remove('hidden');
+    requestAnimationFrame(()=>banner.classList.add('banner-in'));
+  }
+  install.addEventListener('click', async ()=>{
+    if(installing) return; installing=true;
+    install.textContent='Updating…'; install.disabled=true; install.classList.add('opacity-70');
+    prog.classList.remove('hidden'); requestAnimationFrame(()=>{ bar.style.width='90%'; });
+    try{ await T().core.invoke('install_update'); /* app relaunches on success */ }
+    catch(e){ installing=false; install.textContent='Retry'; install.disabled=false; install.classList.remove('opacity-70');
+      sub.textContent='Update failed — try again'; bar.style.width='0%'; }
+  });
+  // Auto-check shortly after launch (native only; never blocks boot).
+  setTimeout(async ()=>{
+    try{ const t=T(); if(!t||!t.core) return; const ver=await t.core.invoke('check_for_update'); if(ver) show(ver); }catch(_){}
+  }, 2500);
+})();
 // morning "Skip today"
 $('#skipToday')?.addEventListener('click', e=>{ e.stopPropagation(); skip(); });
 
@@ -1455,6 +1530,10 @@ if(NATIVE){
   ev.listen('buddy://toggle', ()=>{ if(morningUp()) return;
     drawer.classList.contains('translate-x-full') ? openDrawer() : closeDrawer(); });
   ev.listen('buddy://report-bug', ()=> reportBug());
+  // Tray "Settings…": reveal the drawer (if hidden) and open the settings sheet.
+  ev.listen('buddy://settings', ()=>{ if(morningUp()) return;
+    if(drawer.classList.contains('translate-x-full')) openDrawer();
+    if(!settingsOpen) openSettings(); });
 }
 /* ---- Report a bug (tray menu) -------------------------------------------------
    Capture a screenshot of ONLY Buddy's own UI (the webview DOM via html2canvas —
