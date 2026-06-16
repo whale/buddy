@@ -140,6 +140,10 @@
      Asymmetric: enter ~160ms, exit ~120ms (exit faster). */
   .item-enter{ animation: item-in .16s var(--ease-out) both; }
   @keyframes item-in{ from{ opacity:0; transform:translateY(8px); } to{ opacity:1; transform:none; } }
+  /* Done → Donezo morph: the struck row slides out to the right, the Donezo row fades in from the right. */
+  .donezo-leaving{ transition: transform .15s var(--ease-out), opacity .15s var(--ease-out); transform:translateX(16px); opacity:0; pointer-events:none; }
+  .donezo-enter{ animation: donezo-in .22s var(--ease-out) both; }
+  @keyframes donezo-in{ from{ opacity:0; transform:translateX(16px); } to{ opacity:1; transform:none; } }
 
   /* Settings / history sheets: translateY(100%). enter ~220ms / exit ~180ms. */
   .sheet{ transition: transform .22s var(--ease-out); will-change:transform; }
@@ -195,6 +199,8 @@
     .sheet[data-open="false"]{ transform:none; opacity:0; }
     .sheet[data-open="true"]{  transform:none; opacity:1; }
     .item-enter{ animation: rm-fade .14s ease both; }
+    .donezo-enter{ animation: rm-fade .14s ease both; }
+    .donezo-leaving{ transition: opacity .12s ease; transform:none; opacity:0; }
     .stagger > *{ animation: rm-fade .14s ease both; animation-delay:0ms !important; }
     .hist-fade{ animation: rm-fade .16s ease both; }
     @keyframes rm-fade{ from{opacity:0;} to{opacity:1;} }
@@ -393,6 +399,7 @@ let editingId = null;
 let cursor = 0;                  // keyboard cursor index (0..items.length, last = Add row)
 let kbActive = false;           // true once a key has been used → cursor ring shows
 const SOFT_CAP = 5, HARD_CAP = 6, RED = '#e5484d';
+const ICON_RIGHT = '1.25rem';   // universal right padding: row action icons align to the sheet ✕
 
 /* prefers-reduced-motion — live (matchMedia updates if the user flips it). */
 const RM = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -470,7 +477,7 @@ function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch{ (memoryStore||(memo
 function serialize(){
   return JSON.stringify({
     version:1,
-    today:   { date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null})) },
+    today:   { date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null,doneAt:i.doneAt??null})) },
     history: state.history,
     deferred:(state.deferred||[]).map(d=>({id:d.id,text:d.text,wake:d.wake})),
     settings:{ celebrate: Math.max(0,Math.min(100, state.settings.celebrate??100)), historyDays: clamp(0, state.settings.historyDays??7, 14), reserveSpace: !!state.settings.reserveSpace },
@@ -523,7 +530,7 @@ function load(){
   state.today   = { date:blob.today.date, morningDone:!!blob.today.morningDone, items:blob.today.items.map(i=>({
                       id:i.id||nid(), text:String(i.text||''),
                       state:(i.state==='focused'||i.state==='done')?i.state:'neutral',
-                      src:i.src??null })) };
+                      src:i.src??null, doneAt:(typeof i.doneAt==='number'?i.doneAt:null) })) };
   state.history = Array.isArray(blob.history) ? blob.history.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items)) : [];
   state.deferred= Array.isArray(blob.deferred) ? blob.deferred.filter(d=>d&&typeof d.text==='string').map(d=>({id:d.id||nid(),text:String(d.text),wake:String(d.wake||'')})) : [];
   state.settings= { celebrate: (blob.settings && typeof blob.settings.celebrate==='number') ? Math.max(0,Math.min(100,blob.settings.celebrate)) : (blob.settings && blob.settings.confetti===false ? 0 : 100),
@@ -614,7 +621,7 @@ function wakeDeferred(){
   if(!state.deferred || !state.deferred.length) return;
   const today=localDate(); const keep=[];
   state.deferred.forEach(d=>{
-    if(d.wake && d.wake<=today && state.items.length<HARD_CAP){ state.items.push({id:nid(),text:d.text,state:'neutral'}); }
+    if(d.wake && d.wake<=today && activeCount()<HARD_CAP){ state.items.push({id:nid(),text:d.text,state:'neutral'}); }
     else keep.push(d);
   });
   state.deferred=keep;
@@ -673,9 +680,9 @@ function applyPinnedUI(){
 function cycle(it){
   const was=it.state;
   if(it.state==='neutral'){ state.items.forEach(x=>{ if(x.state==='focused') x.state='neutral'; }); it.state='focused'; }
-  else if(it.state==='focused'){ it.state='done'; }
-  else { it.state='neutral'; }
-  if(was!=='done' && it.state==='done') fireConfetti();
+  else if(it.state==='focused'){ it.state='done'; it.doneAt=Date.now(); }
+  else { if(activeCount()>=HARD_CAP) return; it.state='neutral'; delete it.doneAt; }   // done → restore (capped)
+  if(was!=='done' && it.state==='done'){ fireConfetti(); scheduleDonezo(it.id); }
   render();
 }
 
@@ -688,6 +695,39 @@ function setNow(it){
   render();
 }
 function removeItem(id){ state.items=state.items.filter(x=>x.id!==id); render(); }
+
+/* --------------------------- done / "Donezo" --------------------- */
+// Active = items that still pressure you (not done). Red escalation and the
+// add-cap key off THIS, not raw row count — so completing things eases red and
+// done rows can pile up without blocking new work. (Raw .length still bounds
+// nothing here; the cap is on active work.)
+const activeCount = () => state.items.filter(i => i.state!=='done').length;
+const DONEZO_DELAY = 2000;          // savor beat before a done row morphs to "Donezo."
+let donezoEnterId = null;           // one-shot: the row that just became a Donezo (enter anim)
+// A done row shows as its struck self for DONEZO_DELAY, then becomes a Donezo row.
+const isDonezo = it => it.state==='done' && it.doneAt && (Date.now()-it.doneAt) >= DONEZO_DELAY;
+// 2s after a completion, slide the struck row out and re-render it as a Donezo row.
+// Purely visual — the `done` state was already set + saved synchronously, so a
+// reload / rollover / another completion during the window can't corrupt anything.
+function scheduleDonezo(id){
+  setTimeout(()=>{
+    const it=state.items.find(x=>x.id===id);
+    if(!it || it.state!=='done' || !it.doneAt) return;     // un-done during the window → never morph
+    const row=[...todayWrap.children].find(r=>r.dataset.tid===id && !r.classList.contains('donezo-row'));
+    if(row && !reducedMotion()){ row.classList.add('donezo-leaving');
+      setTimeout(()=>{ donezoEnterId=id; render(); }, 150); }
+    else { donezoEnterId=id; render(); }
+  }, DONEZO_DELAY);
+}
+// ↩ undo: restore a done task to the active list (reuses its id; blocked at the cap).
+function restoreItem(id){
+  const it=state.items.find(x=>x.id===id);
+  if(!it || it.state!=='done') return;
+  if(activeCount()>=HARD_CAP) return;                       // already full of active work
+  it.state='neutral'; delete it.doneAt;
+  render();
+}
+function reducedMotion(){ try{ return matchMedia('(prefers-reduced-motion: reduce)').matches; }catch(_){ return false; } }
 
 /* --------------------------- editing ----------------------------- */
 function startEdit(id){
@@ -750,11 +790,12 @@ function render(){
   }
   prevHistOpen=state.histOpen;
   justAddedId=null;                // enter animation is one-shot, consumed above
+  donezoEnterId=null;              // Donezo enter animation is one-shot too
   renderDots();
   requestAnimationFrame(fitToday);
   save();                                  // debounced persist after any mutation
 }
-function warnLevel(){ const n=state.items.length; return n>=HARD_CAP?2 : n===SOFT_CAP?1 : 0; }
+function warnLevel(){ const n=activeCount(); return n>=HARD_CAP?2 : n===SOFT_CAP?1 : 0; }
 
 // Renders the live task list into `wrap`. minRows pads empty "Add" rows so the
 // morning shows ≥3 slots; the drawer passes 1 (just one Add row). Same rows,
@@ -768,7 +809,9 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     ? 'flex:0 0 auto; min-height:120px; padding:0 var(--px);'   // tall enough for the row's edit/sleep/remove icon stack
     : 'flex:1 1 auto; min-height:0; padding:var(--vpad) var(--px);';
   state.items.forEach((it,idx)=>{
+    if(isDonezo(it)){ wrap.appendChild(buildDonezoRow(it, idx, morning)); return; }
     const row=document.createElement('div');
+    row.dataset.tid=it.id;          // lets scheduleDonezo find this row to slide it out
     row.style.cssText=rowStyle;
     const bgClass = it.state==='focused' ? 'row-focused' : 'row-neutral';
     const ring = (kbActive && cursor===idx) ? ' cursor-ring' : '';
@@ -780,18 +823,19 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     const txt=document.createElement('div');
     txt.dataset.tid=it.id; txt.dataset.ph='Untitled'; txt.style.fontSize='var(--fs)';
     txt.style.paddingRight='44px';   // reserve room for the vertical icon stack (narrower than the old side-by-side icons → more text room)
-    txt.style.color = lvl===2 ? '#fff' : lvl===1 ? RED : (it.state==='done' ? 'rgba(0,0,0,.3)' : '#000');
+    txt.style.color = it.state==='done' ? 'rgba(0,0,0,.3)' : (lvl===2 ? '#fff' : lvl===1 ? RED : '#000');   // done stays neutral grey even in a red list
     txt.className='flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2] '+(it.state==='done'?'line-through':'');
     txt.textContent=it.text||''; if(!it.text)txt.classList.add('empty');
     txt.addEventListener('input',()=>{ it.text=txt.textContent.trim(); });
-    txt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); const had=txt.textContent.trim(); txt.blur(); if(had && state.items.length<HARD_CAP){ const nit={id:nid(),text:'',state:'neutral'}; state.items.push(nit); render(); startEdit(nit.id); } } });
+    txt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); const had=txt.textContent.trim(); txt.blur(); if(had && activeCount()<HARD_CAP){ const nit={id:nid(),text:'',state:'neutral'}; state.items.push(nit); render(); startEdit(nit.id); } } });
     txt.addEventListener('blur',()=>{ it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable'); editingId=null; if(!it.text){ state.items=state.items.filter(x=>x.id!==it.id); } render(); });
     row.appendChild(txt);
 
     const onRed=lvl===2;
     // Row actions stacked VERTICALLY on the right: edit, sleep-till-tomorrow, remove.
     const acts=document.createElement('div');
-    acts.className='absolute right-1.5 top-1/2 -translate-y-1/2 flex flex-col items-center gap-[5px] opacity-0 group-hover:opacity-100 transition-opacity';
+    acts.className='absolute top-1/2 -translate-y-1/2 flex flex-col items-center gap-[5px] opacity-0 group-hover:opacity-100 transition-opacity';
+    acts.style.right=ICON_RIGHT;    // universal right padding (aligns with the sheet ✕)
     const mkBtn=(icon,title,fn)=>{ const b=document.createElement('button'); b.title=title;
       b.className='size-[30px] grid place-items-center rounded-full '+(onRed?'text-white hover:bg-white/20':'text-black/40 hover:bg-black/5');
       b.innerHTML=icon;
@@ -808,7 +852,7 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
 
   // Empty "Add" rows — one in the drawer, padded to minRows in the morning. None
   // at the hard cap (full red — there is no 7th).
-  const addRows = state.items.length<HARD_CAP ? Math.max(1, minRows-state.items.length) : 0;
+  const addRows = activeCount()<HARD_CAP ? Math.max(1, minRows-state.items.length) : 0;
   for(let k=0;k<addRows;k++){
     const first = state.items.length===0 && k===0;
     const add=document.createElement('div');
@@ -820,6 +864,39 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     add.addEventListener('click',()=>{ addAndEdit(); });
     wrap.appendChild(add);
   }
+}
+
+// A completed task after its savor beat: bold "Donezo." + struck title + ↩ undo.
+// Compact, always neutral grey (it's done, not pressure). Shared by the list and
+// the calendar's "Today" group — both derive from the same `state.items`.
+function buildDonezoRow(it, idx, morning){
+  const row=document.createElement('div');
+  row.dataset.tid=it.id; row.dataset.idx=idx;
+  row.style.cssText='flex:0 0 auto; min-height:0; padding:'+(morning?'18px':'16px')+' var(--px);';
+  row.className='donezo-row pressable group relative flex items-center overflow-hidden cursor-pointer'
+    +(idx>0?' border-t border-[#d9d9d9]':'')
+    +(it.id===donezoEnterId?' donezo-enter':'');
+  const lab=document.createElement('div');
+  lab.className='flex items-baseline gap-2 min-w-0 flex-1';
+  lab.style.paddingRight='44px';
+  const tag=document.createElement('span');
+  tag.className='font-semibold tracking-[-0.3px] text-black shrink-0'; tag.style.fontSize='15px';
+  tag.textContent='Donezo.';
+  const ttl=document.createElement('span');
+  ttl.className='line-through text-black/35 truncate'; ttl.style.fontSize='15px';
+  ttl.textContent=it.text||'';
+  lab.append(tag, ttl); row.appendChild(lab);
+  const acts=document.createElement('div');
+  acts.className='absolute top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover:opacity-100 transition-opacity';
+  acts.style.right=ICON_RIGHT;
+  const b=document.createElement('button'); b.title='Restore to list';
+  b.className='size-[30px] grid place-items-center rounded-full text-black/40 hover:bg-black/5';
+  b.innerHTML=UNDO;
+  b.addEventListener('mousedown',e=>e.preventDefault());
+  b.addEventListener('click',e=>{ e.stopPropagation(); restoreItem(it.id); });
+  acts.appendChild(b); row.appendChild(acts);
+  row.addEventListener('click',()=>{ if(editingId) return; restoreItem(it.id); });
+  return row;
 }
 
 function renderHist(){
@@ -836,20 +913,34 @@ function histEmpty(msg){
 // PAST: tasks COMPLETED in the recent days (undone items aren't shown — they
 // move forward instead). Grouped by day; only days with completions appear.
 function renderPast(){
-  const days=lastNDays(state.settings.historyDays||7)
+  const todayDone = state.items.filter(it=>it.state==='done');     // live: today's completions
+  const past = lastNDays(state.settings.historyDays||7)
     .map(d=>({ name:d.name, items:d.items.filter(it=>it.done) }))
     .filter(d=>d.items.length);
-  if(!days.length){ histBody.appendChild(histEmpty('No completed tasks yet.')); return; }
-  days.forEach((day,di)=>{
+  if(!todayDone.length && !past.length){ histBody.appendChild(histEmpty('No completed tasks yet.')); return; }
+  const groups=[];
+  if(todayDone.length) groups.push({ name:'Today', items:todayDone, today:true });
+  past.forEach(d=>groups.push({ name:d.name, items:d.items, today:false }));
+  groups.forEach((day,di)=>{
     const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
     const h=document.createElement('div');
     h.className='chrome text-[18px] font-medium tracking-[-0.36px] text-black mb-1';
     h.textContent=day.name; grp.appendChild(h);
     day.items.forEach(it=>{
-      const r=document.createElement('div'); r.className='hrow relative flex items-center py-1.5';
-      const t=document.createElement('div');
-      t.className='chrome text-[18px] tracking-[-0.36px] line-through text-black/35';
-      t.textContent=it.text; r.appendChild(t);
+      const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(day.today?' pr-[44px]':'');
+      const lab=document.createElement('div'); lab.className='flex items-baseline gap-2 min-w-0 flex-1';
+      const tag=document.createElement('span'); tag.className='font-semibold tracking-[-0.3px] text-black shrink-0'; tag.style.fontSize='18px'; tag.textContent='Donezo.';
+      const t=document.createElement('span'); t.className='tracking-[-0.36px] line-through text-black/35 truncate'; t.style.fontSize='18px'; t.textContent=it.text;
+      lab.append(tag,t); r.appendChild(lab);
+      if(day.today){
+        const u=document.createElement('button'); u.title='Restore to list';
+        u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 opacity-0 group-hover/h:opacity-100 transition-opacity';
+        u.style.right=ICON_RIGHT;
+        u.innerHTML=UNDO;
+        u.addEventListener('mousedown',e=>e.preventDefault());
+        u.addEventListener('click',()=>restoreItem(it.id));
+        r.appendChild(u);
+      }
       grp.appendChild(r);
     });
     histBody.appendChild(grp);
@@ -916,7 +1007,7 @@ function renderHistHeader(){
     b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; render(); } });
     return b;
   };
-  seg.append(mkSeg('future','Future'), mkSeg('past','Past'));
+  seg.append(mkSeg('future','Future'), mkSeg('past','Done'));
   // ✕ close — same affordance as Settings.
   const close=document.createElement('button'); close.title='Close';
   close.className='chrome-btn pressable size-[36px] grid place-items-center rounded-full';
@@ -959,7 +1050,7 @@ function toggleUndone(){
     const rec=state.history[0];
     undoneIds=[];
     (rec?rec.items.filter(it=>!it.done):[]).forEach(it=>{
-      if(state.items.length<HARD_CAP){ const nit={id:nid(),text:it.text,state:'neutral'}; state.items.push(nit); undoneIds.push(nit.id); }
+      if(activeCount()<HARD_CAP){ const nit={id:nid(),text:it.text,state:'neutral'}; state.items.push(nit); undoneIds.push(nit.id); }
     });
     undoneAdded=true;
   } else {
@@ -985,7 +1076,7 @@ $('#devMorning').addEventListener('click',showMorning);
    ==================================================================== */
 let justAddedId=null;            // the one row that should play the enter animation
 function addAndEdit(){
-  if(state.items.length>=HARD_CAP) return;     // visible-but-inert at the cap
+  if(activeCount()>=HARD_CAP) return;     // visible-but-inert at the cap
   const it={id:nid(),text:'',state:'neutral'};
   state.items.push(it);
   justAddedId=it.id;
