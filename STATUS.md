@@ -25,7 +25,7 @@ cd ~/Projects/buddy && source "$HOME/.cargo/env" && set -a && source .env && set
 - `tauri build` refused `frontendDist: "../"` (it would bundle node_modules/src-tauri/target). Fixed by moving the web app into `dist/` and pointing `tauri.conf.json` there (commit 46bbd2c). Confirmed working — build now reaches signing.
 - Codesign failed with `errSecInternalComponent` (background process couldn't reach the keychain). Fixed by the owner clicking **"Always Allow"** once on the keychain prompt — persists across restarts.
 
-**Credentials:** `.env` (gitignored, local only) holds the 4 Apple vars — issuer ID, Key ID `8LPB7CQ8S8`, the `.p8` path, and signing identity `Developer ID Application: Wimp Decaf Coffee Company Inc. (9QDAAYWU9X)`. Never commit these.
+**Credentials:** `.env` (gitignored, local only) holds the 4 Apple vars — issuer ID, Key ID, the `.p8` key path, and the Developer ID signing identity. The actual values live only in `.env`; never print them in tracked files or commit them.
 
 ## How to run (dev)
 

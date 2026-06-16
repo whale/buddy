@@ -72,3 +72,7 @@ Built to match the Foundation / Shapeshifter visual language: Graphik type, flat
 
 1. ✅ **Web-complete (done):** persistence + daily rollover + real history (Phase A); 100-party-parrot completion confetti with a settings toggle, full keyboard control, and a slight/speedy animation pass (Phase B). All self-verified with Playwright.
 2. **Mac shell (Tauri):** menu-bar item, global hotkey, right-edge reveal, pin, wallpaper-behind. See `PLAN.md` §11.
+
+## Credits
+
+Menu-bar icon: the "sticker" glyph from [Lucide](https://lucide.dev) (ISC License) — free for open-source and commercial use.

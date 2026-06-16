@@ -15,3 +15,10 @@ pnpm-lock.yaml
 
 # Apple signing / notarization creds — never commit
 .env
+
+# Cross-platform icons emitted by `tauri icon` that this Mac-only app doesn't use
+src-tauri/icons/Square*Logo.png
+src-tauri/icons/StoreLogo.png
+src-tauri/icons/icon.ico
+src-tauri/icons/ios/
+src-tauri/icons/android/
