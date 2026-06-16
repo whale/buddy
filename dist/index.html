@@ -306,6 +306,10 @@
         </div>
         <button id="exportBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Export my done tasks</button>
         <button id="restartBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Restart Buddy <span class="text-black/30">· dev</span></button>
+        <button id="updateBtn" class="pressable w-full px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02] flex items-center justify-between gap-3 text-left">
+          <span id="updateLabel">Check for Updates</span>
+          <span id="updateStatus" class="text-[15px] text-black/35 shrink-0"></span>
+        </button>
         <button id="quitBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] hover:bg-black/[0.02]">Quit Buddy</button>
       </div>
       <!-- version, pinned to the bottom of the sheet -->
@@ -1178,6 +1182,33 @@ $('#quitBtn')?.addEventListener('click', e=>{ e.stopPropagation();
 (async()=>{ let v='0.2.0';
   try{ const t=window.__TAURI__; if(t&&t.core) v=await t.core.invoke('app_version'); }catch(_){}
   const el=$('#appVersion'); if(el) el.textContent='v'+v;
+})();
+// Check for Updates: first click checks; if one's found, the button becomes
+// "Install … & Relaunch" — a second click downloads, installs, and restarts
+// into the new version. All native (Rust commands); inert in the web demo.
+(function(){
+  const btn=$('#updateBtn'), label=$('#updateLabel'), status=$('#updateStatus');
+  if(!btn) return;
+  let mode='idle';   // idle | checking | available | working
+  function set(m, l, s){ mode=m; if(l!=null) label.textContent=l; status.textContent=s||''; }
+  btn.addEventListener('click', async e=>{
+    e.stopPropagation();
+    const t=window.__TAURI__;
+    if(!t||!t.core){ set('idle','Check for Updates','native only'); return; }
+    if(mode==='checking'||mode==='working') return;
+    if(mode==='available'){
+      set('working','Updating…','please wait');
+      try{ await t.core.invoke('install_update'); /* app relaunches on success */ }
+      catch(err){ set('idle','Check for Updates','update failed'); }
+      return;
+    }
+    set('checking','Checking…','');
+    try{
+      const ver=await t.core.invoke('check_for_update');
+      if(ver) set('available','Install v'+ver+' & Relaunch','ready');
+      else set('idle','Check for Updates','up to date ✓');
+    }catch(err){ set('idle','Check for Updates','check failed'); }
+  });
 })();
 // morning "Skip today"
 $('#skipToday')?.addEventListener('click', e=>{ e.stopPropagation(); skip(); });

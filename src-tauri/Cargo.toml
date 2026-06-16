@@ -1,6 +1,6 @@
 [package]
 name = "buddy"
-version = "0.2.10"
+version = "0.2.11"
 description = "Buddy — a calm day companion that lives on the right edge of your screen."
 authors = ["Whale"]
 edition = "2021"
@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri-plugin-updater = "2"   # in-app auto-update from GitHub Releases
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"   # decode the bug-report screenshot from the webview
