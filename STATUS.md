@@ -1,56 +1,44 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-06-14. Branch: `fix/build-frontend-dist` (commit 46bbd2c, not yet merged)._
+_Last updated: 2026-06-16. Branch: `main` (clean). Latest release: **v0.2.15**. main version: 0.2.17._
 
-A macOS menu-bar focus app for ADHD: each morning pick your top three; a right-edge drawer holds them all day; mark one "now", check things off, glance at recent history. Repo: **github.com/whale/buddy** (private).
+Buddy is a **shipped, public, self-updating** macOS menu-bar focus app for ADHD.
+Repo: **github.com/whale/buddy** (PUBLIC, MIT). Download: **github.com/whale/buddy/releases/latest**.
 
-## ⏳ Current focus: first beta DMG (in progress, paused on restart)
+## ✅ What's live (all shipped this session)
 
-We are building Buddy's first **signed + notarized universal DMG** so testers can download it from GitHub and run it with no scary warnings.
+- **Native Mac app** — Developer-ID signed (Wimp Decaf Coffee Company Inc. `9QDAAYWU9X`) + notarized + **universal** (arm64 + x86_64), macOS 13+.
+- **Auto-updater** — banner auto-checks on launch; Settings → Check for Updates; updates pull from GitHub Releases via a `latest.json` manifest. Update signing key at `~/.tauri/buddy-updater.key` (private — never commit).
+- **Offline** — Tailwind + Inter bundled locally (no CDN).
+- **"Donezo" completed-task flow** — complete → confetti → ~2s savor → the row **glides (FLIP) to the top** as a bold **"Donezo."** row; also files under **Calendar → Done → Today**; hover **↩** to restore (capped at 6 active). Done items don't count toward the red escalation.
+- **Red escalation** — 5 active = text red (lvl1), 6 = whole drawer red (lvl2). Donezo/done text uses the adaptive `--ink`/`--ink-dim` tokens so it stays legible on red.
+- **Tray menu** — Show/Hide · Settings… · Report a bug · Quit.
+- **Docs** — tester-facing `README.md`, `CLAUDE.md` (design + verify-every-build rules), `RELEASE-UPDATER.md` (build/sign/notarize/publish runbook).
+- **Smoke test** — `window.__buddy.smokeTest()` (8 core checks incl. red-state legibility). **Required before every build** (CLAUDE.md Rule 2).
 
-**Where we paused:** the build reached Apple's **notarization** step and was waiting on Apple when the owner restarted the Mac. The restart stops the local build, but everything heavy is cached, so resuming is quick.
+## Verified this session
+- Auto-updater end-to-end (0.2.11 → … → 0.2.15 via the in-app updater).
+- Donezo flow, undo, red recalc, sort-to-top, calendar, offline styling, lvl0/lvl1/lvl2 legibility — via browser smoke test + screenshots.
+- v0.2.15 published, notarization **Accepted**, repo public.
 
-**To resume (next session):** say "resume the Buddy build". It re-runs:
-```
-cd ~/Projects/buddy && source "$HOME/.cargo/env" && set -a && source .env && set +a && pnpm tauri build --target universal-apple-darwin --bundles dmg
-```
-(Stop any `tauri dev`/cargo first to free the build lock. Run in background.)
+## ⚠️ Not verified — needs the owner on-device
+- **White-seam flash** on edge reveal — attempted fix (resize window before sliding the drawer). If still flashing, escalate to the deeper fix: keep the window full-width and make it click-through (`setIgnoreCursorEvents`) when hidden.
+- **Tray → Settings…** opening the drawer + settings sheet.
 
-**After the DMG is produced** at `src-tauri/target/universal-apple-darwin/release/bundle/dmg/Buddy_<version>_universal.dmg`:
-1. Verify: `xcrun stapler validate <dmg>` and `spctl -a -vvv -t install <dmg>` → must say **"Notarized Developer ID"**.
-2. Open a PR for `fix/build-frontend-dist` and merge to `main` (branch-first rule).
-3. Upload the DMG to a **private GitHub Release** (`gh release create`) → shareable tester link.
+## Known quirks
+- `main` version (0.2.17) drifts **ahead** of the latest release (v0.2.15) — the auto-bump GitHub Action fires on every merge, including docs. The next build from main = whatever main's version is.
+- The **DMG container isn't stapled** (the `.app` inside is). Fine for online installs; staple before relying on offline first-launch.
+- Apple's **timestamp service** had a ~1.5h outage this session → 6 consecutive `codesign` failures ("timestamp service is not available"). If it recurs, it's external — just retry later.
 
-**Resolved this session:**
-- `tauri build` refused `frontendDist: "../"` (it would bundle node_modules/src-tauri/target). Fixed by moving the web app into `dist/` and pointing `tauri.conf.json` there (commit 46bbd2c). Confirmed working — build now reaches signing.
-- Codesign failed with `errSecInternalComponent` (background process couldn't reach the keychain). Fixed by the owner clicking **"Always Allow"** once on the keychain prompt — persists across restarts.
-
-**Credentials:** `.env` (gitignored, local only) holds the 4 Apple vars — issuer ID, Key ID, the `.p8` key path, and the Developer ID signing identity. The actual values live only in `.env`; never print them in tracked files or commit them.
+## Next likely work (the "share it widely" polish)
+1. **Landing page** (GitHub Pages): hero + screenshots + a big Download button — the designer-shareable face.
+2. **Staple the DMG** for offline first-launch + a **stable "always-latest" download** asset name (current DMG name is versioned).
+3. **Friendly first-run hint** (it's a menu-bar app — where it went) + confirm the white-seam + tray Settings on-device.
+4. Optional delight: more parrot variants / a bigger flourish when all three are done.
 
 ## How to run (dev)
-
-**Web app (fastest to iterate):**
 ```
-cd ~/Projects/buddy/dist && python3 -m http.server 4500   # open http://localhost:4500
+cd dist && python3 -m http.server 4500     # web app → http://localhost:4500
+pnpm tauri dev                             # native Mac app
 ```
-(Note: the web app moved from the repo root into `dist/` this session.)
-
-**Native Mac app (Tauri):**
-```
-cd ~/Projects/buddy && source "$HOME/.cargo/env" && pnpm tauri dev
-```
-To clear app data and see a fresh morning: quit, `rm -rf ~/Library/WebKit/buddy`, relaunch.
-
-## What's shipped (merged to main before this session)
-
-Edge-reveal hide/show on the right screen edge; macOS-correct soft drop shadow; Quit + version in Settings; calendar-icon history with Future/Past tabs, days-of-history setting, sleep-till-tomorrow and resume-from-yesterday; CSS-variable theming for the 5-text / 6-bg escalation states; live morning planner; compact morning sizing; "Report a bug" menu item (Buddy-only screenshot + logs → email); opt-in "Reserve space when pinned" (Accessibility window-nudging, off by default, skips system overlays); left-click opens the tray menu; auto version-bump GitHub Action.
-
-## Not verified yet / deferred
-
-- **The DMG itself** — not yet built/verified end-to-end (that's the resume task above).
-- **On-device testing in the signed build:** reserve-space nudging, report-bug auto-attach in Apple Mail (needs the signed build), compact morning. Owner to test once the DMG exists.
-- **Before a wider public release** (not needed for closed beta): bundle Tailwind locally + tighten CSP; friendly first-run Accessibility-permission screen.
-
-## Key files
-
-`dist/index.html` (whole web app), `dist/assets/` (parrot gifs + vendored html2canvas), `src-tauri/` (Tauri shell, signing config, entitlements), `RELEASE.md` + `BETA-SETUP.md` (distribution guides), `PLAN.md` (full spec), `README.md`, `README-MAC.md`.
+Pre-build gate: `await window.__buddy.smokeTest()` must be `{ ok: true }`, plus a visual lvl0/lvl1/lvl2 red-state sweep (CLAUDE.md Rule 2).
