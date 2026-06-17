@@ -1,78 +1,85 @@
 # Buddy
 
-A tiny macOS focus companion for ADHD. Each morning it asks for your **top three** things. All day it lives as a drawer at the right edge of your screen — hover to peek, pin to keep it open. You mark which one you're on **now**, check things off, and glance back at the **last 7 days** so you never lose your place when you get yanked away.
+A tiny, calm macOS focus companion — built for ADHD brains.
 
-> Status: **web app complete (Phase A + B).** The native Mac shell comes next.
+Each morning Buddy asks for your **top three** things. All day it lives quietly in your **menu bar**, with a drawer that slides out from the right edge of your screen. You mark which one you're on **now**, check things off (with a little celebration), and glance back at what you've finished — so you never lose your place when life yanks you away.
 
-## What's here
+---
 
-- `index.html` — the full interactive web app (single self-contained file: Tailwind via CDN + vanilla JS). Open it in a browser, or serve it:
-  ```
-  cd buddy && python3 -m http.server 4399
-  # then open http://localhost:4399
-  ```
-- `assets/parrot.gif` — the party-parrot confetti image (see *Confetti asset* below).
-- `PLAN.md` — the thorough, adversarially-reviewed plan for the overnight build (persistence, daily rollover, completion confetti + settings, keyboard control, animation pass) and the Phase-2 Mac shell.
-- `.screenshots/` — captured states for review (morning, list, soft/hard-cap red, history, settings, confetti mid-burst). Gitignored.
+## ⬇️ Download & try it
 
-## The prototype, in a minute
+**[Download the latest version →](https://github.com/whale/buddy/releases/latest)**
 
-- **Morning** — a calm, light screen asks for up to 3 things. Press Enter between them.
-- **Drawer** — hides at the right edge; hover the thin strip to reveal, or **pin** (icon in the Buddy pill) to keep it open.
-- **A thing's life** — click it to cycle **now** (grey) → **done** (struck through) → neutral. Hover to **edit** (pencil) or **remove** (×).
-- **The edge** — 4 is fine; **5** turns every word red; **6** turns the whole drawer red (no 7th).
-- **Last 7 days** — the bar at the bottom rises to the top and reveals your history. Pull an unfinished thing forward with **+** (it gets a TODAY badge); undo removes it.
-- **Completing a task throws confetti** — 100 party-parrots rain down. Turn it off in **Settings** (the gear in the Buddy pill).
+On that page, grab the **`Buddy_…_universal.dmg`** file.
+
+**Requirements:** macOS 13 (Ventura) or later · works on both Apple Silicon and Intel Macs.
+
+### Install (about 30 seconds)
+1. **Open** the downloaded `.dmg`.
+2. **Drag Buddy** onto the **Applications** folder.
+3. Open **Applications** and **double-click Buddy**.
+4. The first time, macOS asks *"Buddy was downloaded from the Internet — open?"* — click **Open**. (It's signed and notarized by Apple, so there's no scary warning.)
+5. **Look at your menu bar** (top-right of your screen) — Buddy lives there as a little sticker icon. There's no Dock icon; the menu bar is home.
+
+### Where did it go?
+Buddy is a **menu-bar app**, so it won't show in your Dock. Click the sticker icon up top to show/hide it, open settings, or quit. The drawer also reveals when you move your mouse to the **right edge** of your screen.
+
+### Updates are automatic
+Buddy checks for new versions on its own. When one's ready, a banner slides in offering **Install & Relaunch** — one click and you're up to date. (You can also check manually in **Settings → Check for Updates**.)
+
+### Something broken or weird?
+Use **Report a bug…** in the menu-bar icon's menu — it attaches a screenshot of just Buddy plus logs to an email draft. That's the best way to send feedback.
+
+---
+
+## How to use it, in a minute
+
+- **Morning** — a calm screen asks for up to **3** things. Press Enter between them.
+- **A task's life** — click it to set it as **now**, click again to mark it **done**. Done tasks celebrate with confetti, then slide up to the top as **"Donezo."** rows (and also file themselves under **Calendar → Done → Today**). Hover any done row for the **↩ undo** to bring it back.
+- **The gentle nudge** — 4 tasks is fine. **5** turns the text red; **6** turns the whole drawer red — Buddy's quiet way of saying *that's a lot*. Finishing things eases the red back down.
+- **Pin it** — the pin icon keeps the drawer open so it doesn't tuck away.
+- **History** — the calendar icon shows what you've finished and what's coming up.
 
 ## Keyboard control
 
-Buddy is fully driveable from the keyboard (a stand-in for the future global hotkey):
+Buddy is fully driveable from the keyboard:
 
 | Key | Does |
 |-----|------|
-| `` ` `` (backtick) | Toggle the drawer open/closed (instant, no animation) |
-| ↑ / ↓ | Move the cursor ring between today's tasks and the Add row |
+| `` ` `` (backtick) | Toggle the drawer open/closed |
+| ↑ / ↓ | Move between today's tasks and the Add row |
 | Enter | On a task: cycle it (→ done throws confetti). On Add: add + edit |
-| F | Set the cursored task as **now** (focused) without cycling |
-| E | Edit the cursored task |
-| ⌫ / Delete | Remove the cursored task |
-| A or + | Add a new task and start editing |
+| F | Set the cursored task as **now** without cycling |
+| E | Edit · ⌫ / Delete | Remove · A or + | Add a task |
 | Esc | Commit an edit, else close history, else close the drawer |
 
-The **cursor ring** (a thin outline) is navigation; the grey **now** fill is a task *state*. They look different on purpose. While you're editing a task, the global keys go quiet so they don't double-fire.
+---
 
-## Confetti asset
+## For developers
 
-The celebration uses **party-parrot GIFs** (`assets/parrot.gif`, sourced from
-[cultofthepartyparrot.com](https://cultofthepartyparrot.com)). If the file is missing or
-couldn't be downloaded, Buddy automatically falls back to the 🦜 **emoji** — same burst,
-no broken images. Drop a real `assets/parrot.gif` in and it upgrades on next load, no code
-change needed.
+Buddy is a single self-contained web app (`dist/index.html`, vanilla JS + locally-bundled Tailwind & Inter) wrapped in a **Tauri v2** macOS shell (`src-tauri/`). MIT licensed.
 
-> **Note (this build):** the GIF host was unreachable from the build sandbox, so the
-> bundled confetti currently uses the **🦜 emoji fallback**. To use the real GIF, run
-> `curl -L -o assets/parrot.gif https://cultofthepartyparrot.com/parrots/hd/parrot.gif`
-> from the `buddy/` folder.
+```bash
+# Run the web app standalone (fastest to iterate on the UI)
+cd dist && python3 -m http.server 4500    # → http://localhost:4500
 
-Confetti is **skipped entirely** when your system is set to *reduce motion* (the Settings
-toggle then shows as disabled/overridden, not silently dead).
+# Run the native Mac app
+pnpm tauri dev
+```
 
-## Console messages (expected, not errors)
+Before every release, run the core smoke test in the browser console — it must return `{ ok: true }`:
 
-Serving the app logs two benign messages: the **Tailwind CDN** "should not be used in
-production" warning (by design — we bundle Tailwind when we wrap for Mac), and, until the
-real GIF is added, a **404 for `assets/parrot.gif`** that triggers the emoji fallback.
-Neither breaks anything.
+```js
+await window.__buddy.smokeTest()
+```
 
-## Design
-
-Built to match the Foundation / Shapeshifter visual language: Graphik type, flat (no shadows), 24px-radius white cards, `#f4f4f4` selected fill, `#d9d9d9` hairlines.
-
-## Roadmap
-
-1. ✅ **Web-complete (done):** persistence + daily rollover + real history (Phase A); 100-party-parrot completion confetti with a settings toggle, full keyboard control, and a slight/speedy animation pass (Phase B). All self-verified with Playwright.
-2. **Mac shell (Tauri):** menu-bar item, global hotkey, right-edge reveal, pin, wallpaper-behind. See `PLAN.md` §11.
+See **`CLAUDE.md`** for the design + verification rules, **`RELEASE-UPDATER.md`** for the build/sign/notarize/publish flow, and **`PLAN.md`** for the original spec.
 
 ## Credits
 
-Menu-bar icon: the "sticker" glyph from [Lucide](https://lucide.dev) (ISC License) — free for open-source and commercial use.
+- Menu-bar + app icon: the "sticker" glyph from [Lucide](https://lucide.dev) (ISC License).
+- Completion confetti: party-parrots from [cultofthepartyparrot.com](https://cultofthepartyparrot.com).
+
+## License
+
+[MIT](LICENSE) © Matthew Matsuzaki
