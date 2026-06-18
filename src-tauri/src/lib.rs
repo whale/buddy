@@ -55,6 +55,12 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// True for debug (dev) builds, false for release. Drives the "Dev Buddy" header.
+#[tauri::command]
+fn is_dev() -> bool {
+    cfg!(debug_assertions)
+}
+
 /// Percent-encode for a mailto: URL (unreserved chars pass through).
 fn percent_encode(s: &str) -> String {
     s.bytes()
@@ -407,7 +413,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, report_bug, set_reserve, check_for_update, install_update, load_state, save_state])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, set_reserve, check_for_update, install_update, load_state, save_state])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).
@@ -424,14 +430,21 @@ pub fn run() {
                 .items(&[&quit_item])
                 .build()?;
 
+            // Dev builds use a RED, non-template tray icon so a running dev instance is
+            // unmistakable next to the installed (black, templated) release app.
+            let dev = cfg!(debug_assertions);
+            let tray_icon = if dev {
+                tauri::image::Image::from_bytes(include_bytes!("../icons/tray-dev.png")).expect("tray icon")
+            } else {
+                tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")).expect("tray icon")
+            };
             let _tray = TrayIconBuilder::with_id("buddy-tray")
-                // lucide "sticker" glyph (black on transparent → templated by macOS)
-                .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")).expect("tray icon"))
-                // `icon_as_template(true)` makes macOS tint a black-on-transparent
-                // icon for light/dark menu bars. Our placeholder tray PNG is built
-                // that way. If you swap in a colored icon, set this to false.
-                .icon_as_template(true)
-                .tooltip("Buddy")
+                .icon(tray_icon)
+                // Release icon is black-on-transparent → templated so macOS tints it for
+                // light/dark menu bars. The dev (red) icon must NOT be templated, or the
+                // red would be flattened to monochrome.
+                .icon_as_template(!dev)
+                .tooltip(if dev { "Dev Buddy" } else { "Buddy" })
                 .menu(&menu)
                 // A normal (left) click opens the menu. Buddy itself is summoned by
                 // the right screen-edge, the global shortcut, or the menu's Show/Hide.

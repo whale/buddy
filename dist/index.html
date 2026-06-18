@@ -278,7 +278,7 @@
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
       </div>
-      <span class="chrome text-[18px] text-black/60 tracking-[-0.36px]">Buddy</span>
+      <span id="appTitle" class="chrome text-[18px] text-black/60 tracking-[-0.36px]">Buddy</span>
     </div>
     <div class="divider h-px w-full bg-[#d9d9d9]"></div>
     <div class="flex items-end justify-between p-8">
@@ -1742,7 +1742,12 @@ function bootFinish(recovered){
 }
 function boot(){
   cursor=0; kbActive=false; editingId=null;  // reset transient keyboard cursor on (re)boot
-  if(NATIVE) document.body.classList.add('native');
+  if(NATIVE){
+    document.body.classList.add('native');
+    // Dev builds: rename the header to "Dev Buddy" so it's never confused with the
+    // installed release app (which also gets a red menu-bar icon, set in Rust).
+    window.__TAURI__.core.invoke('is_dev').then(dev=>{ if(dev){ const t=$('#appTitle'); if(t) t.textContent='Dev Buddy'; document.title='Dev Buddy'; } }).catch(()=>{});
+  }
   load();                                    // granular: a bad slice never wipes valid history
   // Native: ALWAYS reconcile localStorage against the durable file and keep whichever
   // was saved most recently. localStorage is origin-bound, so a relaunch can land on a
