@@ -315,6 +315,34 @@ fn set_reserve(on: bool) {
     let _ = on;
 }
 
+// ============ Durable state file — the origin-independent source of truth ============
+// localStorage is bound to the webview ORIGIN, so a dev-port change / dev→prod / a
+// Tauri config change opens a different (often empty) store and strands the old data.
+// We mirror every save to a plain JSON file in the app-data dir, which is
+// origin-independent and survives a localStorage clear. Written atomically (temp file
+// + rename) so a crash mid-write can never truncate the good copy.
+fn state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join("buddy-state.json"))
+}
+
+#[tauri::command]
+fn load_state(app: AppHandle) -> Option<String> {
+    let p = state_file(&app)?;
+    std::fs::read_to_string(p).ok()
+}
+
+#[tauri::command]
+fn save_state(app: AppHandle, blob: String) -> Result<(), String> {
+    let p = state_file(&app).ok_or("no app data dir")?;
+    if let Some(dir) = p.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let tmp = p.with_extension("json.tmp");
+    std::fs::write(&tmp, blob.as_bytes()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &p).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Auto-updater: ask GitHub Releases whether a newer signed build exists.
 /// Returns Some(version) if an update is available, None if we're current.
 #[tauri::command]
@@ -347,6 +375,19 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
 pub fn run() {
     let mut builder = tauri::Builder::default();
 
+    // Single-instance guard MUST be the first plugin registered (Tauri requirement).
+    // If Buddy is already running, a second launch just focuses the existing window —
+    // two webviews must never fight over the same state file.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }));
+    }
+
     // Global shortcut plugin — desktop only. Backtick summons Buddy.
     #[cfg(desktop)]
     {
@@ -366,7 +407,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, report_bug, set_reserve, check_for_update, install_update])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, report_bug, set_reserve, check_for_update, install_update, load_state, save_state])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).

@@ -24,6 +24,9 @@ base64 = "0.22"   # decode the bug-report screenshot from the webview
 # Global shortcut is desktop-only; gate it off mobile targets.
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-global-shortcut = "2"
+# Single-instance guard: a menu-bar app must never run twice (two webviews would
+# fight over the same state file). Desktop-only.
+tauri-plugin-single-instance = "2"
 # Reads the OS cursor position so the whole right screen-edge can be the reveal
 # trigger (a webview can only see the mouse inside its own window).
 mouse_position = "0.1"
