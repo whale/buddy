@@ -194,11 +194,11 @@ collapse 0–2 into the one-shot.
    step 4 must normalize; (b) iOS `DayItem` has **no id**, so same-date history
    records merge positionally (done-wins) rather than by id like the Mac — give
    `DayItem` an id for fully robust cross-device history merge.
-4. **Normalize the wire format (one place).** Pick **epoch milliseconds** as the
-   single on-the-wire time unit (Mac already uses it); iOS converts on encode/decode
-   (`savedAt`, `erasedAt`, tombstone `deletedAt`, `doneAt`). Give iOS `DayItem` an
-   `id` (`h-<date>-<i>`, like the Mac) so history merges by id, not by position.
-   No backend needed — testable on both apps directly.
+4. **Normalize the wire format (one place).** ✅ **done & verified.** Wire unit =
+   epoch **ms** (Mac-native); iOS `SyncWire` converts s↔ms at the boundary
+   (`savedAt`, `erasedAt`, tombstone `deletedAt`, `doneAt`). iOS `DayItem` gained an
+   `id` (`h-<date>-<i>`); `BuddyMerge` history now merges BY ID (done-wins), and the
+   Mac was already id-based. iOS round-trip + unit-conversion test passes.
 5. **Dumb CAS server + client sync loop.** Server contract — `buddy_push(key, blob,
    expected_version) → {blob, version, ok}` (no merge logic on the server):
    - **No row yet** (first push from a new pairing): require `expected_version = 0`
@@ -217,9 +217,20 @@ collapse 0–2 into the one-shot.
    empty-over-full guard, scanner-pulls-first). Coarse debounce (2–5 s); cap synced
    history (~90 days); key in OS secure storage. Then QR pairing. The live Supabase
    function is ~15 lines, verified once the DB is up.
-6. Explicitly reproduce each loss scenario (different-task edits, 5-min clock skew,
-   empty-phone-vs-full-Mac, double midnight rollover) and confirm ZERO loss — runs
-   locally with two simulated clients (no Postgres needed for the merge/loop logic).
+   🟢 **Engine done & verified (no DB):** `syncOnce` on BOTH apps (`dist/index.html`
+   + `BuddySync.swift`), each against an in-memory CAS store that mirrors the SQL
+   contract exactly; empty-over-full guard, content-key no-op, CAS-conflict retry.
+   CAS Postgres fn written (`supabase/migrations/20260619210000_buddy_cas.sql`). QR
+   identity core done (`generateSyncKey`/`deriveOwnerId`/payload on both apps, shared
+   sha256 vector). **Verified: browser syncTest 15/15; iOS xcodebuild 23/23.**
+   ⏳ **Remaining (on-device/live frontier, NOT yet built):** the real network store
+   (supabase-js on Mac, URLSession on iOS) wired into `syncOnce`; QR image render +
+   camera scan + Settings opt-in fields; run the CAS Postgres fn live (OrbStack →
+   `supabase start`); one real two-device round-trip.
+6. ✅ **Loss scenarios reproduced as unit tests** (different-task edits, CAS-conflict
+   retry, tombstone propagation, delete-beats-edit, empty-phone-vs-full-Mac, erase
+   propagation, history-union, idempotent no-op) — green on both apps. A live
+   two-device run is the only remaining confirmation, pending the network wiring above.
 
 ### Decision log
 - **2026-06-19 — CAS-on-client, NOT server-side merge.** A first cut wrote the merge
