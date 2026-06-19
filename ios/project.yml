@@ -65,13 +65,32 @@ targets:
         ENABLE_PREVIEWS: YES
         SWIFT_EMIT_LOC_STRINGS: YES
 
+  # Unit tests (sync step 3: the pure merge() suite). Logic-only — no host app
+  # needed, so it runs fast on any simulator without signing the app.
+  BuddyTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Buddy/Tests
+    dependencies:
+      - target: Buddy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fyi.whale.buddyTests
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   Buddy:
     build:
       targets:
         Buddy: all
+        BuddyTests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - BuddyTests
     profile:
       config: Release
     analyze:

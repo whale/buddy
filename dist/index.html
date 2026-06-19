@@ -612,6 +612,125 @@ function applyHydrated(h){
   state.erasedAt   = (typeof h.erasedAt==='number') ? h.erasedAt : null;
 }
 
+/* ====================================================================
+   SYNC STEP 3 — pure field-level merge of two state snapshots.
+
+   merge(a, b) takes two HYDRATED blobs (the shape hydrate() returns; either
+   may be null) and returns one merged blob that loses NOTHING. It is pure —
+   it reads its inputs and returns a fresh object, mutating neither. The
+   adversarial review killed whole-doc last-write-wins (it silently drops one
+   device's edits on any two-device day); this is the field-level replacement.
+
+   Rules:
+   - tombstones  → union, keeping the latest deletedAt per id. A deleted id
+                   can never be resurrected by a stale snapshot that still has it.
+   - erasedAt    → the latest erase-all wins, and acts as a BARRIER: any source
+                   saved BEFORE that erase is "pre-erase" and its items/history
+                   are void (so a real wipe propagates over older data).
+   - today items → keyed by id; the higher per-item v wins (v rises on every
+                   edit), tie broken by the more-recent doneAt. Tombstoned ids
+                   are dropped. The newer save's item order is preserved.
+   - history     → union by date; same-date records merge item-by-item with
+                   done-wins (a completion never un-completes).
+   - deferred    → union by id, tombstoned ids dropped.
+   - settings / pinned / today date+morningDone → the newer save wins (scalars).
+
+   NOTE (step 4): this compares timestamps freely, which is correct for the
+   Mac localStorage↔file reconcile (one device, one clock). Cross-device merge
+   must first normalize timestamp UNITS (Mac ms vs Swift seconds) — see
+   IOS-COMPANION-PLAN.md. Don't wire this to the network before that.
+   ==================================================================== */
+function mergeTombstones(a, b){
+  const out = { ...(a||{}) };
+  for(const [id,t] of Object.entries(b||{})) out[id] = Math.max(out[id]||0, t||0);
+  return out;
+}
+// Pick the surviving version of one today-item present on both sides.
+function pickItem(x, y){
+  const vx = x.v|0, vy = y.v|0;
+  if(vy > vx) return y;
+  if(vx > vy) return x;
+  return (y.doneAt||0) > (x.doneAt||0) ? y : x;   // tie on v → newer completion wins, else keep x
+}
+function mergeItems(primary, secondary, tombstones){
+  const sec = new Map((secondary||[]).filter(i=>i&&i.id).map(i=>[i.id,i]));
+  const seen = new Set();
+  const out = [];
+  for(const it of (primary||[])){               // primary = newer save → keeps its order
+    if(!it||!it.id) continue;
+    seen.add(it.id);
+    if(it.id in tombstones) continue;
+    const other = sec.get(it.id);
+    out.push(other ? pickItem(it, other) : it);
+  }
+  for(const it of (secondary||[])){              // items only on the older save → keep, don't lose
+    if(!it||!it.id||seen.has(it.id)) continue;
+    if(it.id in tombstones) continue;
+    out.push(it);
+  }
+  return out;
+}
+function mergeHistRecord(x, y){
+  const items = new Map();
+  for(const it of [...(x.items||[]), ...(y.items||[])]){
+    if(!it||!it.id) continue;
+    const p = items.get(it.id);
+    items.set(it.id, p ? { ...p, done: !!(p.done||it.done) } : it);   // done-wins
+  }
+  return { date:x.date, weekday:x.weekday||y.weekday, items:[...items.values()] };
+}
+function mergeHistory(a, b){
+  const byDate = new Map();
+  for(const rec of [...(a||[]), ...(b||[])]){
+    if(!rec||typeof rec.date!=='string'||!Array.isArray(rec.items)) continue;
+    const prev = byDate.get(rec.date);
+    byDate.set(rec.date, prev ? mergeHistRecord(prev, rec) : rec);
+  }
+  return [...byDate.values()].sort((x,y)=> x.date<y.date?1:x.date>y.date?-1:0);  // newest first (unshift order)
+}
+function mergeDeferred(a, b, tombstones){
+  const byId = new Map();
+  for(const d of [...(a||[]), ...(b||[])]){
+    if(d&&d.id && !(d.id in tombstones)) byId.set(d.id, d);
+  }
+  return [...byId.values()];
+}
+// A source saved before the latest erase is pre-erase → its items/history are void.
+function voidPreErase(src){
+  return { ...src, today: src.today ? { ...src.today, items:[] } : null, history:[], deferred:[] };
+}
+function merge(a, b){
+  if(!a) return b || null;
+  if(!b) return a;
+  const erasedAt = Math.max(a.erasedAt||0, b.erasedAt||0) || null;
+  const va = (erasedAt && (a.savedAt||0) < erasedAt) ? voidPreErase(a) : a;
+  const vb = (erasedAt && (b.savedAt||0) < erasedAt) ? voidPreErase(b) : b;
+  const newer = (va.savedAt||0) >= (vb.savedAt||0) ? va : vb;
+  const older = newer===va ? vb : va;
+  const tombstones = mergeTombstones(va.tombstones, vb.tombstones);
+
+  let today;
+  if(va.today && vb.today && va.today.date === vb.today.date){
+    today = {
+      date: va.today.date,
+      morningDone: !!(va.today.morningDone || vb.today.morningDone),
+      items: mergeItems(newer.today.items, older.today.items, tombstones),
+    };
+  } else {
+    today = newer.today || older.today || null;   // different/missing days → newer day wins whole
+  }
+
+  return {
+    today, hadToday: !!today,
+    history: mergeHistory(va.history, vb.history),
+    deferred: mergeDeferred(va.deferred, vb.deferred, tombstones),
+    settings: newer.settings,
+    pinned: newer.pinned,
+    tombstones, erasedAt,
+    savedAt: Math.max(a.savedAt||0, b.savedAt||0),
+  };
+}
+
 let bootHadStored=false, bootUsable=false, recoveredFromBak=false, lsHydrated=null;
 function load(){
   const raw=lsGet(STORAGE_KEY);
@@ -1672,10 +1791,94 @@ window.__buddy = {
       const lum=ch?(+ch[0]+ +ch[1]+ +ch[2]):0;
       ok('lvl2: Donezo text adapts to LIGHT on red (not hardcoded dark)',
          warnLevel()===2 && lum>500, 'lvl='+warnLevel()+' color='+(dr&&getComputedStyle(dr).color));
+      // sync step 3: the pure merge must lose nothing. Run the full suite and gate on it.
+      const mt=this.mergeTest();
+      ok('sync: merge() loses nothing (full mergeTest suite)', mt.ok,
+         mt.failed+' failed: '+mt.results.filter(r=>!r.pass).map(r=>r.name).join('; '));
     }catch(e){ ok('ran without throwing', false, e&&e.message); }
     state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
     state.tombstones=snap.tombstones||{}; state.erasedAt=(typeof snap.erasedAt==='number')?snap.erasedAt:null;
     editingId=null; render(); saveSuppressed=wasSup;
+    const failed=R.filter(r=>!r.pass);
+    return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
+  },
+
+  // Pure unit suite for merge() (sync step 3) — no DOM, no state mutation.
+  // Each test builds two hydrated-shape snapshots and asserts the merge loses
+  // nothing. These are the loss scenarios the adversarial review demanded.
+  mergeTest(){
+    const R=[]; const ok=(name,cond,detail)=>R.push({name,pass:!!cond,detail:detail||''});
+    const ids = m => (m.today?.items||[]).map(i=>i.id).sort();
+    const item = (id,text,st,v,doneAt)=>({id,text,state:st||'neutral',v:v||1,src:null,doneAt:doneAt||null});
+    // base snapshot factory (hydrated shape)
+    const snap = (o={}) => ({
+      today: o.today!==undefined ? o.today : { date:'2026-06-19', morningDone:false, items:[] },
+      hadToday:true, history:o.history||[], deferred:o.deferred||[],
+      settings:o.settings||{celebrate:100,historyDays:7,reserveSpace:false},
+      pinned:!!o.pinned, tombstones:o.tombstones||{}, erasedAt:o.erasedAt??null,
+      savedAt:o.savedAt||1000,
+    });
+    try{
+      // 1. Different-task edits on two devices BOTH survive (the core LWW failure).
+      const A = snap({ savedAt:2000, today:{date:'2026-06-19',morningDone:false,items:[ item('t1','A-edit','neutral',2), item('t2','keep',null,1) ]} });
+      const B = snap({ savedAt:1900, today:{date:'2026-06-19',morningDone:false,items:[ item('t1','old',null,1), item('t2','B-edit','neutral',2) ]} });
+      const m1 = merge(A,B);
+      const t1=m1.today.items.find(i=>i.id==='t1'), t2=m1.today.items.find(i=>i.id==='t2');
+      ok('different-task edits both survive', t1&&t1.text==='A-edit'&&t1.v===2 && t2&&t2.text==='B-edit'&&t2.v===2,
+         't1='+(t1&&t1.text)+' t2='+(t2&&t2.text));
+
+      // 2. Higher per-item v wins for the same id.
+      const m2 = merge(
+        snap({savedAt:1000,today:{date:'d',items:[item('x','new','neutral',3)]}}),
+        snap({savedAt:5000,today:{date:'d',items:[item('x','stale','neutral',2)]}}));
+      const x=m2.today.items.find(i=>i.id==='x');
+      ok('higher item v wins regardless of savedAt', x&&x.text==='new'&&x.v===3, 'x='+(x&&x.text)+' v'+(x&&x.v));
+
+      // 3. Tombstone wins — a deleted id is never resurrected by a snapshot that still has it.
+      const m3 = merge(
+        snap({savedAt:2000,tombstones:{g:1500},today:{date:'d',items:[]}}),
+        snap({savedAt:1000,today:{date:'d',items:[item('g','ghost',null,1)]}}));
+      ok('tombstone wins (deleted id not resurrected)', !m3.today.items.some(i=>i.id==='g') && m3.tombstones.g===1500);
+
+      // 4. erasedAt barrier — a source saved BEFORE the erase is void.
+      const m4 = merge(
+        snap({savedAt:9000,erasedAt:8000,today:{date:'d',items:[]},history:[]}),
+        snap({savedAt:5000,today:{date:'d',items:[item('z','pre-erase',null,9)]},history:[{date:'2026-06-01',weekday:'Mon',items:[{id:'h1',text:'old',done:true}]}]}));
+      ok('erasedAt voids pre-erase items + history', m4.today.items.length===0 && m4.history.length===0 && m4.erasedAt===8000,
+         'items='+m4.today.items.length+' hist='+m4.history.length);
+
+      // 5. History union by date with done-wins (a completion never un-completes).
+      const m5 = merge(
+        snap({savedAt:2000,history:[{date:'2026-06-18',weekday:'Thu',items:[{id:'h-2026-06-18-0',text:'task',done:true}]}]}),
+        snap({savedAt:1000,history:[{date:'2026-06-18',weekday:'Thu',items:[{id:'h-2026-06-18-0',text:'task',done:false}]},{date:'2026-06-17',weekday:'Wed',items:[{id:'h-2026-06-17-0',text:'other',done:true}]}]}));
+      const day18=m5.history.find(d=>d.date==='2026-06-18');
+      ok('history union by date + done-wins', m5.history.length===2 && day18 && day18.items[0].done===true,
+         'days='+m5.history.length+' done='+(day18&&day18.items[0].done));
+
+      // 6. Items present on only one side are kept (never dropped).
+      const m6 = merge(
+        snap({savedAt:2000,today:{date:'d',items:[item('a','aa',null,1)]}}),
+        snap({savedAt:1000,today:{date:'d',items:[item('b','bb',null,1)]}}));
+      ok('one-sided items are kept', ids(m6).join(',')==='a,b', 'ids='+ids(m6).join(','));
+
+      // 7. Commutative on the item SET (order may differ, contents must not).
+      ok('merge is commutative on the id set', ids(merge(A,B)).join(',')===ids(merge(B,A)).join(','));
+
+      // 8. Idempotent — merge(a,a) preserves items + versions exactly.
+      const m8 = merge(A, JSON.parse(JSON.stringify(A)));
+      ok('idempotent: merge(a,a) preserves items + v',
+         ids(m8).join(',')===ids(A).join(',') && m8.today.items.every(i=>{const o=A.today.items.find(j=>j.id===i.id);return o&&o.v===i.v;}));
+
+      // 9. Null inputs — merge tolerates a missing side (fresh boot / broken localStorage).
+      ok('null left input returns right', merge(null,A)===A);
+      ok('null right input returns left', merge(A,null)===A);
+      ok('both null → null', merge(null,null)===null);
+
+      // 10. Purity — inputs are not mutated.
+      const aBefore=JSON.stringify(A), bBefore=JSON.stringify(B);
+      merge(A,B);
+      ok('merge is pure (inputs unmutated)', JSON.stringify(A)===aBefore && JSON.stringify(B)===bBefore);
+    }catch(e){ ok('mergeTest ran without throwing', false, e&&e.message); }
     const failed=R.filter(r=>!r.pass);
     return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
   },
@@ -1832,12 +2035,22 @@ function boot(){
 async function bootReconcileFile(){
   const fileH=hydrate(migrate(parseRaw(await fileLoad())||{}));
   let recovered=false;
-  // File wins when localStorage is missing/broken OR simply older than the file.
-  if(fileH && (!lsHydrated || (fileH.savedAt||0) > (lsHydrated.savedAt||0))){
-    applyHydrated(fileH);
-    if(!fileH.hadToday) state.today={ date:localDate(), items:[], morningDone:false };
-    bootUsable=true; recovered=true;
-    T('boot: file mirror is newest (file '+(fileH.savedAt||0)+' > ls '+((lsHydrated&&lsHydrated.savedAt)||0)+')');
+  // Step 3: localStorage and the file mirror are two snapshots of THIS device at
+  // different times (localStorage is origin-bound, so a relaunch can land on an
+  // older-but-valid origin store). MERGE them field-level instead of discarding the
+  // older one wholesale — a stale-but-newer-saved origin store could otherwise drop
+  // tasks the file still has. The merge is a superset that loses nothing.
+  if(fileH){
+    const merged = merge(lsHydrated, fileH);
+    if(merged){
+      applyHydrated(merged);
+      if(!merged.hadToday) state.today={ date:localDate(), items:[], morningDone:false };
+      bootUsable=true;
+      // "recovered" = we pulled in anything the localStorage candidate lacked (drives
+      // the demo-seed guard + telemetry). True when ls was absent or the file was newer.
+      recovered = !lsHydrated || (fileH.savedAt||0) > (lsHydrated.savedAt||0);
+      T('boot: merged ls+file (ls '+((lsHydrated&&lsHydrated.savedAt)||0)+' file '+(fileH.savedAt||0)+') → items='+state.items.length+' hist='+state.history.length+' recovered='+recovered);
+    }
   }
   bootFinish(recovered);
 }

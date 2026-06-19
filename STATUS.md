@@ -14,7 +14,7 @@ Four workstreams moved this session. State of each:
 | **Data durability** (file source-of-truth, granular load, single-instance, dev red-icon) | `main` (PR #23 ✅merged) | Done + verified on-device. **✅ SHIPPED in v0.2.21** — both verify gates passed, signed+notarized+stapled, auto-update live. |
 | **Bug reports → private GitHub issue** (serverless) | `main` (PR #24 ✅merged) | Code merged + security-hardened. **DORMANT** until the 1-time deploy: do `BUG-REPORTS.md`, then set `BUG_ENDPOINT` in `dist/index.html` + ship a build. |
 | **iOS companion — offline app** | `main` (PR #25 ✅merged: scaffold+README) **+ PR #26 OPEN** (icon, Supabase schema, full local app, sync-step-1) | Builds + runs (xcodebuild SUCCEEDED, rendered in Simulator). Full local parity. **Merge #26 to land it.** |
-| **Mac⇄iOS sync** | `feat/sync-local-model` (steps 1–2) + plan | Design done. **Steps 1 (UUIDs) ✅ + 2 (per-item `v` + tombstones + `erasedAt` + idempotent rollover, BOTH apps) ✅.** Step 3 (pure `merge()`) is NEXT. Steps 3–6 in `IOS-COMPANION-PLAN.md`. |
+| **Mac⇄iOS sync** | `feat/sync-merge` (step 3) + plan | Design done. **Steps 1 (UUIDs) ✅ + 2 (per-item `v` + tombstones + `erasedAt` + idempotent rollover) ✅ + 3 (pure `merge()`, BOTH apps + Mac boot-reconcile wiring) ✅.** Mac mergeTest 12/12 + smokeTest 11/11; iOS XCTest 10/10. Step 4 (server merge-on-push) is NEXT. ⚠️ step 4 must normalize timestamp UNITS (Mac ms vs Swift s); iOS `DayItem` needs an id for robust history merge. Steps 4–6 in `IOS-COMPANION-PLAN.md`. |
 
 ⚠️ **Sync correctness:** an adversarial review killed the original whole-doc
 last-write-wins design (silently loses data on any two-device day). The plan now
@@ -85,12 +85,12 @@ the file (`boot: file mirror is newest … recovered=true`). Single-instance blo
 ## Next likely work
 1. **Merge PR #26** — lands the iOS app icon, Supabase schema, full offline iOS app, and
    sync-step-1 UUIDs (safe; local-only/inert).
-2. **Sync steps 2–6** (the main remaining build) per the **Sync build order** in
-   `IOS-COMPANION-PLAN.md`: local model (per-item version + tombstones + `erasedAt` +
-   idempotent date-keyed rollover) → pure `merge()` (wire into Mac boot reconcile first)
-   → server **merge-on-push** (replace the interim LWW RPC) + rate-limit → pull/push + QR
-   pairing (scanner-pulls-first) → reproduce every loss scenario. **Start OrbStack /
-   `supabase start` first** to test the schema live.
+2. **Sync steps 4–6** (the main remaining build) per the **Sync build order** in
+   `IOS-COMPANION-PLAN.md`: server **merge-on-push** (replace the interim LWW RPC,
+   normalize timestamp UNITS Mac-ms↔Swift-s) + rate-limit → pull/push + QR pairing
+   (scanner-pulls-first) → reproduce every loss scenario. **Start OrbStack /
+   `supabase start` first** to test the schema live. (Steps 1–3 ✅ — local model +
+   pure `merge()` done & verified on both apps.)
 3. ~~**Cut a release**~~ ✅ DONE — **v0.2.21** shipped 2026-06-19 (durability + single-instance
    guard now live for installed users via auto-update).
 4. **Deploy bug reports** — follow `BUG-REPORTS.md`, set `BUG_ENDPOINT`, ship a build.

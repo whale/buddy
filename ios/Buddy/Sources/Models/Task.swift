@@ -65,6 +65,14 @@ struct TodayState: Codable {
     var items: [BuddyTask]
 }
 
+// MARK: - Deferred task model
+// Mirrors the Mac's deferred[] shape: { id, text, wake }
+struct DeferredTask: Codable, Identifiable {
+    var id: String
+    var text: String
+    var wake: String  // "YYYY-MM-DD"
+}
+
 // MARK: - Full persisted state
 // Mirrors the whole localStorage blob: { today, history, deferred, settings, tombstones, erasedAt }
 struct BuddyState: Codable {
