@@ -133,7 +133,7 @@ struct SyncWire: Codable {
     init(_ s: SyncSnapshot) {
         savedAt = s.savedAt * MS
         today = s.today.map { t in
-            Today(date: t.date, morningDone: false,
+            Today(date: t.date, morningDone: t.morningDone,
                   items: t.items.map { Item(id: $0.id, text: $0.text, state: $0.state.rawValue,
                                             src: nil, doneAt: $0.doneAt.map { $0.timeIntervalSince1970 * MS }, v: $0.v) })
         }
@@ -152,7 +152,7 @@ struct SyncWire: Codable {
                 TodayState(date: t.date, items: t.items.map {
                     BuddyTask(id: $0.id, text: $0.text, state: TaskState(rawValue: $0.state) ?? .neutral,
                               doneAt: $0.doneAt.map { Date(timeIntervalSince1970: $0 / MS) }, v: $0.v)
-                })
+                }, morningDone: t.morningDone)
             },
             history: history.map { Day(date: $0.date, weekday: $0.weekday,
                         items: $0.items.map { DayItem(id: $0.id, text: $0.text, done: $0.done) }) },

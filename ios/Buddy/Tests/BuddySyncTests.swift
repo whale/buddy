@@ -114,6 +114,18 @@ final class BuddySyncTests: XCTestCase {
         XCTAssertEqual(back.today?.items.first?.v, 2)
         XCTAssertEqual(back.history.first?.items.first?.id, "h-2026-06-18-0")
     }
+
+    // 9. morningDone survives merge + wire (regression: was hardcoded false → re-triggered
+    //    the Mac's morning screen after syncing with a phone).
+    func testMorningDoneParity() throws {
+        // OR-wins merge
+        let a = SyncSnapshot(today: TodayState(date: "d", items: [], morningDone: true), history: [], deferred: [], settings: .default, tombstones: [:], erasedAt: nil, savedAt: 2000)
+        let b = SyncSnapshot(today: TodayState(date: "d", items: [], morningDone: false), history: [], deferred: [], settings: .default, tombstones: [:], erasedAt: nil, savedAt: 1000)
+        XCTAssertEqual(BuddyMerge.merge(a, b)?.today?.morningDone, true)
+        // wire round-trip preserves it
+        let back = try JSONDecoder().decode(SyncWire.self, from: JSONEncoder().encode(SyncWire(a))).toSnapshot()
+        XCTAssertEqual(back.today?.morningDone, true)
+    }
 }
 
 // A store that lets one concurrent writer land between the client's pull and its

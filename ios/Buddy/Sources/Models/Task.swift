@@ -82,10 +82,26 @@ struct Day: Codable, Identifiable {
 }
 
 // MARK: - Today's state
-// Mirrors: state.today in the web app
+// Mirrors: state.today in the web app ({date, items, morningDone}).
 struct TodayState: Codable {
     var date: String        // "YYYY-MM-DD"
     var items: [BuddyTask]
+    // Carried for sync fidelity with the Mac: whether today's planner was completed.
+    // The Mac re-shows its morning screen when this is false, so it MUST survive a
+    // cross-device merge (OR-wins). iOS has no morning screen yet — the field is inert
+    // here but must round-trip so syncing with a phone never un-plans the Mac.
+    var morningDone: Bool
+
+    init(date: String, items: [BuddyTask], morningDone: Bool = false) {
+        self.date = date; self.items = items; self.morningDone = morningDone
+    }
+    enum CodingKeys: String, CodingKey { case date, items, morningDone }
+    init(from d: Decoder) throws {       // tolerant: blobs saved before morningDone default to false
+        let c = try d.container(keyedBy: CodingKeys.self)
+        date  = (try? c.decode(String.self, forKey: .date)) ?? ""
+        items = (try? c.decode([BuddyTask].self, forKey: .items)) ?? []
+        morningDone = (try? c.decodeIfPresent(Bool.self, forKey: .morningDone)) ?? false
+    }
 }
 
 // MARK: - Deferred task model

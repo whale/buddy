@@ -63,7 +63,8 @@ enum BuddyMerge {
         if let ta = va.today, let tb = vb.today, ta.date == tb.date {
             today = TodayState(
                 date: ta.date,
-                items: mergeItems(newer.today?.items ?? [], older.today?.items ?? [], tombstones)
+                items: mergeItems(newer.today?.items ?? [], older.today?.items ?? [], tombstones),
+                morningDone: ta.morningDone || tb.morningDone     // OR-wins, mirrors the Mac
             )
         } else {
             today = newer.today ?? older.today      // different/missing days → newer day wins whole

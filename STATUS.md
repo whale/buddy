@@ -19,11 +19,11 @@ Four workstreams moved this session. State of each:
 ⚠️ **Sync correctness:** an adversarial review killed the original whole-doc
 last-write-wins design (silently loses data on any two-device day). Fixed by a
 field-level **`merge()` that runs on the CLIENT** (UUIDs ✅ → per-item version +
-tombstones ✅ → pure `merge()` ✅). The server is now just a **dumb compare-and-swap
-store** (a version stamp; no merge logic). The `buddy_push` RPC in
-`supabase/migrations/` is still the **interim LWW** version and gets replaced by the
-tiny CAS function in step 5. Do not ship sync until steps 4–6 + the loss-scenario
-tests pass.
+tombstones ✅ → pure `merge()` ✅). The server is just a **dumb compare-and-swap
+store** (a version stamp; no merge logic). The CAS `buddy_push`/`buddy_pull` are
+**written** (migration `20260619210000_buddy_cas.sql`, which drops the interim LWW
+function) but **NOT yet run live** — needs OrbStack → `supabase start`. Loss-scenario
+tests are green as unit tests on both apps; a live two-device run still pending.
 
 ✅ **Most remaining sync work is testable WITHOUT a live DB** (the merge + client
 loop run in the browser against a fake store). Only the ~15-line CAS Postgres
