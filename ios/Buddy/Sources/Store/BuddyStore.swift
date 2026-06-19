@@ -216,12 +216,9 @@ final class BuddyStore {
     }
 
     // MARK: - ID generation (mirrors Mac's nid())
-    private var uidCounter: Int = 1
-    private func newId() -> String {
-        let id = "n\(uidCounter)"
-        uidCounter += 1
-        return id
-    }
+    // Globally-unique IDs (UUID), NOT a per-device counter — two devices both
+    // minting n1,n2,… would collide on sync and corrupt a cross-device merge.
+    private func newId() -> String { UUID().uuidString }
 
     // MARK: - Date helpers (mirrors Mac's localDate())
     static func localDate(_ date: Date = Date()) -> String {

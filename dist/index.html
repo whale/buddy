@@ -410,8 +410,13 @@ Object.defineProperty(state,'items',{
   enumerable:false, configurable:true,
 });
 
-let uid = 1; const nid = () => 'n'+(uid++);
-// After loading saved tasks (ids n1,n2,…), push uid past them so new ids never collide.
+// IDs must be GLOBALLY unique, not per-device counters — two devices both minting
+// n1,n2,… would collide on sync and corrupt a cross-device merge. Use a UUID
+// (secure-context API; localhost + the Tauri webview both qualify). The legacy
+// fallback keeps things working in any non-secure context.
+let uid = 1;
+const nid = () => (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('n'+Date.now().toString(36)+'-'+(uid++));
+// Back-compat for blobs saved before UUIDs: ensure the counter clears any old n* ids.
 function bumpUid(){ let mx=0; (state.today.items||[]).forEach(i=>{ const m=/^n(\d+)$/.exec(i.id||''); if(m) mx=Math.max(mx,+m[1]); }); uid=Math.max(uid, mx+1); }
 let editingId = null;
 let cursor = 0;                  // keyboard cursor index (0..items.length, last = Add row)
