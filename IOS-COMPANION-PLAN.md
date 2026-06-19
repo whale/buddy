@@ -105,6 +105,12 @@ Stickers (live), Belly, Sensei. Bundle-id prefixes in use: `fyi.whale.*` /
 
 ## Sequenced plan (each phase independently valuable, ends at a STOP)
 
+> ⚠️ **Superseded for sync details (2026-06-19):** Phases 3–6 below predate the
+> adversarial review. For the *conflict model and sync mechanics*, the
+> authoritative spec is the **"Sync build order"** + **Locked decisions** + **Decision
+> log** further down (CAS-on-client, not LWW, and the live DB enters only at step 5).
+> The phase list still holds for sequencing/value framing.
+
 - **Phase 0 — Decisions (no code). STOP.** Lock: native SwiftUI; "same language,
   not pixel-identical"; opt-in Supabase + local default; durability-first;
   answers to Q1–Q7 below.
@@ -115,8 +121,9 @@ Stickers (live), Belly, Sensei. Bundle-id prefixes in use: `fyi.whale.*` /
   tiny custom endpoint (still Supabase-hosted).
 - **Phase 3 — Mac sync (opt-in).** Settings fields (URL + anon key + room id);
   one Postgres table `buddy_state(owner_id, blob jsonb, updated_at)` + RLS;
-  push-on-change, pull-on-launch; last-write-wins + "synced at" + backup-before-
-  overwrite. STOP: round-trip + clobber-undo verified.
+  push-on-change, pull-on-launch; **CAS push (pull → merge → compare-and-swap →
+  retry)** + "synced at" (LWW was reverted — see Locked decision 4 + Decision log).
+  STOP: round-trip + two-device merge verified.
 - **Phase 4 — iOS skeleton via the proven pipeline.** Copy belly fastlane +
   `project.yml`, swap ids/team, XcodeGen, empty SwiftUI app → TestFlight. No
   features yet. STOP: TestFlight build installs.
@@ -192,14 +199,24 @@ collapse 0–2 into the one-shot.
    (`savedAt`, `erasedAt`, tombstone `deletedAt`, `doneAt`). Give iOS `DayItem` an
    `id` (`h-<date>-<i>`, like the Mac) so history merges by id, not by position.
    No backend needed — testable on both apps directly.
-5. **Dumb CAS server + client sync loop.** Server: `buddy_push(key, blob,
-   expected_version)` writes only if `expected_version` matches the stored row's
-   version, else returns the current `{blob, version}` (no merge logic on the
-   server). Client loop (Mac first, in the browser against a fake store so it's
-   testable without Postgres): `pull → merge(local, remote) → push → retry once on
-   conflict`; refuse to push empty-over-non-empty; coarse debounce (2–5 s); cap
-   synced history (~90 days); key in OS secure storage. Then QR pairing (scanner
-   pulls first). The live Supabase function is ~15 lines, verified once the DB is up.
+5. **Dumb CAS server + client sync loop.** Server contract — `buddy_push(key, blob,
+   expected_version) → {blob, version, ok}` (no merge logic on the server):
+   - **No row yet** (first push from a new pairing): require `expected_version = 0`
+     → insert at `version = 1`, return `{ok:true, version:1}`. A non-zero
+     `expected_version` against a missing row returns `{ok:false}` + an empty/null row.
+   - **Row exists:** if `expected_version = stored.version` → overwrite, set
+     `version = stored.version + 1` (server-side increment), return
+     `{ok:true, version:new}`. Else → `{ok:false, blob:stored, version:stored}`.
+   - `buddy_pull(key) → {blob, version}` (version 0/empty if no row).
+   The **version is owned and incremented by the server**; the client adopts the
+   returned `version` as its next `expected_version` (no re-pull needed on success).
+   Client loop (Mac first, in the browser against a fake in-memory store so it's
+   testable without Postgres): `pull → merge(local, remote) → push(expected=pulled
+   version) → on {ok:false}, merge(local, returned blob) and retry with the returned
+   version`. Refuse to push when local is empty and remote is non-empty (the
+   empty-over-full guard, scanner-pulls-first). Coarse debounce (2–5 s); cap synced
+   history (~90 days); key in OS secure storage. Then QR pairing. The live Supabase
+   function is ~15 lines, verified once the DB is up.
 6. Explicitly reproduce each loss scenario (different-task edits, 5-min clock skew,
    empty-phone-vs-full-Mac, double midnight rollover) and confirm ZERO loss — runs
    locally with two simulated clients (no Postgres needed for the merge/loop logic).
