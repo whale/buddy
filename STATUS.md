@@ -1,6 +1,6 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-06-19. Branch: `feat/ios-companion` (clean). Latest **release**: v0.2.15 (users still on this — the durability fix is in `main` but NOT yet released). `main`: durability + bug-reports merged. **PR #26 OPEN** (iOS icon/schema/local-app/sync-step-1)._
+_Last updated: 2026-06-19. Branch: `main` (PR #26 merged). Latest **release**: **v0.2.21** — durability fix is now SHIPPED + auto-updating to installed users (signed + notarized Accepted + stapled). `main`: durability + bug-reports + iOS + sync-step-1 all merged._
 
 Buddy is a **shipped, public, self-updating** macOS menu-bar focus app for ADHD.
 Repo: **github.com/whale/buddy** (PUBLIC, MIT). Download: **github.com/whale/buddy/releases/latest**.
@@ -11,7 +11,7 @@ Four workstreams moved this session. State of each:
 
 | Workstream | Where | Status |
 |---|---|---|
-| **Data durability** (file source-of-truth, granular load, single-instance, dev red-icon) | `main` (PR #23 ✅merged) | Done + verified on-device. **NOT yet in a release build** — users still run v0.2.15. |
+| **Data durability** (file source-of-truth, granular load, single-instance, dev red-icon) | `main` (PR #23 ✅merged) | Done + verified on-device. **✅ SHIPPED in v0.2.21** — both verify gates passed, signed+notarized+stapled, auto-update live. |
 | **Bug reports → private GitHub issue** (serverless) | `main` (PR #24 ✅merged) | Code merged + security-hardened. **DORMANT** until the 1-time deploy: do `BUG-REPORTS.md`, then set `BUG_ENDPOINT` in `dist/index.html` + ship a build. |
 | **iOS companion — offline app** | `main` (PR #25 ✅merged: scaffold+README) **+ PR #26 OPEN** (icon, Supabase schema, full local app, sync-step-1) | Builds + runs (xcodebuild SUCCEEDED, rendered in Simulator). Full local parity. **Merge #26 to land it.** |
 | **Mac⇄iOS sync** | PR #26 (step 1) + plan | Design done. **Step 1 (UUIDs) ✅.** Steps 2–6 NOT started — full build order in `IOS-COMPANION-PLAN.md`. |
@@ -91,8 +91,8 @@ the file (`boot: file mirror is newest … recovered=true`). Single-instance blo
    → server **merge-on-push** (replace the interim LWW RPC) + rate-limit → pull/push + QR
    pairing (scanner-pulls-first) → reproduce every loss scenario. **Start OrbStack /
    `supabase start` first** to test the schema live.
-3. **Cut a release** so the durability fix reaches installed users (bump version in
-   lockstep per `RELEASE-UPDATER.md`; v0.2.15 lacks the single-instance guard).
+3. ~~**Cut a release**~~ ✅ DONE — **v0.2.21** shipped 2026-06-19 (durability + single-instance
+   guard now live for installed users via auto-update).
 4. **Deploy bug reports** — follow `BUG-REPORTS.md`, set `BUG_ENDPOINT`, ship a build.
 5. **iOS first TestFlight** — needs ASC env vars (`ASC_KEY_ID/ISSUER_ID/KEY_PATH`, reuse
    Belly's key) + the morning-screen decision (iOS currently skips it).
