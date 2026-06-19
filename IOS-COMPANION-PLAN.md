@@ -172,7 +172,16 @@ collapse 0–2 into the one-shot.
    iOS: mirrored, xcodebuild SUCCEEDED). ⚠️ timestamp UNITS still differ (Mac ms-epoch
    vs Swift Date/seconds) — step 4 must normalize before any cross-device merge.
 3. Write + unit-test the pure `merge(a,b)` on both apps; wire it into the Mac's
-   localStorage↔file boot reconcile FIRST (proves the merge with no network). **← NEXT**
+   localStorage↔file boot reconcile FIRST (proves the merge with no network).
+   ✅ **done & verified.** Mac: `merge()` in `dist/index.html`, wired into
+   `bootReconcileFile`, 12-test `__buddy.mergeTest()` gated inside `smokeTest`
+   (12/12 + smokeTest 11/11 in-browser). iOS: `BuddyMerge.merge()` in
+   `ios/.../Sync/BuddyMerge.swift` + a real XCTest target (`BuddyTests`, wired via
+   `project.yml`) — `xcodebuild test` 10/10 passing. ⚠️ TWO follow-ups before
+   cross-device sync: (a) **timestamp units** still differ (Mac ms vs Swift s) —
+   step 4 must normalize; (b) iOS `DayItem` has **no id**, so same-date history
+   records merge positionally (done-wins) rather than by id like the Mac — give
+   `DayItem` an id for fully robust cross-device history merge.
 4. Server: `buddy_push` becomes merge-on-push under a row lock, returns the merged
    blob, stamps `now()`, refuses an empty-over-full push. Add RPC rate-limiting.
 5. Wire pull/push + QR pairing (scanner pulls first), atomic apply, coarser

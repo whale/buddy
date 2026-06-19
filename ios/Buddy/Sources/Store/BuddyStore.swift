@@ -278,14 +278,6 @@ final class BuddyStore {
     }
 }
 
-// MARK: - Deferred task model
-// Mirrors the Mac's deferred[] shape: { id, text, wake }
-struct DeferredTask: Codable, Identifiable {
-    var id: String
-    var text: String
-    var wake: String  // "YYYY-MM-DD"
-}
-
 // MARK: - Serialised blob
 // Mirrors the Mac's localStorage blob: { version, savedAt, today, history, deferred, settings }
 // All fields optional so partial/corrupted data doesn't crash load.
