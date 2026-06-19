@@ -63,10 +63,15 @@ backend. Sync is opt-in — paste a Supabase URL + anon key + a "room id"
 passphrase in Settings (the Settings sheet already exists). That one choice
 satisfies the MIT clone-and-run constraint cleanly.
 
-**Identity without a heavy login:** shared anon key + a user-invented **room id**
-(passphrase) typed once on each device; RLS scopes rows to that id. No email, no
-OAuth. (Sign in with Apple is the heavier "more correct for App Store"
-alternative — decide per question Q1 below.)
+**Identity — QR-code device pairing (LOCKED).** The seamless, login-free, secure
+pattern (how WhatsApp/Signal/Plex link devices):
+- On first run the Mac auto-generates a **high-entropy sync key** (never typed).
+- Settings shows a **QR code** encoding `{ backendUrl, syncKey }`.
+- The phone **scans it once** → both devices derive the same `owner_id` from the
+  key; Supabase **RLS** scopes every row to it. No email, no password, no OAuth.
+- Manual fallback: a copy-paste key string for anyone who can't scan.
+This beats a typed passphrase (higher entropy, zero friction) and beats Sign in
+with Apple (no Apple-account lock-in, works for the open-source/local story).
 
 **Conflict policy (v1):** whole-document **last-write-wins by `updated_at`**, with
 the overwritten blob saved as a local backup + an undo, and a visible "synced at
@@ -125,18 +130,28 @@ collapse 0–2 into the one-shot.
 
 ---
 
-## Open questions to answer before a one-shot build
+## Locked decisions (v1) — 2026-06-18
 
-1. **Identity:** room-id passphrase (light, recommended) vs Sign in with Apple
-   (heavier, more App-Store-correct)?
-2. **Conflict:** whole-document last-write-wins + undo (recommended) — acceptable,
-   or do you need per-task merge?
-3. **Sync surface:** sync `today` + `history` only, or also `settings` +
-   `deferred`? (Desktop settings like `reserveSpace` may be unwanted on phone.)
-4. **iOS v1 scope:** read-only "glance at my tasks" (≈⅓ the work) vs full
-   add/complete/edit?
-5. **Destination:** TestFlight-only (you already run it) vs public App Store
-   (more review risk + polish)?
-6. **Update channels:** accept two (GitHub Releases for Mac, App Store/TestFlight
-   for iOS)?
-7. **Bundle id:** `fyi.whale.buddy` (matches the Mac app) for the iOS app too?
+1. **Scope: full parity.** The iPhone app is the same experience as the Mac app —
+   view, add, complete, edit, history. (Not read-only.) Native nav, shared design
+   language (the menu-bar drawer becomes a full-screen view).
+2. **Identity: QR-code device pairing** (see above) — auto-generated sync key, scan
+   once, manual copy-paste fallback. No login.
+3. **Sync surface: everything** — `today`, `history`, `deferred`, AND `settings`.
+   (Desktop-only prefs like `reserveSpace` are simply ignored by the iOS UI.)
+4. **Conflict: whole-document last-write-wins by `updated_at`**, with the
+   overwritten blob saved as a local backup (reuse the Mac file-mirror pattern) +
+   "synced at HH:MM". Per-field merge deferred.
+5. **Distribution: open-source + TestFlight.** Official builds → TestFlight (Wimp
+   Decaf team) for personal use; repo public so anyone can clone + build their own;
+   **sync backend opt-in, local-only by default** (contributor supplies their own
+   Supabase URL+anon key, or runs offline — no secret committed). Public App Store
+   optional later.
+6. **Two update channels accepted:** GitHub Releases (Mac), TestFlight/App Store (iOS).
+7. **Bundle id:** `fyi.whale.buddy` (iOS target shares the identifier family).
+
+### Still to decide (not blocking the scaffold)
+- Exact Supabase schema + whether the maintainer hosts a default project or every
+  user brings their own from day one.
+- Whether full parity needs a richer conflict model than last-write-wins once two
+  devices are heavily used offline (revisit after dogfooding).
