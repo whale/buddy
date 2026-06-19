@@ -52,7 +52,7 @@ final class BuddyMergeTests: XCTestCase {
         let m = BuddyMerge.merge(
             snap(today: TodayState(date: "d", items: []), history: [], erasedAt: 8000, savedAt: 9000),
             snap(today: TodayState(date: "d", items: [item("z","pre-erase",.neutral,9)]),
-                 history: [Day(date: "2026-06-01", weekday: "Mon", items: [DayItem(text: "old", done: true)])], savedAt: 5000))
+                 history: [Day(date: "2026-06-01", weekday: "Mon", items: [DayItem(id: "h-2026-06-01-0", text: "old", done: true)])], savedAt: 5000))
         XCTAssertEqual(m?.today?.items.count, 0)
         XCTAssertEqual(m?.history.count, 0)
         XCTAssertEqual(m?.erasedAt, 8000)
@@ -61,10 +61,12 @@ final class BuddyMergeTests: XCTestCase {
     // 5. History union by date with done-wins (a completion never un-completes).
     func testHistoryUnionDoneWins() {
         let m = BuddyMerge.merge(
-            snap(history: [Day(date: "2026-06-18", weekday: "Thu", items: [DayItem(text: "task", done: true)])], savedAt: 2000),
-            snap(history: [Day(date: "2026-06-18", weekday: "Thu", items: [DayItem(text: "task", done: false)]),
-                           Day(date: "2026-06-17", weekday: "Wed", items: [DayItem(text: "other", done: true)])], savedAt: 1000))
+            snap(history: [Day(date: "2026-06-18", weekday: "Thu", items: [DayItem(id: "h-2026-06-18-0", text: "task", done: true)])], savedAt: 2000),
+            snap(history: [Day(date: "2026-06-18", weekday: "Thu", items: [DayItem(id: "h-2026-06-18-0", text: "task", done: false)]),
+                           Day(date: "2026-06-17", weekday: "Wed", items: [DayItem(id: "h-2026-06-17-0", text: "other", done: true)])], savedAt: 1000))
         XCTAssertEqual(m?.history.count, 2)
+        // merged by id, done-wins, no duplicate item for the same id
+        XCTAssertEqual(m?.history.first { $0.date == "2026-06-18" }?.items.count, 1)
         XCTAssertEqual(m?.history.first { $0.date == "2026-06-18" }?.items.first?.done, true)
     }
 

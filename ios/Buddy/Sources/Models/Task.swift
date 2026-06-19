@@ -43,11 +43,26 @@ struct BuddyTask: Identifiable, Codable {
 }
 
 // MARK: - A day in history
-// Mirrors: state.history[] in the web app
-// history items use a flat {id, text, done} shape (not full TaskState)
+// Mirrors: state.history[] in the web app — flat {id, text, done} (not full TaskState).
+// The id is the Mac's stable per-day key `h-<date>-<i>`, so two devices archiving the
+// same day produce identical ids and merge() unions history by id (not by position).
 struct DayItem: Codable {
+    var id: String
     var text: String
     var done: Bool
+
+    init(id: String, text: String, done: Bool) { self.id = id; self.text = text; self.done = done }
+
+    enum CodingKeys: String, CodingKey { case id, text, done }
+
+    // Tolerant decode: history records written before ids existed get a synthesized
+    // positional id on load (the caller passes the date+index via a fallback id).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = (try? c.decode(String.self, forKey: .text)) ?? ""
+        done = (try? c.decode(Bool.self, forKey: .done)) ?? false
+        id   = (try? c.decode(String.self, forKey: .id)) ?? ""   // backfilled by Day.normalizedItems
+    }
 }
 
 struct Day: Codable, Identifiable {
@@ -56,6 +71,14 @@ struct Day: Codable, Identifiable {
     var date: String    // "YYYY-MM-DD"
     var weekday: String // e.g. "Monday"
     var items: [DayItem]
+
+    // Backfill missing item ids with the Mac's stable scheme `h-<date>-<i>` so legacy
+    // records (saved before DayItem had an id) merge by id after this runs.
+    mutating func backfillItemIds() {
+        for i in items.indices where items[i].id.isEmpty {
+            items[i].id = "h-\(date)-\(i)"
+        }
+    }
 }
 
 // MARK: - Today's state

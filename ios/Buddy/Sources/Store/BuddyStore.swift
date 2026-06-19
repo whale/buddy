@@ -158,7 +158,10 @@ final class BuddyStore {
             let record = Day(
                 date: stored,
                 weekday: wd,
-                items: today.items.map { DayItem(text: $0.text, done: $0.state == .done) }
+                // Stable per-day ids (h-<date>-<i>) match the Mac so cross-device history merges by id.
+                items: today.items.enumerated().map { i, t in
+                    DayItem(id: "h-\(stored)-\(i)", text: t.text, done: t.state == .done)
+                }
             )
             history.insert(record, at: 0)
 
@@ -240,7 +243,7 @@ final class BuddyStore {
         do {
             let blob = try JSONDecoder().decode(PersistedBlob.self, from: data)
             today    = blob.today ?? TodayState(date: Self.localDate(), items: [])
-            history  = blob.history ?? []
+            history  = (blob.history ?? []).map { var d = $0; d.backfillItemIds(); return d }   // legacy records get stable ids
             deferred = blob.deferred ?? []
             settings = blob.settings ?? .default
             tombstones = blob.tombstones ?? [:]
