@@ -1,9 +1,38 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-06-16. Branch: `main` (clean). Latest release: **v0.2.15**. main version: 0.2.17._
+_Last updated: 2026-06-18. Branch: `fix/data-durability` (clean) — **PR #23 OPEN, awaiting merge**. Latest release: **v0.2.15**. main version: 0.2.17._
 
 Buddy is a **shipped, public, self-updating** macOS menu-bar focus app for ADHD.
 Repo: **github.com/whale/buddy** (PUBLIC, MIT). Download: **github.com/whale/buddy/releases/latest**.
+
+## 🔒 Data durability — in review (PR #23, NOT yet merged/released)
+
+Triggered by a real "my tasks vanished after restart" incident. Diagnosed from the
+live on-disk stores: data wasn't truly deleted, but Buddy had several ways to lose
+or strand it. Fix is committed on `fix/data-durability` → **github.com/whale/buddy/pull/23**.
+
+- **Granular per-slice load** — a corrupt `today` can no longer wipe valid history.
+- **Durable file mirror** `~/Library/Application Support/fyi.whale.buddy/buddy-state.json`
+  (Tauri `save_state`/`load_state`, atomic temp+rename) is the **origin-independent
+  source of truth**; localStorage is now just a cache. Boot keeps the **newest**
+  (`savedAt`) of {localStorage, file} → survives a wiped/stale webview origin.
+- **Rollover pre-fills the planner** with yesterday's unfinished tasks (commits
+  synchronously); **"Add undone" hidden** (commented, easy to restore).
+- **Demo seed only on a genuine first run.**
+- **Single-instance guard** (`tauri-plugin-single-instance`) — 2nd launch focuses the
+  existing window.
+- **Dev builds are visually distinct** — red menu-bar icon + "Dev Buddy" header
+  (gated on `cfg!(debug_assertions)` via a new `is_dev` command). Release unaffected.
+- **Crisp Retina tray icon** (regenerated 88px; the crate forces 18pt → 22px upscaled = blurry).
+
+**Verified ON-DEVICE:** wiped localStorage entirely, relaunched → tasks restored from
+the file (`boot: file mirror is newest … recovered=true`). Single-instance blocks a
+2nd launch. Red icon + "Dev Buddy" title confirmed by screenshot. Browser smoke test
+8/8 + granular/rollover assertions pass. Rust builds clean.
+
+**Not yet done:** PR #23 not merged → not in a release build yet. Layer-3 niceties
+(cap history growth, gate debug `__buddy` hooks in release) deferred. See
+`DATA-SAFETY-PLAN.md` and `IOS-COMPANION-PLAN.md` for the roadmap.
 
 ## ✅ What's live (all shipped this session)
 
@@ -30,11 +59,16 @@ Repo: **github.com/whale/buddy** (PUBLIC, MIT). Download: **github.com/whale/bud
 - The **DMG container isn't stapled** (the `.app` inside is). Fine for online installs; staple before relying on offline first-launch.
 - Apple's **timestamp service** had a ~1.5h outage this session → 6 consecutive `codesign` failures ("timestamp service is not available"). If it recurs, it's external — just retry later.
 
-## Next likely work (the "share it widely" polish)
-1. **Landing page** (GitHub Pages): hero + screenshots + a big Download button — the designer-shareable face.
-2. **Staple the DMG** for offline first-launch + a **stable "always-latest" download** asset name (current DMG name is versioned).
-3. **Friendly first-run hint** (it's a menu-bar app — where it went) + confirm the white-seam + tray Settings on-device.
-4. Optional delight: more parrot variants / a bigger flourish when all three are done.
+## Next likely work
+1. **Merge PR #23**, then cut a release so the durability fix reaches installed users
+   (bump version in lockstep per `RELEASE-UPDATER.md`; the installed v0.2.15 lacks the
+   single-instance guard, so a dev + old-release pair can still both run until then).
+2. **Bug reports → GitHub Issues** via a tiny serverless function (decided; spec in
+   `DATA-SAFETY-PLAN.md`). Replaces the current email-to-self draft.
+3. **iOS companion — Phase 0 (decisions only)** per `IOS-COMPANION-PLAN.md`: answer the
+   open questions (identity, conflict policy, iOS v1 scope), then it's set up to one-shot.
+4. **Landing page** (GitHub Pages) + **staple the DMG** + friendly first-run hint — the
+   earlier "share it widely" polish, still open.
 
 ## How to run (dev)
 ```

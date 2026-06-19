@@ -55,6 +55,12 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// True for debug (dev) builds, false for release. Drives the "Dev Buddy" header.
+#[tauri::command]
+fn is_dev() -> bool {
+    cfg!(debug_assertions)
+}
+
 /// Percent-encode for a mailto: URL (unreserved chars pass through).
 fn percent_encode(s: &str) -> String {
     s.bytes()
@@ -315,6 +321,34 @@ fn set_reserve(on: bool) {
     let _ = on;
 }
 
+// ============ Durable state file — the origin-independent source of truth ============
+// localStorage is bound to the webview ORIGIN, so a dev-port change / dev→prod / a
+// Tauri config change opens a different (often empty) store and strands the old data.
+// We mirror every save to a plain JSON file in the app-data dir, which is
+// origin-independent and survives a localStorage clear. Written atomically (temp file
+// + rename) so a crash mid-write can never truncate the good copy.
+fn state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join("buddy-state.json"))
+}
+
+#[tauri::command]
+fn load_state(app: AppHandle) -> Option<String> {
+    let p = state_file(&app)?;
+    std::fs::read_to_string(p).ok()
+}
+
+#[tauri::command]
+fn save_state(app: AppHandle, blob: String) -> Result<(), String> {
+    let p = state_file(&app).ok_or("no app data dir")?;
+    if let Some(dir) = p.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let tmp = p.with_extension("json.tmp");
+    std::fs::write(&tmp, blob.as_bytes()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &p).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Auto-updater: ask GitHub Releases whether a newer signed build exists.
 /// Returns Some(version) if an update is available, None if we're current.
 #[tauri::command]
@@ -347,6 +381,19 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
 pub fn run() {
     let mut builder = tauri::Builder::default();
 
+    // Single-instance guard MUST be the first plugin registered (Tauri requirement).
+    // If Buddy is already running, a second launch just focuses the existing window —
+    // two webviews must never fight over the same state file.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }));
+    }
+
     // Global shortcut plugin — desktop only. Backtick summons Buddy.
     #[cfg(desktop)]
     {
@@ -366,7 +413,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, report_bug, set_reserve, check_for_update, install_update])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, set_reserve, check_for_update, install_update, load_state, save_state])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).
@@ -383,14 +430,21 @@ pub fn run() {
                 .items(&[&quit_item])
                 .build()?;
 
+            // Dev builds use a RED, non-template tray icon so a running dev instance is
+            // unmistakable next to the installed (black, templated) release app.
+            let dev = cfg!(debug_assertions);
+            let tray_icon = if dev {
+                tauri::image::Image::from_bytes(include_bytes!("../icons/tray-dev.png")).expect("tray icon")
+            } else {
+                tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")).expect("tray icon")
+            };
             let _tray = TrayIconBuilder::with_id("buddy-tray")
-                // lucide "sticker" glyph (black on transparent → templated by macOS)
-                .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")).expect("tray icon"))
-                // `icon_as_template(true)` makes macOS tint a black-on-transparent
-                // icon for light/dark menu bars. Our placeholder tray PNG is built
-                // that way. If you swap in a colored icon, set this to false.
-                .icon_as_template(true)
-                .tooltip("Buddy")
+                .icon(tray_icon)
+                // Release icon is black-on-transparent → templated so macOS tints it for
+                // light/dark menu bars. The dev (red) icon must NOT be templated, or the
+                // red would be flattened to monochrome.
+                .icon_as_template(!dev)
+                .tooltip(if dev { "Dev Buddy" } else { "Buddy" })
                 .menu(&menu)
                 // A normal (left) click opens the menu. Buddy itself is summoned by
                 // the right screen-edge, the global shortcut, or the menu's Show/Hide.

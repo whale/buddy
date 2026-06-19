@@ -278,7 +278,7 @@
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
       </div>
-      <span class="chrome text-[18px] text-black/60 tracking-[-0.36px]">Buddy</span>
+      <span id="appTitle" class="chrome text-[18px] text-black/60 tracking-[-0.36px]">Buddy</span>
     </div>
     <div class="divider h-px w-full bg-[#d9d9d9]"></div>
     <div class="flex items-end justify-between p-8">
@@ -495,6 +495,7 @@ function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch{ (memoryStore||(memo
 function serialize(){
   return JSON.stringify({
     version:1,
+    savedAt: Date.now(),
     today:   { date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null,doneAt:i.doneAt??null})) },
     history: state.history,
     deferred:(state.deferred||[]).map(d=>({id:d.id,text:d.text,wake:d.wake})),
@@ -503,7 +504,23 @@ function serialize(){
   });
 }
 let saveSuppressed=false;        // test hook: freeze persistence so an injected blob survives reload
-function writeNow(){ if(saveSuppressed) return; clearTimeout(saveTimer); saveTimer=null; lsSet(STORAGE_KEY, serialize()); }
+
+/* Durable file mirror (native only). localStorage is bound to the webview ORIGIN,
+   so a dev-port change / dev→prod / config change opens a DIFFERENT, possibly empty
+   store and strands the old data. A file in the app-data dir is origin-independent,
+   so it's the real record; localStorage is just a fast cache. Also survives a
+   localStorage quota failure (the file write still lands → no silent loss). */
+function fileSave(blobStr){ if(!NATIVE) return; try{ window.__TAURI__.core.invoke('save_state', { blob: blobStr }); }catch(_){} }
+async function fileLoad(){ if(!NATIVE) return null; try{ return await window.__TAURI__.core.invoke('load_state'); }catch(_){ return null; } }
+
+function writeNow(){
+  if(saveSuppressed) return;
+  clearTimeout(saveTimer); saveTimer=null;
+  const blob=serialize();
+  try{ localStorage.setItem(STORAGE_KEY, blob); }
+  catch(e){ (memoryStore||(memoryStore={}))[STORAGE_KEY]=blob; console.warn('[buddy] localStorage write failed — relying on the file mirror', e); }
+  fileSave(blob);                // durable record regardless of localStorage state
+}
 function save(){ if(saveSuppressed) return; clearTimeout(saveTimer); saveTimer=setTimeout(writeNow,250); }
 
 /* Force-flush synchronously when the tab is hidden / closing — a trailing
@@ -534,27 +551,59 @@ function freshBoot(){
   state.settings={ celebrate:100, historyDays:7, reserveSpace:false };
   state.pinned=false;
 }
+function parseRaw(raw){ if(raw==null) return null; try{ const b=JSON.parse(raw); return (b&&typeof b==='object')?b:null; }catch{ return null; } }
+
+/* Turn a parsed blob into a sanitised state snapshot. GRANULAR: each slice is
+   validated INDEPENDENTLY, so a malformed `today` can never discard valid
+   `history`/`deferred`/`settings`. Returns null only if the blob isn't a Buddy
+   blob at all. `hadToday` tells the caller whether today was usable or reset. */
+function hydrate(blob){
+  if(!blob) return null;
+  const looksLikeBuddy = blob.version===1 || isValidToday(blob.today) || Array.isArray(blob.history);
+  if(!looksLikeBuddy) return null;
+  const today = isValidToday(blob.today)
+    ? { date:blob.today.date, morningDone:!!blob.today.morningDone, items:blob.today.items.map(i=>({
+        id:i.id||nid(), text:String(i.text||''),
+        state:(i.state==='focused'||i.state==='done')?i.state:'neutral',
+        src:i.src??null, doneAt:(typeof i.doneAt==='number'?i.doneAt:null) })) }
+    : null;
+  return {
+    today,
+    hadToday: !!today,
+    history: Array.isArray(blob.history) ? blob.history.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items)) : [],
+    deferred: Array.isArray(blob.deferred) ? blob.deferred.filter(d=>d&&typeof d.text==='string').map(d=>({id:d.id||nid(),text:String(d.text),wake:String(d.wake||'')})) : [],
+    settings: { celebrate: (blob.settings && typeof blob.settings.celebrate==='number') ? Math.max(0,Math.min(100,blob.settings.celebrate)) : (blob.settings && blob.settings.confetti===false ? 0 : 100),
+                historyDays: (blob.settings && Number.isFinite(blob.settings.historyDays)) ? clamp(0, blob.settings.historyDays|0, 14) : 7,
+                reserveSpace: !!(blob.settings && blob.settings.reserveSpace) },
+    pinned: !!blob.pinned,
+    savedAt: (typeof blob.savedAt==='number') ? blob.savedAt : 0,
+  };
+}
+function applyHydrated(h){
+  state.today   = h.today || { date:localDate(), items:[], morningDone:false };
+  state.history = h.history;
+  state.deferred= h.deferred;
+  state.settings= h.settings;
+  state.pinned  = h.pinned;
+}
+
+let bootHadStored=false, bootUsable=false, recoveredFromBak=false, lsHydrated=null;
 function load(){
   const raw=lsGet(STORAGE_KEY);
-  if(raw==null){ freshBoot(); return; }
-  let blob;
-  try{ blob=JSON.parse(raw); }
-  catch{ lsSet(BAK_KEY, raw); freshBoot(); return; }     // bad JSON
-  if(!blob || typeof blob!=='object' || blob.version!==1 || !isValidToday(blob.today)){
-    lsSet(BAK_KEY, raw); freshBoot(); return;             // wrong version / malformed today
+  bootHadStored = raw!=null;
+  lsHydrated = hydrate(migrate(parseRaw(raw)||{}));   // localStorage candidate (or null)
+  if(lsHydrated){
+    applyHydrated(lsHydrated);
+    if(!lsHydrated.hadToday) state.today={ date:localDate(), items:[], morningDone:false };  // today slice bad → keep history, fresh today
+    bootUsable=true;
+    if(!saveSuppressed) lsSet(BAK_KEY, serialize());   // snapshot a KNOWN-GOOD backup (never the failing raw)
+    return;
   }
-  blob=migrate(blob);
-  // Hydrate runtime state from the validated blob.
-  state.today   = { date:blob.today.date, morningDone:!!blob.today.morningDone, items:blob.today.items.map(i=>({
-                      id:i.id||nid(), text:String(i.text||''),
-                      state:(i.state==='focused'||i.state==='done')?i.state:'neutral',
-                      src:i.src??null, doneAt:(typeof i.doneAt==='number'?i.doneAt:null) })) };
-  state.history = Array.isArray(blob.history) ? blob.history.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items)) : [];
-  state.deferred= Array.isArray(blob.deferred) ? blob.deferred.filter(d=>d&&typeof d.text==='string').map(d=>({id:d.id||nid(),text:String(d.text),wake:String(d.wake||'')})) : [];
-  state.settings= { celebrate: (blob.settings && typeof blob.settings.celebrate==='number') ? Math.max(0,Math.min(100,blob.settings.celebrate)) : (blob.settings && blob.settings.confetti===false ? 0 : 100),
-                    historyDays: (blob.settings && Number.isFinite(blob.settings.historyDays)) ? clamp(0, blob.settings.historyDays|0, 14) : 7,
-                    reserveSpace: !!(blob.settings && blob.settings.reserveSpace) };
-  state.pinned  = !!blob.pinned;
+  // localStorage unusable → recover from the last known-good backup before giving up.
+  const bak=hydrate(parseRaw(lsGet(BAK_KEY)));
+  if(bak){ applyHydrated(bak); if(!bak.hadToday) state.today={ date:localDate(), items:[], morningDone:false }; bootUsable=true; recoveredFromBak=true; lsHydrated=bak; T('load: recovered from backup'); return; }
+  if(raw!=null) lsSet(BAK_KEY, raw);      // preserve the unreadable raw for forensics
+  freshBoot(); bootUsable=false; lsHydrated=null;   // native boot still reconciles with the file mirror
 }
 
 /* ====================================================================
@@ -1090,6 +1139,10 @@ function yesterdayUnfinished(){
 let undoneAdded=false, undoneIds=[];
 function renderMorningUndone(){
   const box=$('#morningUndone'); if(!box) return;
+  // DISABLED: the day-rollover now PRE-FILLS the planner with yesterday's unfinished
+  // tasks (see bootFinish), so a manual "Add undone" button is redundant. Delete the
+  // next line to bring it back if we ever drop auto carry-over.
+  box.classList.add('hidden'); return;
   if(yesterdayUnfinished()<=0){ box.classList.add('hidden'); return; }
   box.classList.remove('hidden');
   $('#undoneLabel').textContent = undoneAdded ? 'Nevermind' : 'Add undone';
@@ -1659,14 +1712,23 @@ function settleNative(){
   setTimeout(()=>{ if(!state.pinned) closeDrawer(); }, 1600);
 }
 
-function boot(){
-  cursor=0; kbActive=false; editingId=null;  // reset transient keyboard cursor on (re)boot
-  if(NATIVE) document.body.classList.add('native');
-  load();                                    // corruption-guarded; bad blob → fresh
+function bootFinish(recovered){
   bumpUid();                                 // avoid id collisions with loaded tasks (the Add bug)
+  const histBefore=state.history.length;
   const rolled=maybeRollover();              // same-day → restore; older → archive/advance
+  if(rolled){
+    // Hybrid carry-over: if we just archived yesterday, pre-fill today's planner
+    // with its UNFINISHED tasks so your working set is never silently dropped on a
+    // new day — you trim down to your three. (Fixes the "my tasks vanished" feel.)
+    if(state.history.length>histBefore){
+      state.history[0].items.filter(it=>!it.done).slice(0,SOFT_CAP).forEach(it=>{
+        if(activeCount()<HARD_CAP) state.items.push({ id:nid(), text:it.text, state:'neutral' });
+      });
+    }
+    writeNow();                              // commit the rollover + carry-over SYNCHRONOUSLY (no debounce gap)
+  }
   wakeDeferred();                            // bring back any tasks slept till today
-  if(state.history.length===0) seedDemoHistory();   // first-run panel populated
+  if(!bootHadStored && !recovered) seedDemoHistory();   // demo seed ONLY on a genuine first run
   setDate();
   applyPinnedUI();
   syncCelebrate();                        // reflect stored settings.confetti
@@ -1674,8 +1736,38 @@ function boot(){
   render();
   // Show the morning whenever today hasn't been planned yet (morningDone flag) —
   // even if slept tasks have woken into the list, so you still plan your three.
-  T('boot done='+state.today.morningDone+' n='+state.today.items.length);
+  T('boot done='+state.today.morningDone+' n='+state.today.items.length+' rolled='+rolled+' recovered='+recovered);
   if(!state.today.morningDone) showMorning(); else settleNative();
+  writeNow();                                // converge localStorage + file mirror to the chosen state
+}
+function boot(){
+  cursor=0; kbActive=false; editingId=null;  // reset transient keyboard cursor on (re)boot
+  if(NATIVE){
+    document.body.classList.add('native');
+    // Dev builds: rename the header to "Dev Buddy" so it's never confused with the
+    // installed release app (which also gets a red menu-bar icon, set in Rust).
+    window.__TAURI__.core.invoke('is_dev').then(dev=>{ if(dev){ const t=$('#appTitle'); if(t) t.textContent='Dev Buddy'; document.title='Dev Buddy'; } }).catch(()=>{});
+  }
+  load();                                    // granular: a bad slice never wipes valid history
+  // Native: ALWAYS reconcile localStorage against the durable file and keep whichever
+  // was saved most recently. localStorage is origin-bound, so a relaunch can land on a
+  // DIFFERENT (older but still valid) origin store — picking the newest source heals
+  // that. Await it BEFORE the first paint so we don't flash a stale/empty list.
+  // Browser/tests keep the synchronous localStorage-only path.
+  if(NATIVE){ bootReconcileFile(); return; }
+  bootFinish(false);
+}
+async function bootReconcileFile(){
+  const fileH=hydrate(migrate(parseRaw(await fileLoad())||{}));
+  let recovered=false;
+  // File wins when localStorage is missing/broken OR simply older than the file.
+  if(fileH && (!lsHydrated || (fileH.savedAt||0) > (lsHydrated.savedAt||0))){
+    applyHydrated(fileH);
+    if(!fileH.hadToday) state.today={ date:localDate(), items:[], morningDone:false };
+    bootUsable=true; recovered=true;
+    T('boot: file mirror is newest (file '+(fileH.savedAt||0)+' > ls '+((lsHydrated&&lsHydrated.savedAt)||0)+')');
+  }
+  bootFinish(recovered);
 }
 boot();
 </script>
