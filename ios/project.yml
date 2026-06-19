@@ -1,0 +1,79 @@
+name: Buddy
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Buddy iOS — native SwiftUI companion to the macOS menu-bar app.
+# This file is the source of truth for the Xcode project. Regenerate with:
+#   xcodegen generate
+# The generated Buddy.xcodeproj is .gitignored on purpose.
+# ─────────────────────────────────────────────────────────────────────────────
+
+options:
+  bundleIdPrefix: fyi.whale
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  developmentLanguage: en
+  defaultConfig: Debug
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: "0.1.0"
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+    TARGETED_DEVICE_FAMILY: "1"   # iPhone only
+    CODE_SIGN_STYLE: Automatic
+    # Team pinned so it survives `xcodegen generate` — no more
+    # re-picking the team in Xcode's Signing tab after every regen.
+    DEVELOPMENT_TEAM: 9QDAAYWU9X
+
+targets:
+  Buddy:
+    type: application
+    platform: iOS
+    sources:
+      - path: Buddy/Sources
+    info:
+      path: Buddy/Info.plist
+      properties:
+        CFBundleName: Buddy
+        CFBundleDisplayName: Buddy
+        CFBundleIconName: AppIcon
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: ""
+        UIRequiredDeviceCapabilities:
+          - arm64
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fyi.whale.buddy
+        PRODUCT_NAME: Buddy
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_PREVIEWS: YES
+        SWIFT_EMIT_LOC_STRINGS: YES
+
+schemes:
+  Buddy:
+    build:
+      targets:
+        Buddy: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

@@ -1,0 +1,13 @@
+# XcodeGen-generated project — regenerate with `xcodegen generate`
+*.xcodeproj
+*.xcworkspace
+
+# Xcode user data
+xcuserdata/
+DerivedData/
+
+# macOS metadata
+.DS_Store
+
+# Fastlane build output
+fastlane/build/
