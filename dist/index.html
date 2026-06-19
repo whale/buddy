@@ -1670,14 +1670,32 @@ function buildBugLogs(){
     ...LOGBUF.slice(-120)
   ].join('\n');
 }
+// Bug reports POST to a tiny serverless proxy that opens a GitHub issue in a
+// PRIVATE repo (see api/bug-report.js + BUG-REPORTS.md). Set this to the deployed
+// URL after the one-time deploy. Until then (or offline), we fall back to the
+// native mail draft so a report is never silently lost.
+const BUG_ENDPOINT = 'https://REPLACE-AFTER-DEPLOY.vercel.app/api/bug-report';
+const BUG_KEY = '';   // optional: match the function's BUG_KEY env to block drive-by traffic
 async function reportBug(){
   try{
     await ensureHtml2canvas();
     const target = morningUp() ? $('#morning') : $('#drawer');
     const canvas = await window.html2canvas(target, { backgroundColor:null, scale:2, logging:false });
     const png = canvas.toDataURL('image/png');
-    if(NATIVE) window.__TAURI__.core.invoke('report_bug', { screenshot:png, logs:buildBugLogs() });
-    return png;   // (web prototype: returned for inspection)
+    const configured = BUG_ENDPOINT && !BUG_ENDPOINT.includes('REPLACE-AFTER-DEPLOY');
+    let sent=false, url=null;
+    if(configured){
+      try{
+        const hdrs={'Content-Type':'application/json'}; if(BUG_KEY) hdrs['x-buddy-key']=BUG_KEY;
+        const r = await fetch(BUG_ENDPOINT, { method:'POST', headers:hdrs,
+          body: JSON.stringify({ version: $('#appVersion')?.textContent||'?', platform: navigator.userAgent, logs: buildBugLogs(), screenshot: png }) });
+        if(r.ok){ sent=true; try{ url=(await r.json()).url; }catch(_){} }
+      }catch(e){ console.warn('[buddy] bug endpoint failed, falling back to mail', e); }
+    }
+    // Offline or not-yet-configured → the proven native mail draft.
+    if(!sent && NATIVE) window.__TAURI__.core.invoke('report_bug', { screenshot:png, logs:buildBugLogs() });
+    T('reportBug sent='+sent+(url?(' '+url):''));
+    return { sent, url, png };   // (web prototype: returned for inspection)
   }catch(e){ console.warn('[buddy] report bug failed', e); }
 }
 const SLIVER=2;    // hidden width — just enough to keep the webview alive (no widget)

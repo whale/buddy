@@ -1,6 +1,6 @@
 {
   "name": "buddy",
-  "version": "0.2.19",
+  "version": "0.2.20",
   "private": true,
   "license": "MIT",
   "description": "Buddy — a calm day companion. Web app (index.html) wrapped in a Tauri v2 Mac menu-bar shell.",
