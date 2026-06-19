@@ -39,6 +39,7 @@ targets:
     platform: iOS
     sources:
       - path: Buddy/Sources
+      - path: Buddy/Resources
     info:
       path: Buddy/Info.plist
       properties:
