@@ -1675,6 +1675,7 @@ function buildBugLogs(){
 // URL after the one-time deploy. Until then (or offline), we fall back to the
 // native mail draft so a report is never silently lost.
 const BUG_ENDPOINT = 'https://REPLACE-AFTER-DEPLOY.vercel.app/api/bug-report';
+const BUG_KEY = '';   // optional: match the function's BUG_KEY env to block drive-by traffic
 async function reportBug(){
   try{
     await ensureHtml2canvas();
@@ -1685,7 +1686,8 @@ async function reportBug(){
     let sent=false, url=null;
     if(configured){
       try{
-        const r = await fetch(BUG_ENDPOINT, { method:'POST', headers:{'Content-Type':'application/json'},
+        const hdrs={'Content-Type':'application/json'}; if(BUG_KEY) hdrs['x-buddy-key']=BUG_KEY;
+        const r = await fetch(BUG_ENDPOINT, { method:'POST', headers:hdrs,
           body: JSON.stringify({ version: $('#appVersion')?.textContent||'?', platform: navigator.userAgent, logs: buildBugLogs(), screenshot: png }) });
         if(r.ok){ sent=true; try{ url=(await r.json()).url; }catch(_){} }
       }catch(e){ console.warn('[buddy] bug endpoint failed, falling back to mail', e); }
