@@ -73,10 +73,11 @@ pattern (how WhatsApp/Signal/Plex link devices):
 This beats a typed passphrase (higher entropy, zero friction) and beats Sign in
 with Apple (no Apple-account lock-in, works for the open-source/local story).
 
-**Conflict policy (v1):** whole-document **last-write-wins by `updated_at`**, with
-the overwritten blob saved as a local backup + an undo, and a visible "synced at
-HH:MM" indicator. No CRDTs. (The `DATA-SAFETY-PLAN.md` file-backup makes the
-"saved before overwrite" trivial.)
+**Conflict policy (v1):** field-level **`merge()` on the client** + a dumb
+compare-and-swap server (LOCKED 2026-06-19 — superseded the original whole-doc
+last-write-wins, which an adversarial review showed silently loses an edit on any
+two-device day). See the locked decisions + decision log below. A visible "synced
+at HH:MM" indicator remains; no CRDTs.
 
 ---
 
@@ -152,9 +153,13 @@ collapse 0–2 into the one-shot.
      but stale pushes can't resurrect them, and a real "Erase all" can propagate.
    - Per-item **version counter** decides ties, NOT client wall-clock (clock skew
      would otherwise let stale data win). Server `now()` is only the "synced at" label.
-   - **Server merges on push** under a row lock (or optimistic compare-and-swap) and
-     returns the merged blob; first pair = **scanner pulls before it pushes** (an
-     empty new phone can never wipe a full Mac).
+   - **Merge runs on the CLIENT, never the server (LOCKED 2026-06-19 — see decision
+     log).** The server is a **dumb atomic store** with a version stamp; each device
+     does **pull → `merge(local, remote)` → compare-and-swap push → retry on version
+     conflict**. This keeps `merge()` in the two places already tested (JS + Swift),
+     not a third untestable plpgsql copy. First pair = **scanner pulls before it
+     pushes** (an empty new phone can never wipe a full Mac); the client also refuses
+     to push an empty blob over a non-empty remote.
 5. **Distribution: open-source + TestFlight.** Official builds → TestFlight (Wimp
    Decaf team) for personal use; repo public so anyone can clone + build their own;
    **sync backend opt-in, local-only by default** (contributor supplies their own
@@ -182,12 +187,30 @@ collapse 0–2 into the one-shot.
    step 4 must normalize; (b) iOS `DayItem` has **no id**, so same-date history
    records merge positionally (done-wins) rather than by id like the Mac — give
    `DayItem` an id for fully robust cross-device history merge.
-4. Server: `buddy_push` becomes merge-on-push under a row lock, returns the merged
-   blob, stamps `now()`, refuses an empty-over-full push. Add RPC rate-limiting.
-5. Wire pull/push + QR pairing (scanner pulls first), atomic apply, coarser
-   debounce (2–5 s), cap synced history (~90 days). Key in OS secure storage.
+4. **Normalize the wire format (one place).** Pick **epoch milliseconds** as the
+   single on-the-wire time unit (Mac already uses it); iOS converts on encode/decode
+   (`savedAt`, `erasedAt`, tombstone `deletedAt`, `doneAt`). Give iOS `DayItem` an
+   `id` (`h-<date>-<i>`, like the Mac) so history merges by id, not by position.
+   No backend needed — testable on both apps directly.
+5. **Dumb CAS server + client sync loop.** Server: `buddy_push(key, blob,
+   expected_version)` writes only if `expected_version` matches the stored row's
+   version, else returns the current `{blob, version}` (no merge logic on the
+   server). Client loop (Mac first, in the browser against a fake store so it's
+   testable without Postgres): `pull → merge(local, remote) → push → retry once on
+   conflict`; refuse to push empty-over-non-empty; coarse debounce (2–5 s); cap
+   synced history (~90 days); key in OS secure storage. Then QR pairing (scanner
+   pulls first). The live Supabase function is ~15 lines, verified once the DB is up.
 6. Explicitly reproduce each loss scenario (different-task edits, 5-min clock skew,
-   empty-phone-vs-full-Mac, double midnight rollover) and confirm ZERO loss.
+   empty-phone-vs-full-Mac, double midnight rollover) and confirm ZERO loss — runs
+   locally with two simulated clients (no Postgres needed for the merge/loop logic).
+
+### Decision log
+- **2026-06-19 — CAS-on-client, NOT server-side merge.** A first cut wrote the merge
+  in plpgsql (a third copy of `merge()`) which couldn't be tested without Docker and
+  drifted from the JS/Swift versions. Reverted (PR #29 closed). Chosen: the server is
+  a dumb atomic store with a version stamp; the client pulls, merges (already-tested
+  JS/Swift), and pushes with compare-and-swap, retrying on conflict. Simpler, two
+  merge copies instead of three, and fully testable on this machine.
 
 ### Still to decide (not blocking)
 - Whether the maintainer hosts a default Supabase project or every user brings their own.

@@ -14,19 +14,20 @@ Four workstreams moved this session. State of each:
 | **Data durability** (file source-of-truth, granular load, single-instance, dev red-icon) | `main` (PR #23 ✅merged) | Done + verified on-device. **✅ SHIPPED in v0.2.21** — both verify gates passed, signed+notarized+stapled, auto-update live. |
 | **Bug reports → private GitHub issue** (serverless) | `main` (PR #24 ✅merged) | Code merged + security-hardened. **DORMANT** until the 1-time deploy: do `BUG-REPORTS.md`, then set `BUG_ENDPOINT` in `dist/index.html` + ship a build. |
 | **iOS companion — offline app** | `main` (PR #25 ✅merged: scaffold+README) **+ PR #26 OPEN** (icon, Supabase schema, full local app, sync-step-1) | Builds + runs (xcodebuild SUCCEEDED, rendered in Simulator). Full local parity. **Merge #26 to land it.** |
-| **Mac⇄iOS sync** | `feat/sync-merge` (step 3) + plan | Design done. **Steps 1 (UUIDs) ✅ + 2 (per-item `v` + tombstones + `erasedAt` + idempotent rollover) ✅ + 3 (pure `merge()`, BOTH apps + Mac boot-reconcile wiring) ✅.** Mac mergeTest 12/12 + smokeTest 11/11; iOS XCTest 10/10. Step 4 (server merge-on-push) is NEXT. ⚠️ step 4 must normalize timestamp UNITS (Mac ms vs Swift s); iOS `DayItem` needs an id for robust history merge. Steps 4–6 in `IOS-COMPANION-PLAN.md`. |
+| **Mac⇄iOS sync** | `feat/sync-cas` + plan | Design done. **Steps 1–3 ✅** (UUIDs; per-item `v` + tombstones + `erasedAt` + idempotent rollover; pure `merge()` BOTH apps + Mac boot-reconcile wiring — Mac mergeTest 12/12 + smokeTest 11/11, iOS XCTest 10/10). **Architecture LOCKED 2026-06-19: CAS-on-client, NOT server-side merge** (a server-merge first cut was reverted — PR #29 closed — because it was a 3rd untestable copy of `merge()`; see plan decision log). **Step 4 (wire-format normalize) + 5 (dumb CAS server + client sync loop) IN PROGRESS** on `feat/sync-cas`. Steps 4–6 in `IOS-COMPANION-PLAN.md`. |
 
 ⚠️ **Sync correctness:** an adversarial review killed the original whole-doc
-last-write-wins design (silently loses data on any two-device day). The plan now
-specifies a small **field-level merge** (UUIDs ✅ → per-item version + tombstones →
-pure `merge()` → server merge-on-push). The `buddy_push` RPC currently in
-`supabase/migrations/` is still the **interim LWW** version and MUST be replaced
-with merge-on-push before sync is wired. Do not ship sync until steps 2–6 + the
-loss-scenario tests pass.
+last-write-wins design (silently loses data on any two-device day). Fixed by a
+field-level **`merge()` that runs on the CLIENT** (UUIDs ✅ → per-item version +
+tombstones ✅ → pure `merge()` ✅). The server is now just a **dumb compare-and-swap
+store** (a version stamp; no merge logic). The `buddy_push` RPC in
+`supabase/migrations/` is still the **interim LWW** version and gets replaced by the
+tiny CAS function in step 5. Do not ship sync until steps 4–6 + the loss-scenario
+tests pass.
 
-🚧 **Sync needs a live DB to test:** Docker/OrbStack was off this session, so the
-schema is written but **never applied/run**. Start OrbStack → `supabase start`, or
-deploy a cloud project (`supabase link` + `db push`), before wiring push/pull.
+✅ **Most remaining sync work is testable WITHOUT a live DB** (the merge + client
+loop run in the browser against a fake store). Only the ~15-line CAS Postgres
+function + live network need OrbStack → `supabase start`, verified once at the end.
 
 ## 🔒 Data durability — in review (PR #23, NOT yet merged/released)
 
@@ -86,11 +87,12 @@ the file (`boot: file mirror is newest … recovered=true`). Single-instance blo
 1. **Merge PR #26** — lands the iOS app icon, Supabase schema, full offline iOS app, and
    sync-step-1 UUIDs (safe; local-only/inert).
 2. **Sync steps 4–6** (the main remaining build) per the **Sync build order** in
-   `IOS-COMPANION-PLAN.md`: server **merge-on-push** (replace the interim LWW RPC,
-   normalize timestamp UNITS Mac-ms↔Swift-s) + rate-limit → pull/push + QR pairing
-   (scanner-pulls-first) → reproduce every loss scenario. **Start OrbStack /
-   `supabase start` first** to test the schema live. (Steps 1–3 ✅ — local model +
-   pure `merge()` done & verified on both apps.)
+   `IOS-COMPANION-PLAN.md`: normalize the wire format (epoch-ms everywhere; iOS
+   `DayItem` gets an id) → **dumb CAS server + client sync loop** (pull → merge →
+   compare-and-swap push → retry) wired on the Mac in the browser → reproduce every
+   loss scenario with two simulated clients. Merge + loop are testable now; only the
+   ~15-line CAS Postgres function needs OrbStack → `supabase start` at the end.
+   (Steps 1–3 ✅ — local model + pure `merge()` done & verified on both apps.)
 3. ~~**Cut a release**~~ ✅ DONE — **v0.2.21** shipped 2026-06-19 (durability + single-instance
    guard now live for installed users via auto-update).
 4. **Deploy bug reports** — follow `BUG-REPORTS.md`, set `BUG_ENDPOINT`, ship a build.
