@@ -139,9 +139,22 @@ collapse 0–2 into the one-shot.
    once, manual copy-paste fallback. No login.
 3. **Sync surface: everything** — `today`, `history`, `deferred`, AND `settings`.
    (Desktop-only prefs like `reserveSpace` are simply ignored by the iOS UI.)
-4. **Conflict: whole-document last-write-wins by `updated_at`**, with the
-   overwritten blob saved as a local backup (reuse the Mac file-mirror pattern) +
-   "synced at HH:MM". Per-field merge deferred.
+4. **Conflict: field-level MERGE, not whole-document last-write-wins.** An
+   adversarial review (2026-06-19) showed whole-doc LWW silently loses an edit on
+   any day both devices are touched, plus several other data-loss paths. The safe
+   design (the minimum that works — NOT a CRDT):
+   - **Globally-unique IDs** (UUIDs), not per-device `n1,n2…` counters. ✅ done.
+   - A pure, **commutative + idempotent `merge(a,b)`** used at every reconcile point
+     (Mac localStorage↔file boot, and local↔remote on both apps): `today.items`
+     union by id keeping the higher per-item version; `history` union by date;
+     `deferred` union by id; `settings` field-wise.
+   - **Tombstones** (`{id: deletedAt}`) + a top-level `erasedAt` so deletes stick
+     but stale pushes can't resurrect them, and a real "Erase all" can propagate.
+   - Per-item **version counter** decides ties, NOT client wall-clock (clock skew
+     would otherwise let stale data win). Server `now()` is only the "synced at" label.
+   - **Server merges on push** under a row lock (or optimistic compare-and-swap) and
+     returns the merged blob; first pair = **scanner pulls before it pushes** (an
+     empty new phone can never wipe a full Mac).
 5. **Distribution: open-source + TestFlight.** Official builds → TestFlight (Wimp
    Decaf team) for personal use; repo public so anyone can clone + build their own;
    **sync backend opt-in, local-only by default** (contributor supplies their own
@@ -150,8 +163,19 @@ collapse 0–2 into the one-shot.
 6. **Two update channels accepted:** GitHub Releases (Mac), TestFlight/App Store (iOS).
 7. **Bundle id:** `fyi.whale.buddy` (iOS target shares the identifier family).
 
-### Still to decide (not blocking the scaffold)
-- Exact Supabase schema + whether the maintainer hosts a default project or every
-  user brings their own from day one.
-- Whether full parity needs a richer conflict model than last-write-wins once two
-  devices are heavily used offline (revisit after dogfooding).
+### Sync build order (post-adversarial-review — each step ships safely on its own)
+1. **Globally-unique IDs (UUID) + migration** on both apps. ✅ done & verified.
+2. Add `v` (per-item version), `tombstones`, `erasedAt`, and **idempotent
+   date-keyed rollover** to the local model on both apps; deletes write tombstones.
+   No network. Gate on the existing smoke test + red-state sweep.
+3. Write + unit-test the pure `merge(a,b)` on both apps; wire it into the Mac's
+   localStorage↔file boot reconcile FIRST (proves the merge with no network).
+4. Server: `buddy_push` becomes merge-on-push under a row lock, returns the merged
+   blob, stamps `now()`, refuses an empty-over-full push. Add RPC rate-limiting.
+5. Wire pull/push + QR pairing (scanner pulls first), atomic apply, coarser
+   debounce (2–5 s), cap synced history (~90 days). Key in OS secure storage.
+6. Explicitly reproduce each loss scenario (different-task edits, 5-min clock skew,
+   empty-phone-vs-full-Mac, double midnight rollover) and confirm ZERO loss.
+
+### Still to decide (not blocking)
+- Whether the maintainer hosts a default Supabase project or every user brings their own.
