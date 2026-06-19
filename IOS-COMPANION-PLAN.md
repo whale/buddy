@@ -167,9 +167,12 @@ collapse 0–2 into the one-shot.
 1. **Globally-unique IDs (UUID) + migration** on both apps. ✅ done & verified.
 2. Add `v` (per-item version), `tombstones`, `erasedAt`, and **idempotent
    date-keyed rollover** to the local model on both apps; deletes write tombstones.
-   No network. Gate on the existing smoke test + red-state sweep.
+   No network. Gate on the existing smoke test + red-state sweep. ✅ done & verified
+   (Mac: smoke test 10/10 + persistence round-trip + idempotent-rollover runtime test;
+   iOS: mirrored, xcodebuild SUCCEEDED). ⚠️ timestamp UNITS still differ (Mac ms-epoch
+   vs Swift Date/seconds) — step 4 must normalize before any cross-device merge.
 3. Write + unit-test the pure `merge(a,b)` on both apps; wire it into the Mac's
-   localStorage↔file boot reconcile FIRST (proves the merge with no network).
+   localStorage↔file boot reconcile FIRST (proves the merge with no network). **← NEXT**
 4. Server: `buddy_push` becomes merge-on-push under a row lock, returns the merged
    blob, stamps `now()`, refuses an empty-over-full push. Add RPC rate-limiting.
 5. Wire pull/push + QR pairing (scanner pulls first), atomic apply, coarser

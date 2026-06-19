@@ -20,6 +20,9 @@ final class BuddyStore {
     var history: [Day] = []
     var deferred: [DeferredTask] = []
     var settings: BuddySettings = .default
+    // --- sync merge foundation (step 2, no network yet) ---
+    var tombstones: [String: Double] = [:]  // { itemId: deletedAt } — deletes persist across a merge
+    var erasedAt: Double? = nil             // "erase all" barrier so a real wipe wins over stale pushes
 
     // MARK: - Derived helpers
     var activeTasks: [BuddyTask] { today.items.filter { $0.isActive } }
@@ -38,6 +41,13 @@ final class BuddyStore {
         scheduleSave()
     }
 
+    // MARK: - Merge helpers (sync step 2)
+    // A delete records a tombstone instead of dropping silently, so a later stale push
+    // from another device can't resurrect the deleted task. Mirrors Mac's tombstone().
+    private func tombstone(_ id: String) {
+        tombstones[id] = Date().timeIntervalSince1970
+    }
+
     // MARK: - Task mutations
 
     /// Tap cycle: neutral → focused → done → neutral (restore).
@@ -51,6 +61,7 @@ final class BuddyStore {
             // Clear any existing focused task first, then focus this one.
             for i in today.items.indices where today.items[i].state == .focused {
                 today.items[i].state = .neutral
+                today.items[i].v += 1
             }
             t.state = .focused
         case .focused:
@@ -61,6 +72,7 @@ final class BuddyStore {
             t.state = .neutral
             t.doneAt = nil
         }
+        t.v += 1                       // any state change bumps the merge version
         today.items[idx] = t
         scheduleSave()
         // Return true if we just completed (transitioned into done) — caller fires celebration
@@ -81,15 +93,18 @@ final class BuddyStore {
         guard let idx = today.items.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
+            tombstone(today.items[idx].id)
             today.items.remove(at: idx)
-        } else {
+        } else if today.items[idx].text != trimmed {
             today.items[idx].text = trimmed
+            today.items[idx].v += 1            // a committed text change bumps the merge version
         }
         scheduleSave()
     }
 
     /// Delete a task by id.
     func deleteTask(id: String) {
+        tombstone(id)                          // record the delete so a stale push can't resurrect it
         today.items.removeAll { $0.id == id }
         scheduleSave()
     }
@@ -101,6 +116,7 @@ final class BuddyStore {
         guard activeCount < Self.hardCap else { return }
         today.items[idx].state = .neutral
         today.items[idx].doneAt = nil
+        today.items[idx].v += 1
         scheduleSave()
     }
 
@@ -110,8 +126,20 @@ final class BuddyStore {
         let task = today.items[idx]
         let wake = tomorrowDateString()
         deferred.append(DeferredTask(id: newId(), text: task.text, wake: wake))
+        tombstone(id)                          // it leaves today under a new deferred id → tombstone the old one
         today.items.remove(at: idx)
         scheduleSave()
+    }
+
+    /// Erase everything and stamp erasedAt so the wipe wins over any later stale push.
+    /// Mirrors Mac's `eraseAll()`. No Settings button yet — foundation for the merge.
+    func eraseAll() {
+        today = TodayState(date: Self.localDate(), items: [])
+        history = []
+        deferred = []
+        tombstones = [:]
+        erasedAt = Date().timeIntervalSince1970
+        scheduleSave(immediate: true)
     }
 
     // MARK: - Rollover
@@ -122,8 +150,10 @@ final class BuddyStore {
         let stored = today.date
         guard stored != cur else { return false }
 
-        // Archive today's tasks into history if there are any
-        if !today.items.isEmpty {
+        // Archive today's tasks into history — but only once per day. If this date is
+        // already in history (a second rollover this run, or a record merged in from
+        // another device), don't duplicate it. Closes the double-midnight loss path.
+        if !today.items.isEmpty && !history.contains(where: { $0.date == stored }) {
             let wd = weekdayName(for: stored)
             let record = Day(
                 date: stored,
@@ -135,16 +165,17 @@ final class BuddyStore {
             // Hybrid carry-over: pre-fill today with yesterday's unfinished tasks (up to softCap).
             // Mirrors Mac's bootFinish carry-over block.
             let unfinished = record.items.filter { !$0.done }.prefix(Self.softCap)
-            var carried = 0
-            for item in unfinished {
-                if activeCount < Self.hardCap {
-                    today.items.append(BuddyTask(id: newId(), text: item.text, state: .neutral))
-                    carried += 1
-                }
+            var carryItems: [BuddyTask] = []
+            for item in unfinished where carryItems.count < Self.hardCap {
+                carryItems.append(BuddyTask(id: newId(), text: item.text, state: .neutral))
             }
+            today = TodayState(date: cur, items: carryItems)
+            scheduleSave(immediate: true)
+            return true
         }
 
-        today = TodayState(date: cur, items: today.items)
+        // Day already archived (idempotent) or nothing to archive — advance to a fresh day.
+        today = TodayState(date: cur, items: [])
         scheduleSave(immediate: true)
         return true
     }
@@ -192,7 +223,9 @@ final class BuddyStore {
             today: today,
             history: history,
             deferred: deferred,
-            settings: settings
+            settings: settings,
+            tombstones: tombstones,
+            erasedAt: erasedAt
         )
         do {
             let data = try JSONEncoder().encode(blob)
@@ -210,6 +243,8 @@ final class BuddyStore {
             history  = blob.history ?? []
             deferred = blob.deferred ?? []
             settings = blob.settings ?? .default
+            tombstones = blob.tombstones ?? [:]
+            erasedAt   = blob.erasedAt
         } catch {
             print("[BuddyStore] load failed: \(error)")
         }
@@ -261,4 +296,6 @@ private struct PersistedBlob: Codable {
     var history: [Day]?
     var deferred: [DeferredTask]?
     var settings: BuddySettings?
+    var tombstones: [String: Double]?
+    var erasedAt: Double?
 }
