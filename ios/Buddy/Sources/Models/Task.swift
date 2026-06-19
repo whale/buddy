@@ -16,11 +16,30 @@ struct BuddyTask: Identifiable, Codable {
     var text: String
     var state: TaskState
     var doneAt: Date?
+    // Per-item version (merge tie-breaker), mirrors the Mac's item.v. Starts at 1 and
+    // rises on any state/text change so merge() can pick the winning copy per id.
+    var v: Int
 
     // Convenience: "done" row shows struck-through text in inkDim colour
     var isDone: Bool { state == .done }
     // Convenience: active = pressing on you (not done)
     var isActive: Bool { state != .done }
+
+    init(id: String, text: String, state: TaskState, doneAt: Date? = nil, v: Int = 1) {
+        self.id = id; self.text = text; self.state = state; self.doneAt = doneAt; self.v = v
+    }
+
+    enum CodingKeys: String, CodingKey { case id, text, state, doneAt, v }
+
+    // Tolerant decode: blobs written before `v` existed default to version 1.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id    = try c.decode(String.self, forKey: .id)
+        text  = (try? c.decode(String.self, forKey: .text)) ?? ""
+        state = (try? c.decode(TaskState.self, forKey: .state)) ?? .neutral
+        doneAt = try? c.decodeIfPresent(Date.self, forKey: .doneAt)
+        v     = (try? c.decodeIfPresent(Int.self, forKey: .v)) ?? 1
+    }
 }
 
 // MARK: - A day in history
@@ -47,9 +66,11 @@ struct TodayState: Codable {
 }
 
 // MARK: - Full persisted state
-// Mirrors the whole localStorage blob: { today, history, deferred, settings }
+// Mirrors the whole localStorage blob: { today, history, deferred, settings, tombstones, erasedAt }
 struct BuddyState: Codable {
     var today: TodayState
     var history: [Day]
-    var deferred: [BuddyTask]   // tasks "slept till tomorrow"
+    var deferred: [BuddyTask]       // tasks "slept till tomorrow"
+    var tombstones: [String: Double] = [:]  // { itemId: deletedAt } — deletes persist so a stale push can't resurrect them
+    var erasedAt: Double? = nil             // top-level "erase all" timestamp (merge barrier)
 }
