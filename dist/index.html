@@ -399,6 +399,9 @@ let state = {
   deferred:[],                       // tasks "slept till tomorrow": {id,text,wake:"YYYY-MM-DD"}
   settings:{ celebrate:100, historyDays:7, reserveSpace:false },   // historyDays 0(off)..14; reserveSpace pushes other windows out when pinned
   pinned:  false,
+  // --- sync merge foundation (step 2, no network yet) ---
+  tombstones:{},                     // { [itemId]: deletedAt } — deletes persist so a stale push can't resurrect them
+  erasedAt:null,                     // top-level "erase all" timestamp — lets a real wipe propagate over a merge
   histOpen:false,
   histTab:'future',                  // 'future' (pushed-forward) | 'past' (completed)
 };
@@ -418,6 +421,14 @@ let uid = 1;
 const nid = () => (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('n'+Date.now().toString(36)+'-'+(uid++));
 // Back-compat for blobs saved before UUIDs: ensure the counter clears any old n* ids.
 function bumpUid(){ let mx=0; (state.today.items||[]).forEach(i=>{ const m=/^n(\d+)$/.exec(i.id||''); if(m) mx=Math.max(mx,+m[1]); }); uid=Math.max(uid, mx+1); }
+// Every today-item carries a per-item version `v` (starts at 1). merge() keeps the
+// higher v per id, so v MUST rise on any semantic change (state/text). Use newItem()
+// to create and touch() to bump — never hand-roll an item literal without a v.
+const newItem = (text, st) => ({ id:nid(), text:text||'', state:st||'neutral', v:1 });
+const touch   = it => { if(it) it.v=(it.v|0)+1; };
+// A delete records a tombstone (id → when) instead of silently dropping the row, so a
+// later stale push from another device can't bring the deleted task back.
+const tombstone = id => { if(id){ (state.tombstones||(state.tombstones={}))[id]=Date.now(); } };
 let editingId = null;
 let cursor = 0;                  // keyboard cursor index (0..items.length, last = Add row)
 let kbActive = false;           // true once a key has been used → cursor ring shows
@@ -501,11 +512,13 @@ function serialize(){
   return JSON.stringify({
     version:1,
     savedAt: Date.now(),
-    today:   { date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null,doneAt:i.doneAt??null})) },
+    today:   { date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null,doneAt:i.doneAt??null,v:i.v||1})) },
     history: state.history,
     deferred:(state.deferred||[]).map(d=>({id:d.id,text:d.text,wake:d.wake})),
     settings:{ celebrate: Math.max(0,Math.min(100, state.settings.celebrate??100)), historyDays: clamp(0, state.settings.historyDays??7, 14), reserveSpace: !!state.settings.reserveSpace },
     pinned:  !!state.pinned,
+    tombstones: state.tombstones||{},
+    erasedAt:   (typeof state.erasedAt==='number') ? state.erasedAt : null,
   });
 }
 let saveSuppressed=false;        // test hook: freeze persistence so an injected blob survives reload
@@ -555,6 +568,8 @@ function freshBoot(){
   state.deferred=[];
   state.settings={ celebrate:100, historyDays:7, reserveSpace:false };
   state.pinned=false;
+  state.tombstones={};
+  state.erasedAt=null;
 }
 function parseRaw(raw){ if(raw==null) return null; try{ const b=JSON.parse(raw); return (b&&typeof b==='object')?b:null; }catch{ return null; } }
 
@@ -570,7 +585,8 @@ function hydrate(blob){
     ? { date:blob.today.date, morningDone:!!blob.today.morningDone, items:blob.today.items.map(i=>({
         id:i.id||nid(), text:String(i.text||''),
         state:(i.state==='focused'||i.state==='done')?i.state:'neutral',
-        src:i.src??null, doneAt:(typeof i.doneAt==='number'?i.doneAt:null) })) }
+        src:i.src??null, doneAt:(typeof i.doneAt==='number'?i.doneAt:null),
+        v:(typeof i.v==='number'&&i.v>0)?i.v:1 })) }   // legacy items pre-v default to 1
     : null;
   return {
     today,
@@ -581,6 +597,8 @@ function hydrate(blob){
                 historyDays: (blob.settings && Number.isFinite(blob.settings.historyDays)) ? clamp(0, blob.settings.historyDays|0, 14) : 7,
                 reserveSpace: !!(blob.settings && blob.settings.reserveSpace) },
     pinned: !!blob.pinned,
+    tombstones: (blob.tombstones && typeof blob.tombstones==='object' && !Array.isArray(blob.tombstones)) ? blob.tombstones : {},
+    erasedAt: (typeof blob.erasedAt==='number') ? blob.erasedAt : null,
     savedAt: (typeof blob.savedAt==='number') ? blob.savedAt : 0,
   };
 }
@@ -590,6 +608,8 @@ function applyHydrated(h){
   state.deferred= h.deferred;
   state.settings= h.settings;
   state.pinned  = h.pinned;
+  state.tombstones = h.tombstones || {};
+  state.erasedAt   = (typeof h.erasedAt==='number') ? h.erasedAt : null;
 }
 
 let bootHadStored=false, bootUsable=false, recoveredFromBak=false, lsHydrated=null;
@@ -621,18 +641,24 @@ function maybeRollover(){
   if(stored===cur) return false;              // same day → restore verbatim, no morning
   if(!stored){ state.today.date=cur; return false; }
 
-  if(state.today.items.length>0){
-    // Archive the finished day with STABLE ids.
-    const epoch=Math.floor(Date.now()/1000);
+  // Idempotent + date-keyed: if this day is already archived (a second rollover in the
+  // same process, or a merged-in record from another device), don't duplicate it — just
+  // advance the date. Stable per-day ids (h-<date>-<i>) so two devices archiving the same
+  // day produce identical ids that merge() dedupes cleanly.
+  if(state.today.items.length>0 && !state.history.some(h=>h.date===stored)){
     const wd=DOW[ new Date(stored+'T00:00:00').getDay() ];
     const record={
       date: stored, weekday: wd,
-      items: state.today.items.map((it,i)=>({ id:`h-${epoch}-${i}`, text:it.text, done: it.state==='done' })),
+      items: state.today.items.map((it,i)=>({ id:`h-${stored}-${i}`, text:it.text, done: it.state==='done' })),
     };
     state.history.unshift(record);
     // history is kept forever until the user erases it (Settings → Erase all data)
     state.today={ date:cur, items:[], morningDone:false };
     return true;                              // → caller shows morning
+  } else if(state.today.items.length>0){
+    // Day already archived (idempotent) — drop the live items, advance the date.
+    state.today={ date:cur, items:[], morningDone:false };
+    return true;
   } else {
     // Empty/skipped day → advance the date AND reset morningDone so the planner
     // shows again the next day (archive nothing).
@@ -685,6 +711,7 @@ function tomorrowDate(){ const d=new Date(); d.setDate(d.getDate()+1); return lo
 function sleepItem(id){
   const it=state.items.find(x=>x.id===id); if(!it) return;
   state.deferred.push({ id:nid(), text:it.text, wake:tomorrowDate() });
+  tombstone(id);                                   // it leaves today under a new deferred id → tombstone the old one
   state.items=state.items.filter(x=>x.id!==id);
   render();
 }
@@ -693,7 +720,7 @@ function wakeDeferred(){
   if(!state.deferred || !state.deferred.length) return;
   const today=localDate(); const keep=[];
   state.deferred.forEach(d=>{
-    if(d.wake && d.wake<=today && activeCount()<HARD_CAP){ state.items.push({id:nid(),text:d.text,state:'neutral'}); }
+    if(d.wake && d.wake<=today && activeCount()<HARD_CAP){ state.items.push(newItem(d.text)); }
     else keep.push(d);
   });
   state.deferred=keep;
@@ -761,9 +788,10 @@ function applyPinnedUI(){
    already-done item never pass through here, so they never celebrate. */
 function cycle(it){
   const was=it.state;
-  if(it.state==='neutral'){ state.items.forEach(x=>{ if(x.state==='focused') x.state='neutral'; }); it.state='focused'; }
+  if(it.state==='neutral'){ state.items.forEach(x=>{ if(x.state==='focused'){ x.state='neutral'; touch(x); } }); it.state='focused'; }
   else if(it.state==='focused'){ it.state='done'; it.doneAt=Date.now(); }
   else { if(activeCount()>=HARD_CAP) return; it.state='neutral'; delete it.doneAt; }   // done → restore (capped)
+  touch(it);
   if(was!=='done' && it.state==='done'){ fireConfetti(); scheduleDonezo(it.id); }
   render();
 }
@@ -772,11 +800,11 @@ function cycle(it){
 /* F key: set a task as focused without cycling. Idempotent. */
 function setNow(it){
   if(it.state==='done') return;        // a done task isn't a "now"
-  state.items.forEach(x=>{ if(x.state==='focused') x.state='neutral'; });
-  it.state='focused';
+  state.items.forEach(x=>{ if(x.state==='focused'){ x.state='neutral'; touch(x); } });
+  it.state='focused'; touch(it);
   render();
 }
-function removeItem(id){ state.items=state.items.filter(x=>x.id!==id); render(); }
+function removeItem(id){ tombstone(id); state.items=state.items.filter(x=>x.id!==id); render(); }
 
 /* --------------------------- done / "Donezo" --------------------- */
 // Active = items that still pressure you (not done). Red escalation and the
@@ -803,10 +831,20 @@ function restoreItem(id){
   const it=state.items.find(x=>x.id===id);
   if(!it || it.state!=='done') return;
   if(activeCount()>=HARD_CAP) return;                       // already full of active work
-  it.state='neutral'; delete it.doneAt;
+  it.state='neutral'; delete it.doneAt; touch(it);
   render();
 }
 function reducedMotion(){ try{ return matchMedia('(prefers-reduced-motion: reduce)').matches; }catch(_){ return false; } }
+
+// Erase everything and stamp erasedAt so the wipe wins over any later stale push
+// (a merge treats erasedAt as a barrier — items/history older than it are dropped).
+// No Settings button yet; exposed via __buddy.eraseAll for now + the merge foundation.
+function eraseAll(){
+  state.today={ date:localDate(), items:[], morningDone:false };
+  state.history=[]; state.deferred=[]; state.tombstones={};
+  state.erasedAt=Date.now();
+  save(); render();
+}
 
 /* --------------------------- editing ----------------------------- */
 function startEdit(id){
@@ -929,8 +967,8 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     txt.className='flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2] '+(it.state==='done'?'line-through':'');
     txt.textContent=it.text||''; if(!it.text)txt.classList.add('empty');
     txt.addEventListener('input',()=>{ it.text=txt.textContent.trim(); });
-    txt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); const had=txt.textContent.trim(); txt.blur(); if(had && activeCount()<HARD_CAP){ const nit={id:nid(),text:'',state:'neutral'}; state.items.push(nit); render(); startEdit(nit.id); } } });
-    txt.addEventListener('blur',()=>{ it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable'); editingId=null; if(!it.text){ state.items=state.items.filter(x=>x.id!==it.id); } render(); });
+    txt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); const had=txt.textContent.trim(); txt.blur(); if(had && activeCount()<HARD_CAP){ const nit=newItem(''); state.items.push(nit); render(); startEdit(nit.id); } } });
+    txt.addEventListener('blur',()=>{ const prev=it.text; it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable'); editingId=null; if(!it.text){ tombstone(it.id); state.items=state.items.filter(x=>x.id!==it.id); } else if(it.text!==prev){ touch(it); } render(); });
     row.appendChild(txt);
 
     const onRed=lvl===2;
@@ -1158,10 +1196,11 @@ function toggleUndone(){
     const rec=state.history[0];
     undoneIds=[];
     (rec?rec.items.filter(it=>!it.done):[]).forEach(it=>{
-      if(activeCount()<HARD_CAP){ const nit={id:nid(),text:it.text,state:'neutral'}; state.items.push(nit); undoneIds.push(nit.id); }
+      if(activeCount()<HARD_CAP){ const nit=newItem(it.text); state.items.push(nit); undoneIds.push(nit.id); }
     });
     undoneAdded=true;
   } else {
+    undoneIds.forEach(tombstone);
     state.items=state.items.filter(x=>!undoneIds.includes(x.id));
     undoneIds=[]; undoneAdded=false;
   }
@@ -1185,7 +1224,7 @@ $('#devMorning').addEventListener('click',showMorning);
 let justAddedId=null;            // the one row that should play the enter animation
 function addAndEdit(){
   if(activeCount()>=HARD_CAP) return;     // visible-but-inert at the cap
-  const it={id:nid(),text:'',state:'neutral'};
+  const it=newItem('');
   state.items.push(it);
   justAddedId=it.id;
   cursor=state.items.length-1;                 // cursor follows the new task
@@ -1563,6 +1602,7 @@ window.__buddy = {
   // Mirrors a page reload but in-process (used to assert load/rollover).
   boot,
   rollover: maybeRollover,
+  eraseAll,                                  // sync step 2: erase + stamp erasedAt (merge barrier)
   openDrawer, closeDrawer,
   showMorning,
   // Phase B hooks (confetti / settings / keyboard verification)
@@ -1582,11 +1622,12 @@ window.__buddy = {
   // change looks purely cosmetic. Snapshots and restores your real state.
   async smokeTest(){
     const R=[]; const ok=(name,cond,detail)=>R.push({name,pass:!!cond,detail:detail||''});
-    const snap=JSON.parse(JSON.stringify({today:state.today,history:state.history,deferred:state.deferred,settings:state.settings,pinned:state.pinned}));
+    const snap=JSON.parse(JSON.stringify({today:state.today,history:state.history,deferred:state.deferred,settings:state.settings,pinned:state.pinned,tombstones:state.tombstones,erasedAt:state.erasedAt}));
     const wasSup=saveSuppressed; saveSuppressed=true;
     try{
+      state.tombstones={};
       state.today={ date:localDate(), morningDone:true, items:[
-        {id:'s1',text:'alpha',state:'neutral'},{id:'s2',text:'beta',state:'focused'} ] };
+        {id:'s1',text:'alpha',state:'neutral',v:1},{id:'s2',text:'beta',state:'focused',v:1} ] };
       editingId=null; render();
       addAndEdit();
       ok('add creates a new item', state.items.length===3, 'len='+state.items.length);
@@ -1603,12 +1644,19 @@ window.__buddy = {
          'active='+(ae&&ae.tagName)+' tid='+(ae&&ae.dataset&&ae.dataset.tid));
       if(ae&&ae.blur) ae.blur();
       const before=activeCount();
+      const vBefore=(state.items.find(i=>i.id==='s2')||{}).v||0;
       cycle(state.items.find(i=>i.id==='s2'));
       const d=state.items.find(i=>i.id==='s2');
       ok('complete: marks done + doneAt', d&&d.state==='done'&&typeof d.doneAt==='number');
       ok('complete: drops from the red (active) count', activeCount()===before-1);
+      ok('sync: a state change bumps the per-item version (merge tie-breaker)', d&&d.v>vBefore, 'v '+vBefore+'→'+(d&&d.v));
       restoreItem('s2');
       ok('undo: restores to active', state.items.find(i=>i.id==='s2')&&state.items.find(i=>i.id==='s2').state!=='done');
+      // sync: a delete must leave a tombstone, not silently vanish (stale-push guard).
+      removeItem('s1');
+      ok('sync: delete writes a tombstone (deleted ids cannot be resurrected)',
+         !!(state.tombstones&&state.tombstones['s1']) && !state.items.some(i=>i.id==='s1'),
+         'tombstones='+Object.keys(state.tombstones||{}).join(','));
       ok('rows do NOT reuse data-tid (FLIP collision guard)',
          ![...todayWrap.querySelectorAll('.buddy-row')].some(r=>r.dataset&&r.dataset.tid));
       // Escalation legibility: at lvl2 (red bg) the done/Donezo text MUST adapt to
@@ -1626,6 +1674,7 @@ window.__buddy = {
          warnLevel()===2 && lum>500, 'lvl='+warnLevel()+' color='+(dr&&getComputedStyle(dr).color));
     }catch(e){ ok('ran without throwing', false, e&&e.message); }
     state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
+    state.tombstones=snap.tombstones||{}; state.erasedAt=(typeof snap.erasedAt==='number')?snap.erasedAt:null;
     editingId=null; render(); saveSuppressed=wasSup;
     const failed=R.filter(r=>!r.pass);
     return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
@@ -1745,7 +1794,7 @@ function bootFinish(recovered){
     // new day — you trim down to your three. (Fixes the "my tasks vanished" feel.)
     if(state.history.length>histBefore){
       state.history[0].items.filter(it=>!it.done).slice(0,SOFT_CAP).forEach(it=>{
-        if(activeCount()<HARD_CAP) state.items.push({ id:nid(), text:it.text, state:'neutral' });
+        if(activeCount()<HARD_CAP) state.items.push(newItem(it.text));
       });
     }
     writeNow();                              // commit the rollover + carry-over SYNCHRONOUSLY (no debounce gap)
