@@ -14,7 +14,7 @@ Four workstreams moved this session. State of each:
 | **Data durability** (file source-of-truth, granular load, single-instance, dev red-icon) | `main` (PR #23 ✅merged) | Done + verified on-device. **✅ SHIPPED in v0.2.21** — both verify gates passed, signed+notarized+stapled, auto-update live. |
 | **Bug reports → private GitHub issue** (serverless) | `main` (PR #24 ✅merged) | Code merged + security-hardened. **DORMANT** until the 1-time deploy: do `BUG-REPORTS.md`, then set `BUG_ENDPOINT` in `dist/index.html` + ship a build. |
 | **iOS companion — offline app** | `main` (PR #25 ✅merged: scaffold+README) **+ PR #26 OPEN** (icon, Supabase schema, full local app, sync-step-1) | Builds + runs (xcodebuild SUCCEEDED, rendered in Simulator). Full local parity. **Merge #26 to land it.** |
-| **Mac⇄iOS sync** | PR #26 (step 1) + plan | Design done. **Step 1 (UUIDs) ✅.** Steps 2–6 NOT started — full build order in `IOS-COMPANION-PLAN.md`. |
+| **Mac⇄iOS sync** | `feat/sync-local-model` (steps 1–2) + plan | Design done. **Steps 1 (UUIDs) ✅ + 2 (per-item `v` + tombstones + `erasedAt` + idempotent rollover, BOTH apps) ✅.** Step 3 (pure `merge()`) is NEXT. Steps 3–6 in `IOS-COMPANION-PLAN.md`. |
 
 ⚠️ **Sync correctness:** an adversarial review killed the original whole-doc
 last-write-wins design (silently loses data on any two-device day). The plan now
