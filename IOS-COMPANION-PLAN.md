@@ -184,6 +184,15 @@ collapse 0–2 into the one-shot.
    `DayItem` an id for fully robust cross-device history merge.
 4. Server: `buddy_push` becomes merge-on-push under a row lock, returns the merged
    blob, stamps `now()`, refuses an empty-over-full push. Add RPC rate-limiting.
+   🟡 **WRITTEN, NOT YET VERIFIED** (`feat/sync-server-merge`, PR draft). New migration
+   `supabase/migrations/20260619030000_buddy_merge_on_push.sql`: pure `buddy_merge_blobs`
+   mirroring the client merge + `buddy_norm_ts` (Mac ms ↔ iOS s normalization) + row
+   lock (`FOR UPDATE`) + empty-over-full guard + 1/sec per-key rate limit; returns the
+   merged blob. Test harness `supabase/tests/buddy_merge_on_push_test.sql` (10 pure-merge
+   scenarios + push integration) is ready. **BLOCKER: no local Postgres** (OrbStack/Docker
+   off; only libpq client tools installed) — must run `supabase start` + the test script
+   before this can be trusted or merged. doneAt v-tie uses raw compare (iOS encodes Date
+   as reference-2001 seconds) — fine as a rare tiebreak, normalize if it ever matters.
 5. Wire pull/push + QR pairing (scanner pulls first), atomic apply, coarser
    debounce (2–5 s), cap synced history (~90 days). Key in OS secure storage.
 6. Explicitly reproduce each loss scenario (different-task edits, 5-min clock skew,
