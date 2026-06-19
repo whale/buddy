@@ -852,6 +852,25 @@ function makeFakeCASStore(seed){
   };
 }
 
+/* ---- Sync identity (QR pairing core) ----
+   A high-entropy capability key is generated once on the Mac and shared to the phone
+   by QR. The DB row key (owner_id) is derived as sha256(syncKey) so the raw secret is
+   never the literal row id. Both devices derive the SAME owner_id from the same key —
+   pinned by a shared test vector in syncTest()/BuddySyncTests so JS and Swift agree. */
+function generateSyncKey(){
+  const a=new Uint8Array(32); (globalThis.crypto||window.crypto).getRandomValues(a);   // 256-bit
+  return btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');  // base64url
+}
+async function deriveOwnerId(syncKey){
+  const buf=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(syncKey)));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function pairingPayload(backendUrl, syncKey){ return JSON.stringify({ v:1, backendUrl:String(backendUrl), syncKey:String(syncKey) }); }
+function parsePairingPayload(s){
+  try{ const o=JSON.parse(s); if(o&&typeof o.syncKey==='string'&&typeof o.backendUrl==='string') return { backendUrl:o.backendUrl, syncKey:o.syncKey }; }catch{}
+  return null;
+}
+
 let bootHadStored=false, bootUsable=false, recoveredFromBak=false, lsHydrated=null;
 function load(){
   const raw=lsGet(STORAGE_KEY);
@@ -1844,6 +1863,7 @@ window.__buddy = {
   rollover: maybeRollover,
   eraseAll,                                  // sync step 2: erase + stamp erasedAt (merge barrier)
   syncOnce, makeFakeCASStore,                // sync step 5: CAS-on-client loop + reference store
+  generateSyncKey, deriveOwnerId, pairingPayload, parsePairingPayload,   // QR pairing core
   openDrawer, closeDrawer,
   showMorning,
   // Phase B hooks (confetti / settings / keyboard verification)
@@ -2092,6 +2112,16 @@ window.__buddy = {
       state.settings={celebrate:100,historyDays:0,reserveSpace:false}; await syncOnce(store,'k');
       row=store._rows()['k'];
       ok('settings change propagates', row.blob.settings && row.blob.settings.historyDays===0, 'historyDays='+(row.blob.settings&&row.blob.settings.historyDays));
+
+      // 11. QR pairing identity: owner_id is deterministic + matches the cross-platform
+      // test vector (the same string sha256'd in BuddySyncTests → JS and Swift agree).
+      const oid=await deriveOwnerId('buddy-test-key');
+      ok('owner_id matches the shared JS↔Swift test vector', oid==='9a39afad46d5205bc0d6abb9be6dd625649a796e09519cee438ba56b5899d79a', 'oid='+oid);
+      const key=generateSyncKey();
+      ok('sync key is 256-bit (43-char base64url)', typeof key==='string' && key.length===43 && /^[A-Za-z0-9_-]+$/.test(key), 'len='+key.length);
+      const round=parsePairingPayload(pairingPayload('https://x.supabase.co', key));
+      ok('pairing payload round-trips', round && round.syncKey===key && round.backendUrl==='https://x.supabase.co');
+      ok('pairing payload rejects garbage', parsePairingPayload('not json')===null && parsePairingPayload('{}')===null);
     }catch(e){ ok('syncTest ran without throwing', false, e&&(e.message+' @ '+(e.stack||'').split('\n')[1])); }
     state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
     state.tombstones=snap.tombstones||{}; state.erasedAt=(typeof snap.erasedAt==='number')?snap.erasedAt:null;
