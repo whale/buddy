@@ -12,6 +12,7 @@ struct SettingsView: View {
     // Local mirror of store.settings so we can preview changes live
     @State private var celebrate: Double = 100
     @State private var historyDays: Double = 7
+    @State private var showEraseConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -96,6 +97,29 @@ struct SettingsView: View {
                     Text("Account")
                 }
                 .disabled(true)
+
+                // Erase all data — mirrors the Mac's eraseAll(); stamps erasedAt so a
+                // real wipe propagates over sync (the merge treats it as a barrier).
+                Section {
+                    Button(role: .destructive) {
+                        showEraseConfirm = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "trash")
+                            Text("Erase all data")
+                        }
+                    }
+                } header: {
+                    Text("Danger zone")
+                } footer: {
+                    Text("Removes every task and all history on this device. This can't be undone.")
+                }
+            }
+            .alert("Erase all data?", isPresented: $showEraseConfirm) {
+                Button("Erase", role: .destructive) { store.eraseAll(); dismiss() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This removes every task and all history on this device. This can't be undone.")
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

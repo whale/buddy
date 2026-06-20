@@ -41,4 +41,16 @@ final class CycleStoreTests: XCTestCase {
         XCTAssertTrue(s.atHardCap)
         XCTAssertNil(s.addTask())                          // no 7th active task
     }
+
+    // Erase all data (parity item 4) — clears everything and stamps the sync barrier.
+    func testEraseAllClearsAndStampsBarrier() {
+        let s = BuddyStore()
+        s.today = TodayState(date: BuddyStore.localDate(), items: [neutral("a")], morningDone: true)
+        s.history = [Day(date: "2020-01-01", weekday: "Wednesday",
+                         items: [DayItem(id: "h-2020-01-01-0", text: "x", done: true)])]
+        s.eraseAll()
+        XCTAssertTrue(s.today.items.isEmpty)
+        XCTAssertTrue(s.history.isEmpty)
+        XCTAssertNotNil(s.erasedAt)        // barrier so a real wipe wins over a stale sync push
+    }
 }

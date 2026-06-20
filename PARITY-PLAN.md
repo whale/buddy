@@ -29,8 +29,8 @@ Execute **one item at a time**, reviewing each before moving on. Check items off
 - [x] **1. Morning view** — ✅ shows on a fresh/rolled day with yesterday's carried-over tasks pre-loaded, Add row, Skip + Buddy! controls; both set `morningDone`. Verified in simulator + code-reviewed (fixed: blank-task race on fast Buddy! tap, Skip wired to `skipMorning`). Styling polish deferred to item 11.
 - [x] **2. Focused / "now" state** — ✅ focused task now gets the grey "now" fill (`#f4f4f4`; red+15%-black `#c33d41` at lvl2), matching the Mac. Covers item 9. Verified in sim + 4 cycle/cap XCTests (focus, single-focus, complete, cap).
 - [ ] **3. Donezo placement** — move completed rows to the **top of the list inline** (Mac model), not a bottom section.
-- [ ] **4. Erase all data** — wire `store.eraseAll()` into Settings (Mac has it; iOS Settings doesn't).
-- [ ] **5. Caps + add-at-cap behavior** — confirm soft 5 / hard 6, add disabled past hard cap, matches Mac.
+- [x] **4. Erase all data** — ✅ "Erase all data" (Danger zone) in Settings with a confirm alert → `store.eraseAll()` (clears + stamps `erasedAt` sync barrier). Build + store test verified.
+- [x] **5. Caps + add-at-cap behavior** — ✅ confirmed soft 5 / hard 6; add returns nil past hard cap; Add row hidden at cap. Covered by `testAddBlockedAtHardCap` + the morning carry-cap test.
 
 ## Phase 2 — Visual style parity (4/10 → 9/10)
 
