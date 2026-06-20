@@ -22,6 +22,9 @@ struct TodayView: View {
     // Celebration overlay
     @State private var showCelebration = false
 
+    // Morning planner (shown on a fresh/rolled day until Buddy!/Skip)
+    @State private var showMorning = false
+
     // DEBUG: force an escalation level in previews
     @State var debugActiveOverride: Int? = nil
 
@@ -137,6 +140,13 @@ struct TodayView: View {
         }
         .sheet(isPresented: $showHistory)  { HistoryView(store: store) }
         .sheet(isPresented: $showSettings) { SettingsView(store: store) }
+        .fullScreenCover(isPresented: $showMorning) {
+            MorningView(store: store, onDone: { showMorning = false })
+        }
+        // Show the planner on a fresh/rolled day. Runs once on appear — ACCEPTED GAP:
+        // an app left open across midnight won't re-show the morning until next launch
+        // (the Mac re-runs rollover on focus/interval; iOS live-rollover is a later item).
+        .task { showMorning = store.needsMorning }
     }
 
     // MARK: - Date header

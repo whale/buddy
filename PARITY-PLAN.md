@@ -26,7 +26,7 @@ Execute **one item at a time**, reviewing each before moving on. Check items off
 
 ## Phase 1 — UX / functionality parity (do first)
 
-- [ ] **1. Morning view** — 3-slot planner shown on a fresh/rolled day until "Buddy!" is pressed; Skip + Buddy! controls; sets `morningDone`. Show yesterday's carried-over unfinished tasks in it (the carry-over already happens in the store; it just isn't presented). This is the biggest missing flow.
+- [x] **1. Morning view** — ✅ shows on a fresh/rolled day with yesterday's carried-over tasks pre-loaded, Add row, Skip + Buddy! controls; both set `morningDone`. Verified in simulator + code-reviewed (fixed: blank-task race on fast Buddy! tap, Skip wired to `skipMorning`). Styling polish deferred to item 11.
 - [ ] **2. Focused / "now" state** — tapping cycles neutral → focused → done (already in the store); make the focused task visibly the "now" one (logic is there, the UI doesn't reflect it).
 - [ ] **3. Donezo placement** — move completed rows to the **top of the list inline** (Mac model), not a bottom section.
 - [ ] **4. Erase all data** — wire `store.eraseAll()` into Settings (Mac has it; iOS Settings doesn't).
