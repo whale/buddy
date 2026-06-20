@@ -34,17 +34,17 @@ Execute **one item at a time**, reviewing each before moving on. Check items off
 
 ## Phase 1.5 — UX gaps the owner flagged
 
-- [ ] **A. Check-off affordance** — tappable completion circle on each active row (no obvious way to mark done). Doubles as the number-badge replacement.
+- [x] **A. Check-off affordance** — ✅ tappable circle completes each row (filled check on done → restore). Also fixed: swipe actions were DEAD outside a List → replaced with a long-press menu (edit / sleep / delete).
 - [ ] **B. Report a bug** — a "Report a bug" row in Settings (mirror the Mac's tray "Report a bug").
 - [ ] **C. Dev restart/reset** — DEBUG-only "Reset data & restart" in Settings so dev testing can re-trigger the morning / clear state.
 
 ## Phase 2 — Visual style parity (4/10 → 9/10)
 
 - [x] **6. Font** — use the **system San Francisco font** (owner's call — no Inter bundle).
-- [ ] **7. Date header** — weekday + month stacked + giant numeral, matching `mac-daily-lvl0`.
-- [ ] **8. Task card** — wrap the list in the bordered rounded card; generous row height + dividers; **remove row numbers** (Mac has none).
+- [x] **7. Date header** — ✅ weekday + month stacked + giant numeral, matches `mac-daily-lvl0`.
+- [x] **8. Task card** — ✅ bordered rounded card + subtle shadow, generous rows, numbers removed (circle replaces them).
 - [x] **9. Focused highlight** — ✅ done with item 2.
-- [ ] **10. Donezo style** — struck inline row matching the Mac's "Donezo. <title>".
+- [x] **10. Donezo style + placement** — ✅ struck inline "Donezo. <title>" at the TOP of the card, matching the Mac.
 - [ ] **11. Morning view styling** — match `mac-morning` (Skip / Buddy! pill).
 - [ ] **12. Final sweep** — screenshot iOS at lvl0/1/2 + morning, side-by-side vs Mac; iterate to 9/10.
 
