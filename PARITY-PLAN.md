@@ -32,9 +32,15 @@ Execute **one item at a time**, reviewing each before moving on. Check items off
 - [x] **4. Erase all data** — ✅ "Erase all data" (Danger zone) in Settings with a confirm alert → `store.eraseAll()` (clears + stamps `erasedAt` sync barrier). Build + store test verified.
 - [x] **5. Caps + add-at-cap behavior** — ✅ confirmed soft 5 / hard 6; add returns nil past hard cap; Add row hidden at cap. Covered by `testAddBlockedAtHardCap` + the morning carry-cap test.
 
+## Phase 1.5 — UX gaps the owner flagged
+
+- [ ] **A. Check-off affordance** — tappable completion circle on each active row (no obvious way to mark done). Doubles as the number-badge replacement.
+- [ ] **B. Report a bug** — a "Report a bug" row in Settings (mirror the Mac's tray "Report a bug").
+- [ ] **C. Dev restart/reset** — DEBUG-only "Reset data & restart" in Settings so dev testing can re-trigger the morning / clear state.
+
 ## Phase 2 — Visual style parity (4/10 → 9/10)
 
-- [ ] **6. Bundle Inter** — add the Inter font to iOS so type matches the Mac (foundation for everything below).
+- [x] **6. Font** — use the **system San Francisco font** (owner's call — no Inter bundle).
 - [ ] **7. Date header** — weekday + month stacked + giant numeral, matching `mac-daily-lvl0`.
 - [ ] **8. Task card** — wrap the list in the bordered rounded card; generous row height + dividers; **remove row numbers** (Mac has none).
 - [x] **9. Focused highlight** — ✅ done with item 2.

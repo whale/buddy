@@ -42,6 +42,16 @@ final class CycleStoreTests: XCTestCase {
         XCTAssertNil(s.addTask())                          // no 7th active task
     }
 
+    // Check-off circle (parity item A): complete() marks done from any state.
+    func testCompleteDirectlyMarksDone() {
+        let s = BuddyStore()
+        s.today = TodayState(date: BuddyStore.localDate(), items: [neutral("a")], morningDone: true)
+        XCTAssertTrue(s.complete(s.today.items[0]))           // transition into done → celebrate
+        XCTAssertEqual(s.today.items[0].state, .done)
+        XCTAssertNotNil(s.today.items[0].doneAt)
+        XCTAssertFalse(s.complete(s.today.items[0]))          // already done → no new transition
+    }
+
     // Erase all data (parity item 4) — clears everything and stamps the sync barrier.
     func testEraseAllClearsAndStampsBarrier() {
         let s = BuddyStore()

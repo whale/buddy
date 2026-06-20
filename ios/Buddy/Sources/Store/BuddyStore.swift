@@ -79,6 +79,19 @@ final class BuddyStore {
         return !wasDone && today.items[idx].state == .done
     }
 
+    /// Direct complete (the check-off circle): marks done from any state. Returns true on a
+    /// transition INTO done so the caller fires the celebration. Mirrors a row landing on done.
+    @discardableResult
+    func complete(_ task: BuddyTask) -> Bool {
+        guard let idx = today.items.firstIndex(where: { $0.id == task.id }) else { return false }
+        let wasDone = today.items[idx].state == .done
+        today.items[idx].state = .done
+        today.items[idx].doneAt = Date()
+        today.items[idx].v += 1
+        scheduleSave()
+        return !wasDone
+    }
+
     /// Add a new blank task. Returns the new task's id so the caller can auto-focus the text field.
     func addTask() -> String? {
         guard activeCount < Self.hardCap else { return nil }
