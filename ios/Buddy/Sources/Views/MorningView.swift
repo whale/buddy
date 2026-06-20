@@ -17,36 +17,50 @@ struct MorningView: View {
     @FocusState private var focusedField: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 16) {
             header
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 20)
                 .padding(.top, 40)
-                .padding(.bottom, 8)
-
-            Divider().padding(.horizontal, 16)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(store.today.items) { task in
-                        plannerRow(task)
-                        Rectangle().fill(Color(hex: "#d9d9d9")).frame(height: 1).padding(.horizontal, 16)
-                    }
-                    if !store.atHardCap { addRow }
-                }
+                plannerCard.padding(.horizontal, 16)
             }
 
-            Spacer(minLength: 0)
             controlBar
         }
         .background(Color.white.ignoresSafeArea())
     }
 
-    // MARK: header (weekday + day number). Phase 2 unifies this with TodayView's header.
+    // Mac-style header: weekday + month stacked, giant numeral on the right.
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(weekday).font(.system(size: 14, weight: .medium)).foregroundStyle(.secondary)
-            Text(dayNumber).font(.system(size: 32, weight: .semibold)).foregroundStyle(.black)
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: -2) {
+                Text(weekday).font(.system(size: 28, weight: .bold)).foregroundStyle(.black)
+                Text(month).font(.system(size: 16)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(dayNumber).font(.system(size: 56, weight: .bold)).foregroundStyle(.black)
         }
+    }
+
+    private let line = Color(hex: "#d9d9d9")
+
+    // The planner list in the same bordered card as the daily view.
+    private var plannerCard: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(store.today.items.enumerated()), id: \.element.id) { i, task in
+                if i > 0 { Rectangle().fill(line).frame(height: 1) }
+                plannerRow(task)
+            }
+            if !store.atHardCap {
+                if !store.today.items.isEmpty { Rectangle().fill(line).frame(height: 1) }
+                addRow
+            }
+        }
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(line, lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.06), radius: 12, y: 6)
     }
 
     // MARK: planner row — tap to edit, inline TextField while editing
@@ -87,6 +101,7 @@ struct MorningView: View {
             Button { skip() } label: {
                 Text("Skip").font(.system(size: 15)).foregroundStyle(.secondary)
             }
+            .buttonStyle(.plain)
             Spacer()
             Button { finish() } label: {
                 Text("Buddy!")
@@ -95,6 +110,7 @@ struct MorningView: View {
                     .padding(.horizontal, 28).padding(.vertical, 14)
                     .background(Capsule().fill(Color.black))
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -131,5 +147,6 @@ struct MorningView: View {
     }
 
     private var weekday: String { let f = DateFormatter(); f.dateFormat = "EEEE"; return f.string(from: Date()) }
+    private var month: String { let f = DateFormatter(); f.dateFormat = "MMMM"; return f.string(from: Date()) }
     private var dayNumber: String { let f = DateFormatter(); f.dateFormat = "d"; return f.string(from: Date()) }
 }
