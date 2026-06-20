@@ -198,6 +198,8 @@ struct TodayView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        // The focused task is your "now" — fill it so you can see it at a glance (mirrors the Mac).
+        .background(task.state == .focused ? theme.focusFill : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture {
             if editingId != nil { return }

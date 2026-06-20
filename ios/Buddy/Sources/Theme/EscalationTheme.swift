@@ -66,6 +66,16 @@ struct EscalationTheme {
         }
     }
 
+    // Focused ("now") row fill. Mirrors the Mac:
+    //   .row-focused { background:#f4f4f4 }  (lvl0/1)
+    //   .lvl2 .row-focused { red + 15% black overlay } → ≈ #c33d41
+    var focusFill: Color {
+        switch level {
+        case .lvl0, .lvl1: return Color(hex: "#f4f4f4")
+        case .lvl2:        return Color(hex: "#c33d41")
+        }
+    }
+
     // Convenience factory
     static func from(activeCount: Int) -> EscalationTheme {
         EscalationTheme(level: .from(activeCount: activeCount))

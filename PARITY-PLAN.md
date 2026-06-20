@@ -27,7 +27,7 @@ Execute **one item at a time**, reviewing each before moving on. Check items off
 ## Phase 1 — UX / functionality parity (do first)
 
 - [x] **1. Morning view** — ✅ shows on a fresh/rolled day with yesterday's carried-over tasks pre-loaded, Add row, Skip + Buddy! controls; both set `morningDone`. Verified in simulator + code-reviewed (fixed: blank-task race on fast Buddy! tap, Skip wired to `skipMorning`). Styling polish deferred to item 11.
-- [ ] **2. Focused / "now" state** — tapping cycles neutral → focused → done (already in the store); make the focused task visibly the "now" one (logic is there, the UI doesn't reflect it).
+- [x] **2. Focused / "now" state** — ✅ focused task now gets the grey "now" fill (`#f4f4f4`; red+15%-black `#c33d41` at lvl2), matching the Mac. Covers item 9. Verified in sim + 4 cycle/cap XCTests (focus, single-focus, complete, cap).
 - [ ] **3. Donezo placement** — move completed rows to the **top of the list inline** (Mac model), not a bottom section.
 - [ ] **4. Erase all data** — wire `store.eraseAll()` into Settings (Mac has it; iOS Settings doesn't).
 - [ ] **5. Caps + add-at-cap behavior** — confirm soft 5 / hard 6, add disabled past hard cap, matches Mac.
@@ -37,7 +37,7 @@ Execute **one item at a time**, reviewing each before moving on. Check items off
 - [ ] **6. Bundle Inter** — add the Inter font to iOS so type matches the Mac (foundation for everything below).
 - [ ] **7. Date header** — weekday + month stacked + giant numeral, matching `mac-daily-lvl0`.
 - [ ] **8. Task card** — wrap the list in the bordered rounded card; generous row height + dividers; **remove row numbers** (Mac has none).
-- [ ] **9. Focused highlight** — grey fill on lvl0/1, darker-red on lvl2 (per `mac-lvl2`).
+- [x] **9. Focused highlight** — ✅ done with item 2.
 - [ ] **10. Donezo style** — struck inline row matching the Mac's "Donezo. <title>".
 - [ ] **11. Morning view styling** — match `mac-morning` (Skip / Buddy! pill).
 - [ ] **12. Final sweep** — screenshot iOS at lvl0/1/2 + morning, side-by-side vs Mac; iterate to 9/10.
