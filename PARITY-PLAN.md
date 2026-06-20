@@ -35,8 +35,8 @@ Execute **one item at a time**, reviewing each before moving on. Check items off
 ## Phase 1.5 — UX gaps the owner flagged
 
 - [x] **A. Check-off affordance** — ✅ tappable circle completes each row (filled check on done → restore). Also fixed: swipe actions were DEAD outside a List → replaced with a long-press menu (edit / sleep / delete).
-- [ ] **B. Report a bug** — a "Report a bug" row in Settings (mirror the Mac's tray "Report a bug").
-- [ ] **C. Dev restart/reset** — DEBUG-only "Reset data & restart" in Settings so dev testing can re-trigger the morning / clear state.
+- [x] **B. Report a bug** — ✅ Settings → Feedback → "Report a bug" opens a prefilled GitHub issue (app version + device + iOS in the body).
+- [x] **C. Dev restart/reset** — ✅ DEBUG-only Developer section: "Reset data (show morning)" + "Restart app (quit)".
 
 ## Phase 2 — Visual style parity (4/10 → 9/10)
 

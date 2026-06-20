@@ -155,6 +155,18 @@ final class BuddyStore {
         scheduleSave(immediate: true)
     }
 
+    #if DEBUG
+    // Dev-only: wipe to a clean first-run state so the morning planner shows again.
+    func resetForDev() {
+        today = TodayState(date: Self.localDate(), items: [], morningDone: false)
+        history = []
+        deferred = []
+        tombstones = [:]
+        erasedAt = nil
+        scheduleSave(immediate: true)
+    }
+    #endif
+
     // MARK: - Morning planner
     // Mirrors the Mac: on a fresh/rolled day the morning planner shows until the user
     // presses Buddy! (or Skip) — both just mark the day planned. Yesterday's unfinished
