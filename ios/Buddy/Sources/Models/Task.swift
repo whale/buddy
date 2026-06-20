@@ -43,11 +43,26 @@ struct BuddyTask: Identifiable, Codable {
 }
 
 // MARK: - A day in history
-// Mirrors: state.history[] in the web app
-// history items use a flat {id, text, done} shape (not full TaskState)
+// Mirrors: state.history[] in the web app — flat {id, text, done} (not full TaskState).
+// The id is the Mac's stable per-day key `h-<date>-<i>`, so two devices archiving the
+// same day produce identical ids and merge() unions history by id (not by position).
 struct DayItem: Codable {
+    var id: String
     var text: String
     var done: Bool
+
+    init(id: String, text: String, done: Bool) { self.id = id; self.text = text; self.done = done }
+
+    enum CodingKeys: String, CodingKey { case id, text, done }
+
+    // Tolerant decode: history records written before ids existed get a synthesized
+    // positional id on load (the caller passes the date+index via a fallback id).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = (try? c.decode(String.self, forKey: .text)) ?? ""
+        done = (try? c.decode(Bool.self, forKey: .done)) ?? false
+        id   = (try? c.decode(String.self, forKey: .id)) ?? ""   // backfilled by Day.normalizedItems
+    }
 }
 
 struct Day: Codable, Identifiable {
@@ -56,13 +71,37 @@ struct Day: Codable, Identifiable {
     var date: String    // "YYYY-MM-DD"
     var weekday: String // e.g. "Monday"
     var items: [DayItem]
+
+    // Backfill missing item ids with the Mac's stable scheme `h-<date>-<i>` so legacy
+    // records (saved before DayItem had an id) merge by id after this runs.
+    mutating func backfillItemIds() {
+        for i in items.indices where items[i].id.isEmpty {
+            items[i].id = "h-\(date)-\(i)"
+        }
+    }
 }
 
 // MARK: - Today's state
-// Mirrors: state.today in the web app
+// Mirrors: state.today in the web app ({date, items, morningDone}).
 struct TodayState: Codable {
     var date: String        // "YYYY-MM-DD"
     var items: [BuddyTask]
+    // Carried for sync fidelity with the Mac: whether today's planner was completed.
+    // The Mac re-shows its morning screen when this is false, so it MUST survive a
+    // cross-device merge (OR-wins). iOS has no morning screen yet — the field is inert
+    // here but must round-trip so syncing with a phone never un-plans the Mac.
+    var morningDone: Bool
+
+    init(date: String, items: [BuddyTask], morningDone: Bool = false) {
+        self.date = date; self.items = items; self.morningDone = morningDone
+    }
+    enum CodingKeys: String, CodingKey { case date, items, morningDone }
+    init(from d: Decoder) throws {       // tolerant: blobs saved before morningDone default to false
+        let c = try d.container(keyedBy: CodingKeys.self)
+        date  = (try? c.decode(String.self, forKey: .date)) ?? ""
+        items = (try? c.decode([BuddyTask].self, forKey: .items)) ?? []
+        morningDone = (try? c.decodeIfPresent(Bool.self, forKey: .morningDone)) ?? false
+    }
 }
 
 // MARK: - Deferred task model

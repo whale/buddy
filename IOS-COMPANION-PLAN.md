@@ -73,10 +73,11 @@ pattern (how WhatsApp/Signal/Plex link devices):
 This beats a typed passphrase (higher entropy, zero friction) and beats Sign in
 with Apple (no Apple-account lock-in, works for the open-source/local story).
 
-**Conflict policy (v1):** whole-document **last-write-wins by `updated_at`**, with
-the overwritten blob saved as a local backup + an undo, and a visible "synced at
-HH:MM" indicator. No CRDTs. (The `DATA-SAFETY-PLAN.md` file-backup makes the
-"saved before overwrite" trivial.)
+**Conflict policy (v1):** field-level **`merge()` on the client** + a dumb
+compare-and-swap server (LOCKED 2026-06-19 — superseded the original whole-doc
+last-write-wins, which an adversarial review showed silently loses an edit on any
+two-device day). See the locked decisions + decision log below. A visible "synced
+at HH:MM" indicator remains; no CRDTs.
 
 ---
 
@@ -104,6 +105,12 @@ Stickers (live), Belly, Sensei. Bundle-id prefixes in use: `fyi.whale.*` /
 
 ## Sequenced plan (each phase independently valuable, ends at a STOP)
 
+> ⚠️ **Superseded for sync details (2026-06-19):** Phases 3–6 below predate the
+> adversarial review. For the *conflict model and sync mechanics*, the
+> authoritative spec is the **"Sync build order"** + **Locked decisions** + **Decision
+> log** further down (CAS-on-client, not LWW, and the live DB enters only at step 5).
+> The phase list still holds for sequencing/value framing.
+
 - **Phase 0 — Decisions (no code). STOP.** Lock: native SwiftUI; "same language,
   not pixel-identical"; opt-in Supabase + local default; durability-first;
   answers to Q1–Q7 below.
@@ -114,8 +121,9 @@ Stickers (live), Belly, Sensei. Bundle-id prefixes in use: `fyi.whale.*` /
   tiny custom endpoint (still Supabase-hosted).
 - **Phase 3 — Mac sync (opt-in).** Settings fields (URL + anon key + room id);
   one Postgres table `buddy_state(owner_id, blob jsonb, updated_at)` + RLS;
-  push-on-change, pull-on-launch; last-write-wins + "synced at" + backup-before-
-  overwrite. STOP: round-trip + clobber-undo verified.
+  push-on-change, pull-on-launch; **CAS push (pull → merge → compare-and-swap →
+  retry)** + "synced at" (LWW was reverted — see Locked decision 4 + Decision log).
+  STOP: round-trip + two-device merge verified.
 - **Phase 4 — iOS skeleton via the proven pipeline.** Copy belly fastlane +
   `project.yml`, swap ids/team, XcodeGen, empty SwiftUI app → TestFlight. No
   features yet. STOP: TestFlight build installs.
@@ -152,9 +160,13 @@ collapse 0–2 into the one-shot.
      but stale pushes can't resurrect them, and a real "Erase all" can propagate.
    - Per-item **version counter** decides ties, NOT client wall-clock (clock skew
      would otherwise let stale data win). Server `now()` is only the "synced at" label.
-   - **Server merges on push** under a row lock (or optimistic compare-and-swap) and
-     returns the merged blob; first pair = **scanner pulls before it pushes** (an
-     empty new phone can never wipe a full Mac).
+   - **Merge runs on the CLIENT, never the server (LOCKED 2026-06-19 — see decision
+     log).** The server is a **dumb atomic store** with a version stamp; each device
+     does **pull → `merge(local, remote)` → compare-and-swap push → retry on version
+     conflict**. This keeps `merge()` in the two places already tested (JS + Swift),
+     not a third untestable plpgsql copy. First pair = **scanner pulls before it
+     pushes** (an empty new phone can never wipe a full Mac); the client also refuses
+     to push an empty blob over a non-empty remote.
 5. **Distribution: open-source + TestFlight.** Official builds → TestFlight (Wimp
    Decaf team) for personal use; repo public so anyone can clone + build their own;
    **sync backend opt-in, local-only by default** (contributor supplies their own
@@ -182,12 +194,51 @@ collapse 0–2 into the one-shot.
    step 4 must normalize; (b) iOS `DayItem` has **no id**, so same-date history
    records merge positionally (done-wins) rather than by id like the Mac — give
    `DayItem` an id for fully robust cross-device history merge.
-4. Server: `buddy_push` becomes merge-on-push under a row lock, returns the merged
-   blob, stamps `now()`, refuses an empty-over-full push. Add RPC rate-limiting.
-5. Wire pull/push + QR pairing (scanner pulls first), atomic apply, coarser
-   debounce (2–5 s), cap synced history (~90 days). Key in OS secure storage.
-6. Explicitly reproduce each loss scenario (different-task edits, 5-min clock skew,
-   empty-phone-vs-full-Mac, double midnight rollover) and confirm ZERO loss.
+4. **Normalize the wire format (one place).** ✅ **done & verified.** Wire unit =
+   epoch **ms** (Mac-native); iOS `SyncWire` converts s↔ms at the boundary
+   (`savedAt`, `erasedAt`, tombstone `deletedAt`, `doneAt`). iOS `DayItem` gained an
+   `id` (`h-<date>-<i>`); `BuddyMerge` history now merges BY ID (done-wins), and the
+   Mac was already id-based. iOS round-trip + unit-conversion test passes.
+5. **Dumb CAS server + client sync loop.** Server contract — `buddy_push(key, blob,
+   expected_version) → {blob, version, ok}` (no merge logic on the server):
+   - **No row yet** (first push from a new pairing): require `expected_version = 0`
+     → insert at `version = 1`, return `{ok:true, version:1}`. A non-zero
+     `expected_version` against a missing row returns `{ok:false}` + an empty/null row.
+   - **Row exists:** if `expected_version = stored.version` → overwrite, set
+     `version = stored.version + 1` (server-side increment), return
+     `{ok:true, version:new}`. Else → `{ok:false, blob:stored, version:stored}`.
+   - `buddy_pull(key) → {blob, version}` (version 0/empty if no row).
+   The **version is owned and incremented by the server**; the client adopts the
+   returned `version` as its next `expected_version` (no re-pull needed on success).
+   Client loop (Mac first, in the browser against a fake in-memory store so it's
+   testable without Postgres): `pull → merge(local, remote) → push(expected=pulled
+   version) → on {ok:false}, merge(local, returned blob) and retry with the returned
+   version`. Refuse to push when local is empty and remote is non-empty (the
+   empty-over-full guard, scanner-pulls-first). Coarse debounce (2–5 s); cap synced
+   history (~90 days); key in OS secure storage. Then QR pairing. The live Supabase
+   function is ~15 lines, verified once the DB is up.
+   🟢 **Engine done & verified (no DB):** `syncOnce` on BOTH apps (`dist/index.html`
+   + `BuddySync.swift`), each against an in-memory CAS store that mirrors the SQL
+   contract exactly; empty-over-full guard, content-key no-op, CAS-conflict retry.
+   CAS Postgres fn written (`supabase/migrations/20260619210000_buddy_cas.sql`). QR
+   identity core done (`generateSyncKey`/`deriveOwnerId`/payload on both apps, shared
+   sha256 vector). **Verified: browser syncTest 15/15; iOS xcodebuild 23/23.**
+   ⏳ **Remaining (on-device/live frontier, NOT yet built):** the real network store
+   (supabase-js on Mac, URLSession on iOS) wired into `syncOnce`; QR image render +
+   camera scan + Settings opt-in fields; run the CAS Postgres fn live (OrbStack →
+   `supabase start`); one real two-device round-trip.
+6. ✅ **Loss scenarios reproduced as unit tests** (different-task edits, CAS-conflict
+   retry, tombstone propagation, delete-beats-edit, empty-phone-vs-full-Mac, erase
+   propagation, history-union, idempotent no-op) — green on both apps. A live
+   two-device run is the only remaining confirmation, pending the network wiring above.
+
+### Decision log
+- **2026-06-19 — CAS-on-client, NOT server-side merge.** A first cut wrote the merge
+  in plpgsql (a third copy of `merge()`) which couldn't be tested without Docker and
+  drifted from the JS/Swift versions. Reverted (PR #29 closed). Chosen: the server is
+  a dumb atomic store with a version stamp; the client pulls, merges (already-tested
+  JS/Swift), and pushes with compare-and-swap, retrying on conflict. Simpler, two
+  merge copies instead of three, and fully testable on this machine.
 
 ### Still to decide (not blocking)
 - Whether the maintainer hosts a default Supabase project or every user brings their own.

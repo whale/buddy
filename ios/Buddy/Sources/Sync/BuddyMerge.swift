@@ -63,7 +63,8 @@ enum BuddyMerge {
         if let ta = va.today, let tb = vb.today, ta.date == tb.date {
             today = TodayState(
                 date: ta.date,
-                items: mergeItems(newer.today?.items ?? [], older.today?.items ?? [], tombstones)
+                items: mergeItems(newer.today?.items ?? [], older.today?.items ?? [], tombstones),
+                morningDone: ta.morningDone || tb.morningDone     // OR-wins, mirrors the Mac
             )
         } else {
             today = newer.today ?? older.today      // different/missing days → newer day wins whole
@@ -123,15 +124,20 @@ enum BuddyMerge {
     }
 
     static func mergeHistRecord(_ x: Day, _ y: Day) -> Day {
-        let n = Swift.max(x.items.count, y.items.count)
+        // Union by item id (matches the Mac), done-wins. x's order is kept; y-only items appended.
+        var byId = [String: DayItem]()
+        for it in y.items { byId[it.id] = it }
+        var seen = Set<String>()
         var items = [DayItem]()
-        for i in 0..<n {
-            let xi = i < x.items.count ? x.items[i] : nil
-            let yi = i < y.items.count ? y.items[i] : nil
-            let text = xi?.text ?? yi?.text ?? ""
-            let done = (xi?.done ?? false) || (yi?.done ?? false)   // done-wins
-            items.append(DayItem(text: text, done: done))
+        for it in x.items {
+            seen.insert(it.id)
+            if let o = byId[it.id] {
+                items.append(DayItem(id: it.id, text: it.text, done: it.done || o.done))   // done-wins
+            } else {
+                items.append(it)
+            }
         }
+        for it in y.items where !seen.contains(it.id) { items.append(it) }
         return Day(date: x.date, weekday: x.weekday.isEmpty ? y.weekday : x.weekday, items: items)
     }
 

@@ -45,26 +45,26 @@ enum MockData {
             date: "2026-06-17",
             weekday: "Tuesday",
             items: [
-                DayItem(text: "Ship Buddy v0.2.15", done: true),
-                DayItem(text: "Write IOS plan doc", done: true),
-                DayItem(text: "Call with team", done: false),
+                DayItem(id: "h-2026-06-17-0", text: "Ship Buddy v0.2.15", done: true),
+                DayItem(id: "h-2026-06-17-1", text: "Write IOS plan doc", done: true),
+                DayItem(id: "h-2026-06-17-2", text: "Call with team", done: false),
             ]
         ),
         Day(
             date: "2026-06-16",
             weekday: "Monday",
             items: [
-                DayItem(text: "Fix localStorage wipe bug", done: true),
-                DayItem(text: "Review DATA-SAFETY-PLAN.md", done: true),
-                DayItem(text: "Design weekly review", done: true),
+                DayItem(id: "h-2026-06-16-0", text: "Fix localStorage wipe bug", done: true),
+                DayItem(id: "h-2026-06-16-1", text: "Review DATA-SAFETY-PLAN.md", done: true),
+                DayItem(id: "h-2026-06-16-2", text: "Design weekly review", done: true),
             ]
         ),
         Day(
             date: "2026-06-15",
             weekday: "Sunday",
             items: [
-                DayItem(text: "Morning run", done: true),
-                DayItem(text: "Read Sensei Fastfile", done: false),
+                DayItem(id: "h-2026-06-15-0", text: "Morning run", done: true),
+                DayItem(id: "h-2026-06-15-1", text: "Read Sensei Fastfile", done: false),
             ]
         ),
     ]

@@ -731,6 +731,146 @@ function merge(a, b){
   };
 }
 
+/* ====================================================================
+   SYNC LOOP (CAS-on-client) — sync step 5.
+
+   Architecture (LOCKED 2026-06-19, see IOS-COMPANION-PLAN.md decision log):
+   the merge runs HERE on the client, never on the server. The server is a dumb
+   atomic store with a version stamp. Each sync does:
+       pull → merge(local, remote) → compare-and-swap push → retry on conflict.
+   This keeps merge() in the two places already tested (this file + BuddyMerge.swift),
+   not a third copy in the server.
+
+   A `store` is any object implementing the contract:
+     pull(key)                       → { blob, version }   (version 0 / blob null if absent)
+     push(key, blob, expectedVersion) → { ok, blob, version }
+        - no row yet  : expectedVersion must be 0 → insert at version 1
+        - row exists  : ok iff expectedVersion === stored.version → overwrite,
+                        version = stored.version + 1 (server owns the increment)
+        - on mismatch : { ok:false, blob:current, version:current }
+   makeFakeCASStore() below implements this exactly, so the in-browser tests also
+   pin the contract the live Supabase function must match.
+   ==================================================================== */
+const SYNC_MAX_RETRY = 5;
+
+// A wire blob is the parsed serialize() object. Empty = nothing worth syncing
+// (no tasks/history/deferred/tombstones/erase) — used by the empty-over-full guard.
+function blobIsEmpty(b){
+  return !b || ( ((b.today&&b.today.items&&b.today.items.length)||0)===0
+    && ((b.history&&b.history.length)||0)===0
+    && ((b.deferred&&b.deferred.length)||0)===0
+    && Object.keys(b.tombstones||{}).length===0
+    && (b.erasedAt==null) );
+}
+// Content fingerprint that IGNORES savedAt — so an unchanged re-sync is a no-op
+// (otherwise two idle devices would ping-pong version bumps forever).
+function blobContentKey(b){
+  if(!b) return '';
+  return JSON.stringify({ td:b.today&&b.today.date, m:!!(b.today&&b.today.morningDone),
+    t:(b.today&&b.today.items)||[], h:b.history||[], d:b.deferred||[],
+    tomb:b.tombstones||{}, e:b.erasedAt??null, s:b.settings||{}, p:!!b.pinned });
+}
+// Map a merged hydrated result (merge() output) back to a wire blob for push/apply.
+function hydratedToWire(h){
+  if(!h) return null;
+  return { version:1, savedAt:(typeof h.savedAt==='number'?h.savedAt:Date.now()),
+    today: h.today || { date:localDate(), items:[], morningDone:false },
+    history: h.history||[], deferred: h.deferred||[], settings: h.settings,
+    pinned: !!h.pinned, tombstones: h.tombstones||{},
+    erasedAt:(typeof h.erasedAt==='number')?h.erasedAt:null };
+}
+// Merge two wire blobs → merged wire blob (hydrate both, merge, re-wire).
+function mergeWire(aBlob, bBlob){
+  const ha = aBlob ? hydrate(migrate(aBlob)) : null;
+  const hb = bBlob ? hydrate(migrate(bBlob)) : null;
+  return hydratedToWire(merge(ha, hb));
+}
+// Adopt a merged wire blob as local truth.
+function applyWire(blob){
+  // Never clobber an in-progress edit: render() would tear down the contenteditable
+  // mid-type and the blur handler could tombstone a half-typed task. Defer — the next
+  // sync pass re-merges and applies once the edit commits.
+  if(editingId !== null) return;
+  const h = hydrate(migrate(blob));
+  if(!h) return;
+  applyHydrated(h);
+  if(!h.hadToday) state.today = { date:localDate(), items:[], morningDone:false };
+  render(); writeNow();
+}
+
+// One sync pass against a CAS store. Pure w.r.t. the store contract; mutates local
+// state only via applyWire. Returns a small result describing what happened.
+async function syncOnce(store, key){
+  const remote = await store.pull(key);                 // { blob, version }
+  const localBlob = JSON.parse(serialize());
+
+  // Empty-over-full guard / scanner-pulls-first: a fresh empty device must never
+  // overwrite a populated remote — adopt the remote instead of pushing nothing.
+  if(blobIsEmpty(localBlob) && !blobIsEmpty(remote.blob)){
+    applyWire(remote.blob);
+    return { ok:true, pulled:true, pushed:false, version:remote.version };
+  }
+
+  let mergedBlob = mergeWire(localBlob, remote.blob);
+
+  // Nothing new vs remote → adopt remote, don't churn the version.
+  if(blobContentKey(mergedBlob) === blobContentKey(remote.blob)){
+    if(remote.blob) applyWire(remote.blob);
+    return { ok:true, pushed:false, noop:true, version:remote.version };
+  }
+
+  let expected = remote.version || 0;
+  for(let attempt=0; attempt<SYNC_MAX_RETRY; attempt++){
+    const res = await store.push(key, mergedBlob, expected);
+    if(res && res.ok){ applyWire(mergedBlob); return { ok:true, pushed:true, version:res.version, attempts:attempt+1 }; }
+    // Someone wrote between our pull and push → fold their blob in and retry CAS.
+    mergedBlob = mergeWire(mergedBlob, res && res.blob);
+    // Adopt the server's reported version; keep the old expected if it's malformed
+    // (a stray 0 would be read as an insert request and could clobber a concurrent writer).
+    expected = (res && typeof res.version==='number' && res.version>0) ? res.version : expected;
+  }
+  return { ok:false, reason:'max-retries' };
+}
+
+// In-memory CAS store implementing the exact server contract — for tests + the
+// reference the live Supabase buddy_push must match.
+function makeFakeCASStore(seed){
+  const rows = {};
+  if(seed && seed.key) rows[seed.key] = { blob:seed.blob, version:seed.version||1 };
+  return {
+    async pull(key){ const r=rows[key]; return r ? { blob:r.blob, version:r.version } : { blob:null, version:0 }; },
+    async push(key, blob, expected){
+      const cur = rows[key];
+      if(!cur){
+        if((expected||0)!==0) return { ok:false, blob:null, version:0 };
+        rows[key] = { blob, version:1 }; return { ok:true, version:1 };
+      }
+      if(expected === cur.version){ cur.blob=blob; cur.version+=1; return { ok:true, version:cur.version }; }
+      return { ok:false, blob:cur.blob, version:cur.version };
+    },
+    _rows(){ return rows; },
+  };
+}
+
+/* ---- Sync identity (QR pairing core) ----
+   A high-entropy capability key is generated once on the Mac and shared to the phone
+   by QR. The DB row key (owner_id) is derived as sha256(syncKey) so the raw secret is
+   never the literal row id. Both devices derive the SAME owner_id from the same key —
+   pinned by a shared test vector in syncTest()/BuddySyncTests so JS and Swift agree. */
+function generateSyncKey(){
+  const a=new Uint8Array(32); (globalThis.crypto||window.crypto).getRandomValues(a);   // 256-bit
+  return btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');  // base64url
+}
+async function deriveOwnerId(syncKey){
+  const buf=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(syncKey)));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function pairingPayload(backendUrl, syncKey){ return JSON.stringify({ v:1, backendUrl:String(backendUrl), syncKey:String(syncKey) }); }
+function parsePairingPayload(s){
+  try{ const o=JSON.parse(s); if(o&&typeof o.syncKey==='string'&&typeof o.backendUrl==='string') return { backendUrl:o.backendUrl, syncKey:o.syncKey }; }catch{}
+  return null;
+}
+
 let bootHadStored=false, bootUsable=false, recoveredFromBak=false, lsHydrated=null;
 function load(){
   const raw=lsGet(STORAGE_KEY);
@@ -1722,6 +1862,8 @@ window.__buddy = {
   boot,
   rollover: maybeRollover,
   eraseAll,                                  // sync step 2: erase + stamp erasedAt (merge barrier)
+  syncOnce, makeFakeCASStore,                // sync step 5: CAS-on-client loop + reference store
+  generateSyncKey, deriveOwnerId, pairingPayload, parsePairingPayload,   // QR pairing core
   openDrawer, closeDrawer,
   showMorning,
   // Phase B hooks (confetti / settings / keyboard verification)
@@ -1879,6 +2021,111 @@ window.__buddy = {
       merge(A,B);
       ok('merge is pure (inputs unmutated)', JSON.stringify(A)===aBefore && JSON.stringify(B)===bBefore);
     }catch(e){ ok('mergeTest ran without throwing', false, e&&e.message); }
+    const failed=R.filter(r=>!r.pass);
+    return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
+  },
+
+  // Sync loop suite (step 5) — drives syncOnce() against the reference CAS store and
+  // the loss scenarios. Snapshots + restores state like smokeTest. Async.
+  async syncTest(){
+    const R=[]; const ok=(name,cond,detail)=>R.push({name,pass:!!cond,detail:detail||''});
+    const snap=JSON.parse(JSON.stringify({today:state.today,history:state.history,deferred:state.deferred,settings:state.settings,pinned:state.pinned,tombstones:state.tombstones,erasedAt:state.erasedAt}));
+    const wasSup=saveSuppressed; saveSuppressed=true;
+    const setLocal=(items,extra)=>{ state.today={date:'2026-06-19',morningDone:false,items:items||[]}; state.history=(extra&&extra.history)||[]; state.deferred=(extra&&extra.deferred)||[]; state.tombstones=(extra&&extra.tombstones)||{}; state.erasedAt=(extra&&extra.erasedAt)??null; editingId=null; };
+    const itemsOf=blob=>((blob&&blob.today&&blob.today.items)||[]).map(i=>i.id).sort();
+    try{
+      // 1. First push to an empty server seeds it at version 1.
+      let store=makeFakeCASStore();
+      setLocal([{id:'a',text:'alpha',state:'neutral',v:1},{id:'b',text:'beta',state:'neutral',v:1}]);
+      let res=await syncOnce(store,'k');
+      let row=store._rows()['k'];
+      ok('first push seeds empty server at v1', res.ok&&res.pushed&&row&&row.version===1&&itemsOf(row.blob).join(',')==='a,b', 'v='+(row&&row.version)+' items='+(row&&itemsOf(row.blob)));
+
+      // 2. Empty local + full server → pull-only, local adopts server, no version churn.
+      store=makeFakeCASStore({key:'k',version:3,blob:JSON.parse(serialize())});  // server has a,b at v3
+      setLocal([]);                                                              // fresh empty device
+      res=await syncOnce(store,'k');
+      ok('empty-over-full guard: pulls, does not push', res.ok&&res.pulled&&!res.pushed&&store._rows()['k'].version===3, 'pushed='+res.pushed+' v='+store._rows()['k'].version);
+      ok('empty device adopts server tasks', itemsOf(JSON.parse(serialize())).join(',')==='a,b', 'local='+itemsOf(JSON.parse(serialize())));
+
+      // 3. Two devices, different-task edits, both survive (the core LWW failure).
+      store=makeFakeCASStore();
+      setLocal([{id:'t1',text:'base',state:'neutral',v:1}]); await syncOnce(store,'k');   // seed t1 @ v1
+      // device A edits t1
+      setLocal([{id:'t1',text:'A-edit',state:'neutral',v:2}]); await syncOnce(store,'k');
+      // device B (still on base) adds t2
+      setLocal([{id:'t1',text:'base',state:'neutral',v:1},{id:'t2',text:'B-new',state:'neutral',v:1}]); await syncOnce(store,'k');
+      row=store._rows()['k']; const ri=id=>(row.blob.today.items.find(x=>x.id===id)||{});
+      ok('two-device merge: A-edit + B-new both survive', itemsOf(row.blob).join(',')==='t1,t2' && ri('t1').text==='A-edit' && ri('t1').v===2 && ri('t2').text==='B-new',
+         'items='+itemsOf(row.blob)+' t1='+ri('t1').text+' v'+ri('t1').v);
+
+      // 4. CAS conflict + retry: a concurrent write between pull and push is folded in.
+      store=makeFakeCASStore();
+      setLocal([{id:'p','text':'mine',state:'neutral',v:1}]); await syncOnce(store,'k');   // server: p @ v1
+      let fired=false;
+      const racy={ pull:store.pull, _rows:store._rows,
+        push:async(key,blob,exp)=>{ if(!fired){ fired=true; await store.push(key, JSON.parse(JSON.stringify({version:1,savedAt:Date.now(),today:{date:'2026-06-19',items:[{id:'p',text:'mine',state:'neutral',v:1},{id:'q',text:'other-device',state:'neutral',v:1}]},history:[],deferred:[],settings:state.settings,pinned:false,tombstones:{},erasedAt:null})), 1); } return store.push(key,blob,exp); } };
+      setLocal([{id:'p',text:'mine',state:'neutral',v:1},{id:'r',text:'late-add',state:'neutral',v:1}]);
+      res=await syncOnce(racy,'k'); row=store._rows()['k'];
+      ok('CAS conflict retried, no data lost (p+q+r)', res.ok&&res.pushed&&itemsOf(row.blob).join(',')==='p,q,r', 'attempts='+res.attempts+' items='+itemsOf(row.blob));
+
+      // 5. Idempotent re-sync is a no-op (no version churn → no two-device ping-pong).
+      store=makeFakeCASStore();
+      setLocal([{id:'z',text:'z',state:'neutral',v:1}]); await syncOnce(store,'k');
+      const vAfter=store._rows()['k'].version;
+      res=await syncOnce(store,'k');   // nothing changed locally
+      ok('idempotent re-sync does not bump version', res.noop&&store._rows()['k'].version===vAfter, 'noop='+res.noop+' v='+store._rows()['k'].version+' (was '+vAfter+')');
+
+      // 6. Erase propagates (the guard must NOT block a real wipe — erasedAt set ⇒ not "empty").
+      store=makeFakeCASStore({key:'k',version:2,blob:JSON.parse(JSON.stringify({version:1,savedAt:1000,today:{date:'2026-06-19',items:[{id:'old',text:'old',state:'neutral',v:1}]},history:[],deferred:[],settings:state.settings,pinned:false,tombstones:{},erasedAt:null}))});
+      setLocal([], {erasedAt:Date.now()});   // user erased everything locally
+      res=await syncOnce(store,'k'); row=store._rows()['k'];
+      ok('erase-all propagates over a full remote', res.pushed && itemsOf(row.blob).length===0 && row.blob.erasedAt!=null, 'items='+itemsOf(row.blob)+' erasedAt='+row.blob.erasedAt);
+
+      // 7. Tombstone propagates: A deletes x; device B (still holding x) must NOT resurrect it.
+      store=makeFakeCASStore();
+      setLocal([{id:'x',text:'x',state:'neutral',v:1},{id:'y',text:'y',state:'neutral',v:1}]); await syncOnce(store,'k');   // server: x,y
+      setLocal([{id:'y',text:'y',state:'neutral',v:1}], {tombstones:{x:Date.now()}}); await syncOnce(store,'k');            // device A deleted x
+      setLocal([{id:'x',text:'x',state:'neutral',v:1},{id:'y',text:'y',state:'neutral',v:1}]); await syncOnce(store,'k');   // device B never saw the delete
+      row=store._rows()['k'];
+      ok('tombstone propagates (device B does not resurrect x)', itemsOf(row.blob).join(',')==='y' && row.blob.tombstones && row.blob.tombstones.x, 'items='+itemsOf(row.blob));
+
+      // 8. Delete beats a concurrent edit (tombstone wins, even against a higher v).
+      store=makeFakeCASStore();
+      setLocal([{id:'d',text:'orig',state:'neutral',v:1}]); await syncOnce(store,'k');                 // server: d v1
+      setLocal([], {tombstones:{d:Date.now()}}); await syncOnce(store,'k');                            // device A deletes d
+      setLocal([{id:'d',text:'EDITED',state:'neutral',v:5}]); await syncOnce(store,'k');               // device B edited d, unaware
+      row=store._rows()['k'];
+      ok('delete beats concurrent edit (tombstone wins over higher v)', itemsOf(row.blob).length===0 && row.blob.tombstones.d, 'items='+itemsOf(row.blob));
+
+      // 9. History merges across devices — union by date, no day dropped.
+      store=makeFakeCASStore();
+      setLocal([], {history:[{date:'2026-06-17',weekday:'Wed',items:[{id:'h-2026-06-17-0',text:'a',done:true}]}]}); await syncOnce(store,'k');
+      setLocal([], {history:[{date:'2026-06-18',weekday:'Thu',items:[{id:'h-2026-06-18-0',text:'b',done:true}]}]}); await syncOnce(store,'k');
+      row=store._rows()['k']; const days=((row.blob.history)||[]).map(d=>d.date).sort();
+      ok('history merges across devices (both days kept)', days.join(',')==='2026-06-17,2026-06-18', 'days='+days);
+
+      // 10. Settings change propagates (newer save wins the scalar).
+      store=makeFakeCASStore();
+      state.settings={celebrate:100,historyDays:7,reserveSpace:false};
+      setLocal([{id:'s1',text:'s',state:'neutral',v:1}]); await syncOnce(store,'k');
+      state.settings={celebrate:100,historyDays:0,reserveSpace:false}; await syncOnce(store,'k');
+      row=store._rows()['k'];
+      ok('settings change propagates', row.blob.settings && row.blob.settings.historyDays===0, 'historyDays='+(row.blob.settings&&row.blob.settings.historyDays));
+
+      // 11. QR pairing identity: owner_id is deterministic + matches the cross-platform
+      // test vector (the same string sha256'd in BuddySyncTests → JS and Swift agree).
+      const oid=await deriveOwnerId('buddy-test-key');
+      ok('owner_id matches the shared JS↔Swift test vector', oid==='9a39afad46d5205bc0d6abb9be6dd625649a796e09519cee438ba56b5899d79a', 'oid='+oid);
+      const key=generateSyncKey();
+      ok('sync key is 256-bit (43-char base64url)', typeof key==='string' && key.length===43 && /^[A-Za-z0-9_-]+$/.test(key), 'len='+key.length);
+      const round=parsePairingPayload(pairingPayload('https://x.supabase.co', key));
+      ok('pairing payload round-trips', round && round.syncKey===key && round.backendUrl==='https://x.supabase.co');
+      ok('pairing payload rejects garbage', parsePairingPayload('not json')===null && parsePairingPayload('{}')===null);
+    }catch(e){ ok('syncTest ran without throwing', false, e&&(e.message+' @ '+(e.stack||'').split('\n')[1])); }
+    state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
+    state.tombstones=snap.tombstones||{}; state.erasedAt=(typeof snap.erasedAt==='number')?snap.erasedAt:null;
+    editingId=null; render(); saveSuppressed=wasSup;
     const failed=R.filter(r=>!r.pass);
     return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
   },
