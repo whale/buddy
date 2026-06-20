@@ -1,0 +1,49 @@
+# iOS ⇄ Mac Parity Plan
+
+Goal: the iOS app matches the Mac app — **functionality (UX) first, then visual style.**
+Mac (`dist/index.html`) is the source of truth. Target: UI parity from ~4/10 → 9/10.
+
+Reference screenshots in `.screenshots/`: `mac-daily-lvl0`, `mac-morning`, `mac-lvl2`, `ios-daily-lvl0`.
+
+Execute **one item at a time**, reviewing each before moving on. Check items off as they land + verify.
+
+---
+
+## What the comparison showed
+
+| Aspect | Mac | iOS (today) |
+|---|---|---|
+| Date header | weekday + month stacked, giant numeral on the right | small inline "Saturday 20", no month |
+| Task list | inside a **bordered rounded card**, generous rows, dividers | flat full-bleed list, tighter |
+| Row numbers | none | shows 1 / 2 / 3 |
+| Focused ("now") | grey-fill highlighted row | **not shown at all** |
+| Donezo | struck row **at the top** of the card | a "DONEZO" section **at the bottom** |
+| Morning view | 3-slot planner + Skip / Buddy! bar | **missing entirely** |
+| Typography | Inter (bundled) | system San Francisco |
+| Escalation lvl0/1/2 | ✅ | ✅ (faithfully ported) |
+
+---
+
+## Phase 1 — UX / functionality parity (do first)
+
+- [ ] **1. Morning view** — 3-slot planner shown on a fresh/rolled day until "Buddy!" is pressed; Skip + Buddy! controls; sets `morningDone`. Show yesterday's carried-over unfinished tasks in it (the carry-over already happens in the store; it just isn't presented). This is the biggest missing flow.
+- [ ] **2. Focused / "now" state** — tapping cycles neutral → focused → done (already in the store); make the focused task visibly the "now" one (logic is there, the UI doesn't reflect it).
+- [ ] **3. Donezo placement** — move completed rows to the **top of the list inline** (Mac model), not a bottom section.
+- [ ] **4. Erase all data** — wire `store.eraseAll()` into Settings (Mac has it; iOS Settings doesn't).
+- [ ] **5. Caps + add-at-cap behavior** — confirm soft 5 / hard 6, add disabled past hard cap, matches Mac.
+
+## Phase 2 — Visual style parity (4/10 → 9/10)
+
+- [ ] **6. Bundle Inter** — add the Inter font to iOS so type matches the Mac (foundation for everything below).
+- [ ] **7. Date header** — weekday + month stacked + giant numeral, matching `mac-daily-lvl0`.
+- [ ] **8. Task card** — wrap the list in the bordered rounded card; generous row height + dividers; **remove row numbers** (Mac has none).
+- [ ] **9. Focused highlight** — grey fill on lvl0/1, darker-red on lvl2 (per `mac-lvl2`).
+- [ ] **10. Donezo style** — struck inline row matching the Mac's "Donezo. <title>".
+- [ ] **11. Morning view styling** — match `mac-morning` (Skip / Buddy! pill).
+- [ ] **12. Final sweep** — screenshot iOS at lvl0/1/2 + morning, side-by-side vs Mac; iterate to 9/10.
+
+---
+
+## Notes
+- Each item: build → run in simulator → screenshot → (agent) review → commit.
+- Sync wiring (network + live DB + QR UI) is a **separate** track (see `IOS-COMPANION-PLAN.md`); not part of this parity plan.
