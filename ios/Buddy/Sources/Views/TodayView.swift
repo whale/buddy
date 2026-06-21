@@ -54,21 +54,14 @@ struct TodayView: View {
                 buddyChrome
                     .padding(.horizontal, 22)
                     .padding(.top, 8)
-                    .padding(.bottom, 4)
+                    .padding(.bottom, 6)
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        dateHeader
-                            .padding(.horizontal, 22)
-                            .padding(.top, 10)
+                dateHeader
+                    .padding(.horizontal, 22)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
 
-                        taskCard
-                            .padding(.horizontal, 16)
-
-                        Spacer(minLength: 40)
-                    }
-                }
-                .scrollContentBackground(.hidden)
+                taskListCard
             }
             .animation(.easeInOut(duration: 0.2), value: activeCount)
 
@@ -103,125 +96,120 @@ struct TodayView: View {
     // Mac-style header: weekday + month stacked on the left, giant numeral on the right.
     private var dateHeader: some View {
         HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: -2) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(currentWeekday)
-                    .font(.system(size: 30, weight: .bold))
+                    .font(.system(size: 24, weight: .medium)).tracking(-0.5)
                     .foregroundStyle(theme.ink)
                 Text(currentMonth)
-                    .font(.system(size: 17, weight: .regular))
+                    .font(.system(size: 18, weight: .regular)).tracking(-0.36)
                     .foregroundStyle(theme.inkDim)
             }
             Spacer()
             Text(currentDayNumber)
-                .font(.system(size: 76, weight: .bold))
+                .font(.system(size: 62, weight: .medium)).tracking(-1.2)
                 .foregroundStyle(theme.ink)
         }
     }
 
-    // The bordered rounded card holding Donezo (top) + active tasks + Add (Mac model).
-    private var taskCard: some View {
+    // The task list — a styled List (so we get Mail-style swipe actions), kept looking
+    // like the Mac's floating panel: white card on the grey backdrop, full-width dividers.
+    private var taskListCard: some View {
         let rows = store.doneTasks + store.activeTasks   // Donezo first, then active
-        return VStack(spacing: 0) {
-            ForEach(Array(rows.enumerated()), id: \.element.id) { i, task in
-                if i > 0 { rowDivider }
-                if task.isDone { doneRowView(task: task) } else { activeRowView(task: task) }
+        return List {
+            ForEach(rows, id: \.id) { task in
+                swipeRow(task)
             }
             if !store.atHardCap {
-                if !rows.isEmpty { rowDivider }
-                addRow
+                addRowContent
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(theme.cardBackground)
+                    .listRowSeparatorTint(theme.line)
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
             }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .background(theme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        // Border only at lvl2 (to delineate red-on-red); at lvl0/1 the grey backdrop + shadow do it.
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
             .stroke(theme.level == .lvl2 ? theme.line : Color.clear, lineWidth: 1))
         .shadow(color: theme.level == .lvl2 ? .clear : Color.black.opacity(0.07), radius: 16, y: 5)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 14)
     }
 
-    private var rowDivider: some View {
-        Rectangle().fill(theme.line).frame(height: 1)
-    }
-
-    // MARK: - Active task row (matches the Mac: no checkbox, text at the edge).
-    // Tap the row cycles neutral → focused → done (like the Mac); tap the text edits;
-    // long-press for Complete / Edit / Sleep / Delete (swipeActions don't work outside a List).
+    // One List row + its swipe actions (split out so the type-checker stays fast).
     @ViewBuilder
-    private func activeRowView(task: BuddyTask) -> some View {
+    private func swipeRow(_ task: BuddyTask) -> some View {
+        Group { if task.isDone { doneRowContent(task) } else { activeRowContent(task) } }
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(task.state == .focused ? theme.focusFill : theme.cardBackground)
+            .listRowSeparatorTint(theme.line)
+            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }   // full-width dividers like the Mac
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                if task.isDone {
+                    Button { store.restoreTask(id: task.id) } label: { Label("Restore", systemImage: "arrow.uturn.backward") }.tint(.gray)
+                } else {
+                    Button { handleComplete(task: task) } label: { Label("Complete", systemImage: "checkmark") }.tint(Color(hex: "#2f9e44"))
+                }
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) { store.deleteTask(id: task.id) } label: { Label("Delete", systemImage: "trash") }
+                if !task.isDone {
+                    Button { store.deferToTomorrow(id: task.id) } label: { Label("Tomorrow", systemImage: "moon.zzz") }.tint(.indigo)
+                    Button { startEdit(task: task) } label: { Label("Edit", systemImage: "pencil") }.tint(.gray)
+                }
+            }
+    }
+
+    // MARK: row CONTENT (the List provides the background, dividers, and swipe).
+    // Tap cycles neutral → focused → done (like the Mac); edit is the swipe pencil.
+    @ViewBuilder
+    private func activeRowContent(_ task: BuddyTask) -> some View {
         Group {
             if editingId == task.id {
                 TextField("", text: $editText, axis: .vertical)
-                    .font(.system(size: 17))
+                    .font(.system(size: 21, weight: .medium)).tracking(-0.4)
                     .foregroundStyle(theme.escalationText)
                     .submitLabel(.done)
                     .focused($focusedField, equals: task.id)
                     .onSubmit { commitEdit(id: task.id) }
                     .onChange(of: focusedField) { _, newVal in
-                        if newVal != task.id && editingId == task.id {
-                            commitEdit(id: task.id)
-                        }
+                        if newVal != task.id && editingId == task.id { commitEdit(id: task.id) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text(task.text.isEmpty ? "Untitled" : task.text)
-                    .font(.system(size: 17, weight: .regular))
+                    .font(.system(size: 21, weight: .medium)).tracking(-0.4)
                     .foregroundStyle(task.text.isEmpty ? theme.inkDim : theme.escalationText)
-                    .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 22)
-        // The focused task is your "now" — fill it so you can see it at a glance (mirrors the Mac).
-        .background(task.state == .focused ? theme.focusFill : Color.clear)
+        .padding(.horizontal, 22).padding(.vertical, 26)
         .contentShape(Rectangle())
         .onTapGesture { if editingId == nil { handleCycle(task: task) } }
-        .contextMenu {
-            Button { handleComplete(task: task) } label: { Label("Complete", systemImage: "checkmark") }
-            Button { startEdit(task: task) } label: { Label("Edit", systemImage: "pencil") }
-            Button { store.deferToTomorrow(id: task.id) } label: { Label("Sleep till tomorrow", systemImage: "moon.zzz") }
-            Button(role: .destructive) { store.deleteTask(id: task.id) } label: { Label("Delete", systemImage: "trash") }
-        }
     }
 
-    // MARK: - Done (Donezo) row — neutral + adaptive (inkDim, not escalationText).
-    // Filled circle (tap to restore) + inline struck "Donezo. <title>" like the Mac.
     @ViewBuilder
-    private func doneRowView(task: BuddyTask) -> some View {
-        HStack(spacing: 6) {
-            Text("Donezo.")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(theme.ink)
-            Text(task.text)
-                .font(.system(size: 15))
-                .strikethrough(true, color: theme.inkDim)
-                .foregroundStyle(theme.inkDim)
-                .lineLimit(1)
+    private func doneRowContent(_ task: BuddyTask) -> some View {
+        HStack(spacing: 7) {
+            Text("Donezo.").font(.system(size: 16, weight: .semibold)).foregroundStyle(theme.ink)
+            Text(task.text).font(.system(size: 16)).tracking(-0.3)
+                .strikethrough(true, color: theme.inkDim).foregroundStyle(theme.inkDim).lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.horizontal, 22).padding(.vertical, 20)
         .contentShape(Rectangle())
         .onTapGesture { store.restoreTask(id: task.id) }
-        .contextMenu {
-            Button { store.restoreTask(id: task.id) } label: { Label("Restore", systemImage: "arrow.uturn.backward") }
-            Button(role: .destructive) { store.deleteTask(id: task.id) } label: { Label("Delete", systemImage: "trash") }
-        }
     }
 
-    // MARK: - Add row
-    private var addRow: some View {
+    private var addRowContent: some View {
         HStack(spacing: 18) {
-            Text("Add")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(theme.inkDim)
-            Image(systemName: "plus")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(theme.inkDim)
+            Text("Add").font(.system(size: 21, weight: .medium)).tracking(-0.4).foregroundStyle(theme.inkDim)
+            Image(systemName: "plus").font(.system(size: 17, weight: .medium)).foregroundStyle(theme.inkDim)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 22).padding(.vertical, 26)
         .contentShape(Rectangle())
         .onTapGesture { addTask() }
     }
