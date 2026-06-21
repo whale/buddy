@@ -95,8 +95,9 @@ struct TodayView: View {
 
     // Mac-style header: weekday + month stacked on the left, giant numeral on the right.
     private var dateHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 0) {
+        // Mac: `flex items-end` — bottoms align; weekday/month stacked with a gap.
+        HStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(currentWeekday)
                     .font(.system(size: 24, weight: .medium)).tracking(-0.5)
                     .foregroundStyle(theme.ink)
@@ -108,6 +109,7 @@ struct TodayView: View {
             Text(currentDayNumber)
                 .font(.system(size: 62, weight: .medium)).tracking(-1.2)
                 .foregroundStyle(theme.ink)
+                .fixedSize()
         }
     }
 
@@ -116,15 +118,11 @@ struct TodayView: View {
     private var taskListCard: some View {
         let rows = store.doneTasks + store.activeTasks   // Donezo first, then active
         return List {
-            ForEach(rows, id: \.id) { task in
-                swipeRow(task)
+            ForEach(Array(rows.enumerated()), id: \.element.id) { i, task in
+                rowCell(task, topDivider: i > 0)
             }
             if !store.atHardCap {
-                addRowContent
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(theme.cardBackground)
-                    .listRowSeparatorTint(theme.line)
-                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                addCell(topDivider: !rows.isEmpty)
             }
         }
         .listStyle(.plain)
@@ -138,32 +136,62 @@ struct TodayView: View {
         .padding(.bottom, 14)
     }
 
-    // One List row + its swipe actions (split out so the type-checker stays fast).
+    // One List row: a custom full-width top divider + the row body, with Mail-style
+    // swipe actions. Default List separators are hidden — we draw our own so they span
+    // the full card width (the iOS inset separators were the "lines not full width" bug).
     @ViewBuilder
-    private func swipeRow(_ task: BuddyTask) -> some View {
-        Group { if task.isDone { doneRowContent(task) } else { activeRowContent(task) } }
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(task.state == .focused ? theme.focusFill : theme.cardBackground)
-            .listRowSeparatorTint(theme.line)
-            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }   // full-width dividers like the Mac
-            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                if task.isDone {
-                    Button { store.restoreTask(id: task.id) } label: { Label("Restore", systemImage: "arrow.uturn.backward") }.tint(.gray)
-                } else {
-                    Button { handleComplete(task: task) } label: { Label("Complete", systemImage: "checkmark") }.tint(Color(hex: "#2f9e44"))
-                }
+    private func rowCell(_ task: BuddyTask, topDivider: Bool) -> some View {
+        VStack(spacing: 0) {
+            if topDivider { Rectangle().fill(theme.line).frame(height: 1) }
+            rowBody(task)
+        }
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
+        .listRowBackground(task.state == .focused ? theme.focusFill : theme.cardBackground)
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            if task.isDone {
+                Button { store.restoreTask(id: task.id) } label: { Label("Restore", systemImage: "arrow.uturn.backward") }.tint(.gray)
+            } else {
+                Button { handleComplete(task: task) } label: { Label("Complete", systemImage: "checkmark") }.tint(Color(hex: "#2f9e44"))
             }
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button(role: .destructive) { store.deleteTask(id: task.id) } label: { Label("Delete", systemImage: "trash") }
-                if !task.isDone {
-                    Button { store.deferToTomorrow(id: task.id) } label: { Label("Tomorrow", systemImage: "moon.zzz") }.tint(.indigo)
-                    Button { startEdit(task: task) } label: { Label("Edit", systemImage: "pencil") }.tint(.gray)
-                }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) { store.deleteTask(id: task.id) } label: { Label("Delete", systemImage: "trash") }
+            if !task.isDone {
+                Button { store.deferToTomorrow(id: task.id) } label: { Label("Tomorrow", systemImage: "moon.zzz") }.tint(.indigo)
+                Button { startEdit(task: task) } label: { Label("Edit", systemImage: "pencil") }.tint(.gray)
             }
+        }
     }
 
-    // MARK: row CONTENT (the List provides the background, dividers, and swipe).
-    // Tap cycles neutral → focused → done (like the Mac); edit is the swipe pencil.
+    // Tap = cycle/restore. Wrapped in a Button (NOT onTapGesture) — onTapGesture on a
+    // List row's content swallows the swipe gesture; a Button coexists with swipe.
+    @ViewBuilder
+    private func rowBody(_ task: BuddyTask) -> some View {
+        if editingId == task.id {
+            activeRowContent(task)                          // TextField needs direct taps
+        } else {
+            Button {
+                if task.isDone { store.restoreTask(id: task.id) } else { handleCycle(task: task) }
+            } label: {
+                if task.isDone { doneRowContent(task) } else { activeRowContent(task) }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private func addCell(topDivider: Bool) -> some View {
+        VStack(spacing: 0) {
+            if topDivider { Rectangle().fill(theme.line).frame(height: 1) }
+            Button { addTask() } label: { addRowContent }.buttonStyle(.plain)
+        }
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
+        .listRowBackground(theme.cardBackground)
+    }
+
+    // MARK: row CONTENT (visual only — taps handled by the wrapping Button).
     @ViewBuilder
     private func activeRowContent(_ task: BuddyTask) -> some View {
         Group {
@@ -187,7 +215,6 @@ struct TodayView: View {
         }
         .padding(.horizontal, 22).padding(.vertical, 26)
         .contentShape(Rectangle())
-        .onTapGesture { if editingId == nil { handleCycle(task: task) } }
     }
 
     @ViewBuilder
@@ -200,7 +227,6 @@ struct TodayView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 22).padding(.vertical, 20)
         .contentShape(Rectangle())
-        .onTapGesture { store.restoreTask(id: task.id) }
     }
 
     private var addRowContent: some View {
@@ -211,7 +237,6 @@ struct TodayView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 22).padding(.vertical, 26)
         .contentShape(Rectangle())
-        .onTapGesture { addTask() }
     }
 
     // MARK: - Buddy chrome (custom — NOT the native iOS toolbar)
