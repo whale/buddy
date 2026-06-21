@@ -50,12 +50,17 @@ struct TodayView: View {
                 .ignoresSafeArea()
                 .animation(.easeInOut(duration: 0.2), value: activeCount)
 
-            NavigationStack {
+            VStack(alignment: .leading, spacing: 0) {
+                buddyChrome
+                    .padding(.horizontal, 22)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         dateHeader
                             .padding(.horizontal, 22)
-                            .padding(.top, 18)
+                            .padding(.top, 10)
 
                         taskCard
                             .padding(.horizontal, 16)
@@ -64,12 +69,8 @@ struct TodayView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-                .background(theme.screenBackground)
-                .animation(.easeInOut(duration: 0.2), value: activeCount)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { toolbarContent }
             }
-            .tint(theme.ink)
+            .animation(.easeInOut(duration: 0.2), value: activeCount)
 
             // Celebration overlay
             if showCelebration {
@@ -219,31 +220,29 @@ struct TodayView: View {
         .onTapGesture { addTask() }
     }
 
-    // MARK: - Toolbar
-
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        // History (calendar icon) — hidden if historyDays is 0
-        if store.settings.historyDays > 0 {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    showHistory = true
-                } label: {
-                    Image(systemName: "calendar")
-                        .foregroundStyle(theme.ink)
+    // MARK: - Buddy chrome (custom — NOT the native iOS toolbar)
+    // Mirrors the Mac drawer's chrome row: flat glyphs on the left, "Buddy" wordmark
+    // on the right. No iOS toolbar / circular button backgrounds.
+    private var buddyChrome: some View {
+        HStack(spacing: 20) {
+            if store.settings.historyDays > 0 {
+                Button { showHistory = true } label: {
+                    Image(systemName: "calendar").font(.system(size: 19, weight: .regular))
                 }
+                .buttonStyle(.plain)
             }
-        }
+            Button { showSettings = true } label: {
+                Image(systemName: "gearshape").font(.system(size: 19, weight: .regular))
+            }
+            .buttonStyle(.plain)
 
-        // Settings (gear icon)
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Button {
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-                    .foregroundStyle(theme.ink)
-            }
+            Spacer()
+
+            Text("Buddy")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(theme.inkDim)
         }
+        .foregroundStyle(theme.escalationText)     // glyphs: black → red(lvl1) → white(lvl2), like the Mac
     }
 
     // MARK: - Focus state
