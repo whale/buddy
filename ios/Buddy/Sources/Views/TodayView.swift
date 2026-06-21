@@ -89,7 +89,13 @@ struct TodayView: View {
         // Show the planner on a fresh/rolled day. Runs once on appear — ACCEPTED GAP:
         // an app left open across midnight won't re-show the morning until next launch
         // (the Mac re-runs rollover on focus/interval; iOS live-rollover is a later item).
-        .task { showMorning = store.needsMorning }
+        .task {
+            showMorning = store.needsMorning
+            #if DEBUG  // screenshot hooks: launch with --args -openSettings / -openHistory
+            if CommandLine.arguments.contains("-openSettings") { showMorning = false; showSettings = true }
+            if CommandLine.arguments.contains("-openHistory")  { showMorning = false; showHistory  = true }
+            #endif
+        }
     }
 
     // MARK: - Date header
