@@ -57,6 +57,9 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         ITSAppUsesNonExemptEncryption: false
+        # Allow plain-HTTP to a LOCAL Supabase during dev (cloud Supabase is HTTPS).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fyi.whale.buddy
