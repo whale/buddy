@@ -79,6 +79,19 @@ final class BuddyStore {
         return !wasDone && today.items[idx].state == .done
     }
 
+    /// Direct complete (the check-off circle): marks done from any state. Returns true on a
+    /// transition INTO done so the caller fires the celebration. Mirrors a row landing on done.
+    @discardableResult
+    func complete(_ task: BuddyTask) -> Bool {
+        guard let idx = today.items.firstIndex(where: { $0.id == task.id }) else { return false }
+        let wasDone = today.items[idx].state == .done
+        today.items[idx].state = .done
+        today.items[idx].doneAt = Date()
+        today.items[idx].v += 1
+        scheduleSave()
+        return !wasDone
+    }
+
     /// Add a new blank task. Returns the new task's id so the caller can auto-focus the text field.
     func addTask() -> String? {
         guard activeCount < Self.hardCap else { return nil }
@@ -142,6 +155,37 @@ final class BuddyStore {
         scheduleSave(immediate: true)
     }
 
+    #if DEBUG
+    // Dev-only: wipe to a clean first-run state so the morning planner shows again.
+    func resetForDev() {
+        today = TodayState(date: Self.localDate(), items: [], morningDone: false)
+        history = []
+        deferred = []
+        tombstones = [:]
+        erasedAt = nil
+        scheduleSave(immediate: true)
+    }
+    #endif
+
+    // MARK: - Morning planner
+    // Mirrors the Mac: on a fresh/rolled day the morning planner shows until the user
+    // presses Buddy! (or Skip) — both just mark the day planned. Yesterday's unfinished
+    // tasks are already carried into `today.items` by the rollover, so the planner shows
+    // them automatically before the day "starts".
+    var needsMorning: Bool { !today.morningDone }
+
+    /// Buddy! — finish planning, keep the chosen tasks.
+    func completeMorning() {
+        today.morningDone = true
+        scheduleSave(immediate: true)
+    }
+
+    /// Skip — same effect (the day is marked planned); mirrors the Mac's skip().
+    func skipMorning() {
+        today.morningDone = true
+        scheduleSave(immediate: true)
+    }
+
     // MARK: - Rollover
     // Mirrors Mac's `maybeRollover()` + the carry-over in `bootFinish()`.
     @discardableResult
@@ -178,6 +222,9 @@ final class BuddyStore {
         }
 
         // Day already archived (idempotent) or nothing to archive — advance to a fresh day.
+        // NOTE (sync): this resets morningDone to false, which is correct for a genuinely new
+        // day. A sync-merged archive for `stored` could also land here while today still holds
+        // the old date — revisit when wiring live sync so a merge can't re-trigger the morning.
         today = TodayState(date: cur, items: [])
         scheduleSave(immediate: true)
         return true

@@ -22,6 +22,9 @@ struct TodayView: View {
     // Celebration overlay
     @State private var showCelebration = false
 
+    // Morning planner (shown on a fresh/rolled day until Buddy!/Skip)
+    @State private var showMorning = false
+
     // DEBUG: force an escalation level in previews
     @State var debugActiveOverride: Int? = nil
 
@@ -49,71 +52,13 @@ struct TodayView: View {
 
             NavigationStack {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        dateHeader
+                            .padding(.horizontal, 20)
+                            .padding(.top, 20)
 
-                        dateCard
+                        taskCard
                             .padding(.horizontal, 16)
-                            .padding(.top, 24)
-                            .padding(.bottom, 8)
-
-                        Divider()
-                            .background(theme.line)
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 4)
-
-                        // Active tasks
-                        let active = store.activeTasks
-                        ForEach(Array(active.enumerated()), id: \.element.id) { index, task in
-                            activeRowView(task: task, index: index + 1)
-
-                            if index < active.count - 1 {
-                                Rectangle()
-                                    .fill(theme.line)
-                                    .frame(height: 1)
-                                    .padding(.horizontal, 16)
-                            }
-                        }
-
-                        // Add row (hidden at hard cap)
-                        if !store.atHardCap {
-                            if !store.activeTasks.isEmpty {
-                                Rectangle()
-                                    .fill(theme.line)
-                                    .frame(height: 1)
-                                    .padding(.horizontal, 16)
-                            }
-                            addRow
-                        }
-
-                        // Donezo section
-                        let done = store.doneTasks
-                        if !done.isEmpty {
-                            Rectangle()
-                                .fill(theme.line)
-                                .frame(height: 1)
-                                .padding(.horizontal, 16)
-                                .padding(.top, 4)
-
-                            Text("Donezo")
-                                .font(.system(size: 11, weight: .semibold))
-                                .tracking(0.5)
-                                .textCase(.uppercase)
-                                .foregroundStyle(theme.inkDim)
-                                .padding(.horizontal, 16)
-                                .padding(.top, 12)
-                                .padding(.bottom, 4)
-
-                            ForEach(done) { task in
-                                doneRowView(task: task)
-
-                                if task.id != done.last?.id {
-                                    Rectangle()
-                                        .fill(theme.line)
-                                        .frame(height: 1)
-                                        .padding(.horizontal, 16)
-                                }
-                            }
-                        }
 
                         Spacer(minLength: 40)
                     }
@@ -137,34 +82,73 @@ struct TodayView: View {
         }
         .sheet(isPresented: $showHistory)  { HistoryView(store: store) }
         .sheet(isPresented: $showSettings) { SettingsView(store: store) }
+        .fullScreenCover(isPresented: $showMorning) {
+            MorningView(store: store, onDone: { showMorning = false })
+        }
+        // Show the planner on a fresh/rolled day. Runs once on appear — ACCEPTED GAP:
+        // an app left open across midnight won't re-show the morning until next launch
+        // (the Mac re-runs rollover on focus/interval; iOS live-rollover is a later item).
+        .task { showMorning = store.needsMorning }
     }
 
     // MARK: - Date header
 
-    private var dateCard: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(currentWeekday)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(theme.inkDim)
-
+    // Mac-style header: weekday + month stacked on the left, giant numeral on the right.
+    private var dateHeader: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: -2) {
+                Text(currentWeekday)
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(theme.ink)
+                Text(currentMonth)
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(theme.inkDim)
+            }
+            Spacer()
             Text(currentDayNumber)
-                .font(.system(size: 32, weight: .semibold))
+                .font(.system(size: 56, weight: .bold))
                 .foregroundStyle(theme.ink)
         }
     }
 
-    // MARK: - Active task row
-    // Tapping cycles the task state. Swipe actions for edit, defer, delete.
-    @ViewBuilder
-    private func activeRowView(task: BuddyTask, index: Int) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            // Task number badge — escalationText so it turns red at lvl1
-            Text("\(index)")
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(theme.escalationText)
-                .frame(width: 20, alignment: .trailing)
+    // The bordered rounded card holding Donezo (top) + active tasks + Add (Mac model).
+    private var taskCard: some View {
+        let rows = store.doneTasks + store.activeTasks   // Donezo first, then active
+        return VStack(spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { i, task in
+                if i > 0 { rowDivider }
+                if task.isDone { doneRowView(task: task) } else { activeRowView(task: task) }
+            }
+            if !store.atHardCap {
+                if !rows.isEmpty { rowDivider }
+                addRow
+            }
+        }
+        .background(theme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(theme.line, lineWidth: 1))
+        .shadow(color: theme.level == .lvl2 ? .clear : Color.black.opacity(0.06), radius: 12, y: 6)
+    }
 
-            // Inline edit or display
+    private var rowDivider: some View {
+        Rectangle().fill(theme.line).frame(height: 1)
+    }
+
+    // MARK: - Active task row
+    // Check-off circle completes; tapping the body cycles (focus → done); tapping the
+    // text edits; long-press opens edit/sleep/delete (swipeActions don't work outside a List).
+    @ViewBuilder
+    private func activeRowView(task: BuddyTask) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            // Check-off circle — the discoverable "mark done" affordance.
+            Button { handleComplete(task: task) } label: {
+                Circle()
+                    .strokeBorder(theme.escalationText.opacity(0.5), lineWidth: 1.5)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+
             if editingId == task.id {
                 TextField("", text: $editText, axis: .vertical)
                     .font(.system(size: 16))
@@ -183,59 +167,39 @@ struct TodayView: View {
                     .foregroundStyle(task.text.isEmpty ? theme.inkDim : theme.escalationText)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                     .onTapGesture { startEdit(task: task) }
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 14)
+        // The focused task is your "now" — fill it so you can see it at a glance (mirrors the Mac).
+        .background(task.state == .focused ? theme.focusFill : Color.clear)
         .contentShape(Rectangle())
-        .onTapGesture {
-            if editingId != nil { return }
-            handleCycle(task: task)
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            Button {
-                handleCycle(task: task)
-            } label: {
-                Label("Cycle", systemImage: task.state == .neutral ? "circle.fill" : "checkmark.circle.fill")
-            }
-            .tint(theme.escalationText == .black ? .black : Color(hex: "#e5484d"))
-        }
-        .swipeActions(edge: .trailing) {
-            Button(role: .destructive) {
-                store.deleteTask(id: task.id)
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-
-            Button {
-                store.deferToTomorrow(id: task.id)
-            } label: {
-                Label("Tomorrow", systemImage: "calendar.badge.plus")
-            }
-            .tint(.indigo)
-
-            Button {
-                startEdit(task: task)
-            } label: {
-                Label("Edit", systemImage: "pencil")
-            }
-            .tint(.gray)
+        .onTapGesture { if editingId == nil { handleCycle(task: task) } }
+        .contextMenu {
+            Button { startEdit(task: task) } label: { Label("Edit", systemImage: "pencil") }
+            Button { store.deferToTomorrow(id: task.id) } label: { Label("Sleep till tomorrow", systemImage: "moon.zzz") }
+            Button(role: .destructive) { store.deleteTask(id: task.id) } label: { Label("Delete", systemImage: "trash") }
         }
     }
 
-    // MARK: - Done (Donezo) row
-    // Neutral and adaptive — inkDim, not escalationText. Tap or swipe to restore.
+    // MARK: - Done (Donezo) row — neutral + adaptive (inkDim, not escalationText).
+    // Filled circle (tap to restore) + inline struck "Donezo. <title>" like the Mac.
     @ViewBuilder
     private func doneRowView(task: BuddyTask) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "checkmark")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.inkDim)
-                .frame(width: 20, alignment: .trailing)
-                .padding(.top, 3)
+        HStack(alignment: .center, spacing: 12) {
+            Button { store.restoreTask(id: task.id) } label: {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 21))
+                    .foregroundStyle(theme.inkDim)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(store.atHardCap)
 
-            VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 6) {
                 Text("Donezo.")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(theme.ink)
@@ -243,22 +207,16 @@ struct TodayView: View {
                     .font(.system(size: 15))
                     .strikethrough(true, color: theme.inkDim)
                     .foregroundStyle(theme.inkDim)
-                    .multilineTextAlignment(.leading)
+                    .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 14)
         .contentShape(Rectangle())
-        .onTapGesture { store.restoreTask(id: task.id) }
-        .swipeActions(edge: .leading) {
-            Button {
-                store.restoreTask(id: task.id)
-            } label: {
-                Label("Restore", systemImage: "arrow.uturn.backward")
-            }
-            .tint(.gray)
-            .disabled(store.atHardCap)
+        .contextMenu {
+            Button { store.restoreTask(id: task.id) } label: { Label("Restore", systemImage: "arrow.uturn.backward") }
+            Button(role: .destructive) { store.deleteTask(id: task.id) } label: { Label("Delete", systemImage: "trash") }
         }
     }
 
@@ -318,6 +276,13 @@ struct TodayView: View {
         }
     }
 
+    private func handleComplete(task: BuddyTask) {
+        let didComplete = store.complete(task)
+        if didComplete && store.settings.celebrate > 0 {
+            withAnimation { showCelebration = true }
+        }
+    }
+
     private func addTask() {
         if let newId = store.addTask() {
             pendingFocusId = newId
@@ -357,6 +322,12 @@ struct TodayView: View {
     private var currentDayNumber: String {
         let f = DateFormatter()
         f.dateFormat = "d"
+        return f.string(from: Date())
+    }
+
+    private var currentMonth: String {
+        let f = DateFormatter()
+        f.dateFormat = "MMMM"
         return f.string(from: Date())
     }
 }

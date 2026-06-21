@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - SettingsView
 // A sheet showing: celebrate intensity slider, history days slider, and a
@@ -12,6 +13,7 @@ struct SettingsView: View {
     // Local mirror of store.settings so we can preview changes live
     @State private var celebrate: Double = 100
     @State private var historyDays: Double = 7
+    @State private var showEraseConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -96,6 +98,58 @@ struct SettingsView: View {
                     Text("Account")
                 }
                 .disabled(true)
+
+                // Report a bug — opens a prefilled GitHub issue (repo is public, no backend needed).
+                Section {
+                    Link(destination: bugReportURL) {
+                        Label("Report a bug", systemImage: "ladybug")
+                    }
+                } header: {
+                    Text("Feedback")
+                }
+
+                #if DEBUG
+                // Dev tools — debug builds only.
+                Section {
+                    Button {
+                        store.resetForDev(); dismiss()
+                    } label: {
+                        Label("Reset data (show morning)", systemImage: "arrow.counterclockwise")
+                    }
+                    Button(role: .destructive) {
+                        exit(0)
+                    } label: {
+                        Label("Restart app (quit)", systemImage: "power")
+                    }
+                } header: {
+                    Text("Developer")
+                } footer: {
+                    Text("Debug builds only.")
+                }
+                #endif
+
+                // Erase all data — mirrors the Mac's eraseAll(); stamps erasedAt so a
+                // real wipe propagates over sync (the merge treats it as a barrier).
+                Section {
+                    Button(role: .destructive) {
+                        showEraseConfirm = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "trash")
+                            Text("Erase all data")
+                        }
+                    }
+                } header: {
+                    Text("Danger zone")
+                } footer: {
+                    Text("Removes every task and all history on this device. This can't be undone.")
+                }
+            }
+            .alert("Erase all data?", isPresented: $showEraseConfirm) {
+                Button("Erase", role: .destructive) { store.eraseAll(); dismiss() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This removes every task and all history on this device. This can't be undone.")
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -110,6 +164,24 @@ struct SettingsView: View {
                 historyDays = Double(store.settings.historyDays)
             }
         }
+    }
+
+    // Prefilled GitHub issue with app version + device, so reports are diagnosable.
+    private var bugReportURL: URL {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        let body = """
+
+
+        ---
+        Buddy iOS \(v) (\(build)) · \(UIDevice.current.systemName) \(UIDevice.current.systemVersion)
+        What happened:
+        What you expected:
+        """
+        var c = URLComponents(string: "https://github.com/whale/buddy/issues/new")!
+        c.queryItems = [URLQueryItem(name: "title", value: "Bug: "),
+                        URLQueryItem(name: "body", value: body)]
+        return c.url ?? URL(string: "https://github.com/whale/buddy/issues/new")!
     }
 
     private var historyDaysLabel: String {
