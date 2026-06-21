@@ -1,9 +1,22 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-06-19. Branch: `main` (PR #26 merged). Latest **release**: **v0.2.21** — durability fix is now SHIPPED + auto-updating to installed users (signed + notarized Accepted + stapled). `main`: durability + bug-reports + iOS + sync-step-1 all merged._
+_Last updated: 2026-06-21. Active branch: **`feat/sync-live`** (NOT pushed/PR'd yet — holds all of this session's sync + iOS-style work, 8 commits ahead of `main`). Latest **release**: **v0.2.21**._
 
 Buddy is a **shipped, public, self-updating** macOS menu-bar focus app for ADHD.
 Repo: **github.com/whale/buddy** (PUBLIC, MIT). Download: **github.com/whale/buddy/releases/latest**.
+
+## 🧭 Session map — 2026-06-21 (read this first)
+
+Two big things moved, both on **`feat/sync-live`** (clean tree, all committed, **not pushed**):
+
+| Workstream | Status |
+|---|---|
+| **Mac⇄iOS sync — NOW WORKING LIVE** | The whole stack is verified end-to-end against a **live local Supabase**: (1) CAS server SQL `buddy_cas_test.sql` 7/7 via psql + HTTP RPC (push/pull/stale-reject/RLS) via browser fetch; (2) **Mac** real adapter `makeSupabaseCASStore` + **auto-sync engine** (push debounced on change, pull on focus) — a real two-device merge converged in the live DB (`mac1`+`phone1`); (3) **iOS** real adapter `SupabaseCASStore.swift` + `SupabaseSyncLiveTests` (3 live tests pass: CAS contract, two-device merge, Mac-shaped-blob read). iOS suite 40/40. **REMAINING:** iOS auto-sync triggers (foreground + debounced) wired into the app; **QR pairing UI** on both (the design surface — engine + identity already done); a hosted **cloud Supabase** project for real over-internet use (local DB only runs while the Mac is on). |
+| **iOS visual parity (4/10 → ~9/10)** | Big style pass after owner feedback that it "looked like native iOS." Root cause: I was using native SwiftUI scaffolding. Fixed: **custom Buddy chrome** (no toolbar/circles), **bordered card on grey** floating like the Mac drawer, **custom Settings + History sheets** (flat rows / Future-Done segmented — NOT native Form/List), **exact Mac type sizes** (task 21px medium, numeral 62 medium), **bottom-aligned date** (`items-end`), **full-width dividers**, **Mail-style swipe actions** (right=Complete/Restore, left=Delete/Tomorrow/Edit). ⚠️ **Swipe is wired but UNCONFIRMED on-device** (can't swipe headlessly — owner is the test). Font is still **system SF** (owner OK'd it; offered to bundle Inter for a precise match). Reference shots in `.screenshots/` (`mac-*` vs `ios-*`, `cmp-mac`/`cmp-ios5`). |
+
+🚧 **Local Supabase is RUNNING** (started this session via OrbStack). Keys: API `http://127.0.0.1:54321`, publishable `sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH`, DB `postgresql://postgres:postgres@127.0.0.1:54322/postgres`, Studio `http://127.0.0.1:54323`. To restart later: `supabase start` from the repo root (OrbStack must be running). Local keys persist across restarts.
+
+⚠️ **Sync config is set via the console only** (`window.__buddy.setSync({enabled,url,key,syncKey})` on Mac); there's no Settings/QR UI yet, so sync isn't user-reachable. That UI is the main remaining piece.
 
 ## 🧭 Session map — 2026-06-19 (read this first)
 
@@ -84,21 +97,22 @@ the file (`boot: file mirror is newest … recovered=true`). Single-instance blo
 - Apple's **timestamp service** had a ~1.5h outage this session → 6 consecutive `codesign` failures ("timestamp service is not available"). If it recurs, it's external — just retry later.
 
 ## Next likely work
-1. **Merge PR #26** — lands the iOS app icon, Supabase schema, full offline iOS app, and
-   sync-step-1 UUIDs (safe; local-only/inert).
-2. **Sync steps 4–6** (the main remaining build) per the **Sync build order** in
-   `IOS-COMPANION-PLAN.md`: normalize the wire format (epoch-ms everywhere; iOS
-   `DayItem` gets an id) → **dumb CAS server + client sync loop** (pull → merge →
-   compare-and-swap push → retry) wired on the Mac in the browser → reproduce every
-   loss scenario with two simulated clients. Merge + loop are testable now; only the
-   ~15-line CAS Postgres function needs OrbStack → `supabase start` at the end.
-   (Steps 1–3 ✅ — local model + pure `merge()` done & verified on both apps.)
-3. ~~**Cut a release**~~ ✅ DONE — **v0.2.21** shipped 2026-06-19 (durability + single-instance
-   guard now live for installed users via auto-update).
-4. **Deploy bug reports** — follow `BUG-REPORTS.md`, set `BUG_ENDPOINT`, ship a build.
-5. **iOS first TestFlight** — needs ASC env vars (`ASC_KEY_ID/ISSUER_ID/KEY_PATH`, reuse
-   Belly's key) + the morning-screen decision (iOS currently skips it).
-6. **Landing page** + **staple the DMG** + first-run hint — the older "share it widely" polish.
+1. **Confirm the iOS swipe on-device** (owner) — press-hold-drag a row left/right in the
+   sim. If it still doesn't reveal actions, switch from List `.swipeActions` to a custom
+   swipe gesture (the Button-wrapper fix should have done it).
+2. **iOS auto-sync triggers** — wire `BuddySync.syncOnce` into the app: pull on
+   foreground (`scenePhase`), debounced push after a change. Mac already does this
+   (`scheduleSync`/`syncNow` in `dist/index.html`); mirror it in `BuddyStore` + `BuddyApp`.
+3. **QR pairing + Settings opt-in UI** (both apps) — the main missing user-facing piece.
+   Engine + identity done (`generateSyncKey`/`deriveOwnerId` JS, `SyncIdentity` Swift).
+   Mac: Settings → show QR of `{backendUrl, syncKey}`; iOS: camera scan (needs a real
+   device to test) + manual paste fallback. Sync is console-only until this exists.
+4. **Hosted Supabase project** for real over-internet sync (local DB only runs while the
+   Mac is on). `supabase link` + `db push` the two migrations; use the cloud URL+anon key.
+5. **Push `feat/sync-live` + open PR(s)** — consider splitting sync vs iOS-style into two
+   PRs for cleaner review (8 commits, two themes).
+6. **Optional:** bundle **Inter** for exact typography parity; **iOS TestFlight** (reuse
+   Belly's ASC key); **deploy bug reports** (`BUG-REPORTS.md`, set `BUG_ENDPOINT`).
 
 ## How to run (dev)
 ```
