@@ -538,6 +538,7 @@ function writeNow(){
   try{ localStorage.setItem(STORAGE_KEY, blob); }
   catch(e){ (memoryStore||(memoryStore={}))[STORAGE_KEY]=blob; console.warn('[buddy] localStorage write failed — relying on the file mirror', e); }
   fileSave(blob);                // durable record regardless of localStorage state
+  scheduleSync();                // opt-in: debounced push of this change to other devices
 }
 function save(){ if(saveSuppressed) return; clearTimeout(saveTimer); saveTimer=setTimeout(writeNow,250); }
 
@@ -872,6 +873,50 @@ function makeSupabaseCASStore(baseUrl, anonKey, device){
       return r ? { ok:r.ok, blob:r.blob, version:r.version } : { ok:false, blob:null, version:0 };
     },
   };
+}
+
+/* ---- Auto-sync engine (opt-in) --------------------------------------------
+   Config lives in localStorage `buddy.sync.v1` = { enabled, url, key, syncKey }
+   (set later by the Settings/QR pairing UI; settable now via __buddy.setSync).
+   owner_id = sha256(syncKey). Triggers: on boot, on window focus / tab-visible,
+   and debounced (~3s) after any local change. One sync at a time; failures are
+   logged and retried on the next trigger (offline-tolerant). */
+const SYNC_CFG_KEY = 'buddy.sync.v1';
+const SYNC_DEBOUNCE_MS = 3000;
+let syncStore=null, syncOwnerId=null, syncing=false, lastSyncAt=0, syncDebounce=null;
+
+function readSyncCfg(){
+  try{ const o=JSON.parse(lsGet(SYNC_CFG_KEY)||'null');
+       return (o && o.enabled && o.url && o.key && o.syncKey) ? o : null; }
+  catch{ return null; }
+}
+async function initSync(){
+  const cfg = readSyncCfg();
+  if(!cfg){ syncStore=null; syncOwnerId=null; return false; }
+  syncStore   = makeSupabaseCASStore(cfg.url, cfg.key, NATIVE ? 'mac' : 'web');
+  syncOwnerId = await deriveOwnerId(cfg.syncKey);
+  return true;
+}
+async function setSync(cfg){                       // Settings/pairing writes config here
+  lsSet(SYNC_CFG_KEY, JSON.stringify(cfg || {}));
+  await initSync();
+  if(syncStore) await syncNow('config');
+  return !!syncStore;
+}
+async function syncNow(reason){
+  if(!syncStore || !syncOwnerId || syncing) return null;
+  syncing = true;
+  try{
+    const res = await syncOnce(syncStore, syncOwnerId);   // pull → merge → CAS push → retry
+    if(res && res.ok){ lastSyncAt = Date.now(); T('sync '+reason+' ok pushed='+(!!res.pushed)+' v='+(res.version||0)); }
+    return res;
+  }catch(e){ console.warn('[buddy] sync failed ('+reason+')', e); T('sync '+reason+' FAILED '+(e&&e.message)); return null; }
+  finally{ syncing = false; }
+}
+function scheduleSync(){                            // debounced; skipped while a sync is mid-flight
+  if(!syncStore || syncing) return;
+  clearTimeout(syncDebounce);
+  syncDebounce = setTimeout(()=>syncNow('change'), SYNC_DEBOUNCE_MS);
 }
 
 /* ---- Sync identity (QR pairing core) ----
@@ -1860,6 +1905,10 @@ window.addEventListener('focus', liveRolloverCheck);
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') liveRolloverCheck(); });
 setInterval(liveRolloverCheck, 60000);
 
+// Opt-in sync: pull others' changes when the app regains attention.
+window.addEventListener('focus', ()=>syncNow('focus'));
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') syncNow('visible'); });
+
 /* ====================================================================
    TEST HOOK  — read / inject state without depending on hover timers.
    Used by the Playwright acceptance suite (§7).
@@ -1885,6 +1934,8 @@ window.__buddy = {
   rollover: maybeRollover,
   eraseAll,                                  // sync step 2: erase + stamp erasedAt (merge barrier)
   syncOnce, makeFakeCASStore, makeSupabaseCASStore,   // sync step 5: CAS-on-client loop + stores
+  setSync, syncNow, get syncConfigured(){ return !!syncStore; },   // auto-sync engine
+  get lastSyncAt(){ return lastSyncAt; },
   generateSyncKey, deriveOwnerId, pairingPayload, parsePairingPayload,   // QR pairing core
   openDrawer, closeDrawer,
   showMorning,
@@ -2283,6 +2334,8 @@ function bootFinish(recovered){
   T('boot done='+state.today.morningDone+' n='+state.today.items.length+' rolled='+rolled+' recovered='+recovered);
   if(!state.today.morningDone) showMorning(); else settleNative();
   writeNow();                                // converge localStorage + file mirror to the chosen state
+  // Opt-in sync: once state is loaded, pull others' changes and push ours.
+  initSync().then(()=>{ if(syncStore) syncNow('boot'); });
 }
 function boot(){
   cursor=0; kbActive=false; editingId=null;  // reset transient keyboard cursor on (re)boot
