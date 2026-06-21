@@ -46,16 +46,16 @@ struct TodayView: View {
 
     var body: some View {
         ZStack {
-            theme.cardBackground
+            theme.screenBackground
                 .ignoresSafeArea()
                 .animation(.easeInOut(duration: 0.2), value: activeCount)
 
             NavigationStack {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 18) {
                         dateHeader
-                            .padding(.horizontal, 20)
-                            .padding(.top, 20)
+                            .padding(.horizontal, 22)
+                            .padding(.top, 18)
 
                         taskCard
                             .padding(.horizontal, 16)
@@ -64,7 +64,7 @@ struct TodayView: View {
                     }
                 }
                 .scrollContentBackground(.hidden)
-                .background(theme.cardBackground)
+                .background(theme.screenBackground)
                 .animation(.easeInOut(duration: 0.2), value: activeCount)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbarContent }
@@ -98,15 +98,15 @@ struct TodayView: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: -2) {
                 Text(currentWeekday)
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.system(size: 30, weight: .bold))
                     .foregroundStyle(theme.ink)
                 Text(currentMonth)
-                    .font(.system(size: 16, weight: .regular))
+                    .font(.system(size: 17, weight: .regular))
                     .foregroundStyle(theme.inkDim)
             }
             Spacer()
             Text(currentDayNumber)
-                .font(.system(size: 56, weight: .bold))
+                .font(.system(size: 76, weight: .bold))
                 .foregroundStyle(theme.ink)
         }
     }
@@ -125,33 +125,26 @@ struct TodayView: View {
             }
         }
         .background(theme.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(theme.line, lineWidth: 1))
-        .shadow(color: theme.level == .lvl2 ? .clear : Color.black.opacity(0.06), radius: 12, y: 6)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        // Border only at lvl2 (to delineate red-on-red); at lvl0/1 the grey backdrop + shadow do it.
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .stroke(theme.level == .lvl2 ? theme.line : Color.clear, lineWidth: 1))
+        .shadow(color: theme.level == .lvl2 ? .clear : Color.black.opacity(0.07), radius: 16, y: 5)
     }
 
     private var rowDivider: some View {
         Rectangle().fill(theme.line).frame(height: 1)
     }
 
-    // MARK: - Active task row
-    // Check-off circle completes; tapping the body cycles (focus → done); tapping the
-    // text edits; long-press opens edit/sleep/delete (swipeActions don't work outside a List).
+    // MARK: - Active task row (matches the Mac: no checkbox, text at the edge).
+    // Tap the row cycles neutral → focused → done (like the Mac); tap the text edits;
+    // long-press for Complete / Edit / Sleep / Delete (swipeActions don't work outside a List).
     @ViewBuilder
     private func activeRowView(task: BuddyTask) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            // Check-off circle — the discoverable "mark done" affordance.
-            Button { handleComplete(task: task) } label: {
-                Circle()
-                    .strokeBorder(theme.escalationText.opacity(0.5), lineWidth: 1.5)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-
+        Group {
             if editingId == task.id {
                 TextField("", text: $editText, axis: .vertical)
-                    .font(.system(size: 16))
+                    .font(.system(size: 17))
                     .foregroundStyle(theme.escalationText)
                     .submitLabel(.done)
                     .focused($focusedField, equals: task.id)
@@ -161,23 +154,23 @@ struct TodayView: View {
                             commitEdit(id: task.id)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text(task.text.isEmpty ? "Untitled" : task.text)
-                    .font(.system(size: 16, weight: .regular))
+                    .font(.system(size: 17, weight: .regular))
                     .foregroundStyle(task.text.isEmpty ? theme.inkDim : theme.escalationText)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture { startEdit(task: task) }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 22)
         // The focused task is your "now" — fill it so you can see it at a glance (mirrors the Mac).
         .background(task.state == .focused ? theme.focusFill : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture { if editingId == nil { handleCycle(task: task) } }
         .contextMenu {
+            Button { handleComplete(task: task) } label: { Label("Complete", systemImage: "checkmark") }
             Button { startEdit(task: task) } label: { Label("Edit", systemImage: "pencil") }
             Button { store.deferToTomorrow(id: task.id) } label: { Label("Sleep till tomorrow", systemImage: "moon.zzz") }
             Button(role: .destructive) { store.deleteTask(id: task.id) } label: { Label("Delete", systemImage: "trash") }
@@ -188,32 +181,21 @@ struct TodayView: View {
     // Filled circle (tap to restore) + inline struck "Donezo. <title>" like the Mac.
     @ViewBuilder
     private func doneRowView(task: BuddyTask) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            Button { store.restoreTask(id: task.id) } label: {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 21))
-                    .foregroundStyle(theme.inkDim)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(store.atHardCap)
-
-            HStack(spacing: 6) {
-                Text("Donezo.")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(theme.ink)
-                Text(task.text)
-                    .font(.system(size: 15))
-                    .strikethrough(true, color: theme.inkDim)
-                    .foregroundStyle(theme.inkDim)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(spacing: 6) {
+            Text("Donezo.")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(theme.ink)
+            Text(task.text)
+                .font(.system(size: 15))
+                .strikethrough(true, color: theme.inkDim)
+                .foregroundStyle(theme.inkDim)
+                .lineLimit(1)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
         .contentShape(Rectangle())
+        .onTapGesture { store.restoreTask(id: task.id) }
         .contextMenu {
             Button { store.restoreTask(id: task.id) } label: { Label("Restore", systemImage: "arrow.uturn.backward") }
             Button(role: .destructive) { store.deleteTask(id: task.id) } label: { Label("Delete", systemImage: "trash") }
@@ -230,8 +212,8 @@ struct TodayView: View {
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(theme.inkDim)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture { addTask() }

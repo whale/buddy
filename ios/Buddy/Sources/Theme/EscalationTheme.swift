@@ -32,6 +32,15 @@ struct EscalationTheme {
         }
     }
 
+    // Screen background BEHIND the card — light grey so the white card floats like the
+    // Mac's drawer panel; red at lvl2 (the whole surface goes red).
+    var screenBackground: Color {
+        switch level {
+        case .lvl0, .lvl1: return Color(hex: "#f0f0f0")
+        case .lvl2:        return Color(hex: "#e5484d")
+        }
+    }
+
     // Primary text — task titles, labels
     var ink: Color {
         switch level {
