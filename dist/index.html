@@ -530,6 +530,7 @@ let saveSuppressed=false;        // test hook: freeze persistence so an injected
    localStorage quota failure (the file write still lands → no silent loss). */
 function fileSave(blobStr){ if(!NATIVE) return; try{ window.__TAURI__.core.invoke('save_state', { blob: blobStr }); }catch(_){} }
 async function fileLoad(){ if(!NATIVE) return null; try{ return await window.__TAURI__.core.invoke('load_state'); }catch(_){ return null; } }
+async function fileLoadRecovery(){ if(!NATIVE) return null; try{ return await window.__TAURI__.core.invoke('load_recovery_state'); }catch(_){ return null; } }
 
 function writeNow(){
   if(saveSuppressed) return;
@@ -2020,6 +2021,26 @@ window.__buddy = {
       const aBefore=JSON.stringify(A), bBefore=JSON.stringify(B);
       merge(A,B);
       ok('merge is pure (inputs unmutated)', JSON.stringify(A)===aBefore && JSON.stringify(B)===bBefore);
+
+      // 11. Accidental empty same-day launch must not become permanent. A newer
+      // empty snapshot with no tombstones/erase is treated as a stale cache, not a
+      // real delete, so the recovery/file side keeps the task.
+      const m11=merge(
+        snap({savedAt:3000,today:{date:'2026-06-22',morningDone:true,items:[]}}),
+        snap({savedAt:2000,today:{date:'2026-06-22',morningDone:true,items:[item('safe','survives','neutral',1)]}}));
+      ok('same-day empty cache does not wipe recovery/file tasks',
+         m11.today.items.length===1 && m11.today.items[0].id==='safe',
+         'items='+ids(m11));
+
+      // 12. But a new-day rollover should stay empty if there is no carry-over.
+      // This prevents the recovery file from dragging yesterday's list back into
+      // a genuinely fresh day.
+      const m12=merge(
+        snap({savedAt:3000,today:{date:'2026-06-23',morningDone:false,items:[]}}),
+        snap({savedAt:2000,today:{date:'2026-06-22',morningDone:true,items:[item('y','yesterday','neutral',1)]}}));
+      ok('different-day empty state does not resurrect yesterday',
+         m12.today.date==='2026-06-23' && m12.today.items.length===0,
+         'date='+m12.today.date+' items='+ids(m12));
     }catch(e){ ok('mergeTest ran without throwing', false, e&&e.message); }
     const failed=R.filter(r=>!r.pass);
     return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
@@ -2281,22 +2302,30 @@ function boot(){
 }
 async function bootReconcileFile(){
   const fileH=hydrate(migrate(parseRaw(await fileLoad())||{}));
+  const recoveryH=hydrate(migrate(parseRaw(await fileLoadRecovery())||{}));
   let recovered=false;
   // Step 3: localStorage and the file mirror are two snapshots of THIS device at
   // different times (localStorage is origin-bound, so a relaunch can land on an
   // older-but-valid origin store). MERGE them field-level instead of discarding the
   // older one wholesale — a stale-but-newer-saved origin store could otherwise drop
-  // tasks the file still has. The merge is a superset that loses nothing.
-  if(fileH){
-    const merged = merge(lsHydrated, fileH);
+  // tasks the file still has. Also include the native recovery file, which holds
+  // the last save with real task/delete information. That protects against the
+  // worst case: an accidental empty same-day launch writing over the primary file.
+  // The merge is a superset that loses nothing, while tombstones/erasedAt still
+  // prevent resurrecting tasks the user intentionally deleted.
+  if(fileH || recoveryH){
+    const merged = [lsHydrated, fileH, recoveryH].reduce((acc,h)=>merge(acc,h), null);
     if(merged){
       applyHydrated(merged);
       if(!merged.hadToday) state.today={ date:localDate(), items:[], morningDone:false };
       bootUsable=true;
       // "recovered" = we pulled in anything the localStorage candidate lacked (drives
       // the demo-seed guard + telemetry). True when ls was absent or the file was newer.
-      recovered = !lsHydrated || (fileH.savedAt||0) > (lsHydrated.savedAt||0);
-      T('boot: merged ls+file (ls '+((lsHydrated&&lsHydrated.savedAt)||0)+' file '+(fileH.savedAt||0)+') → items='+state.items.length+' hist='+state.history.length+' recovered='+recovered);
+      recovered = !lsHydrated
+        || (fileH && (fileH.savedAt||0) > (lsHydrated.savedAt||0))
+        || (recoveryH && (recoveryH.savedAt||0) > (lsHydrated.savedAt||0))
+        || (state.items.length > ((lsHydrated&&lsHydrated.today&&lsHydrated.today.items&&lsHydrated.today.items.length)||0));
+      T('boot: merged ls+file+recovery (ls '+((lsHydrated&&lsHydrated.savedAt)||0)+' file '+((fileH&&fileH.savedAt)||0)+' recovery '+((recoveryH&&recoveryH.savedAt)||0)+') → items='+state.items.length+' hist='+state.history.length+' recovered='+recovered);
     }
   }
   bootFinish(recovered);

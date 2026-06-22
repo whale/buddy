@@ -331,9 +331,50 @@ fn state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join("buddy-state.json"))
 }
 
+// Last state that looked recoverable. This is deliberately separate from the
+// primary file: if a bad launch writes an empty same-day state, the recovery file
+// keeps the last real task list instead of being overwritten by that empty save.
+fn recovery_state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join("buddy-state.recovery.json"))
+}
+
+fn state_has_array_items(v: &serde_json::Value, path: &[&str]) -> bool {
+    let mut cur = v;
+    for key in path {
+        cur = match cur.get(*key) {
+            Some(next) => next,
+            None => return false,
+        };
+    }
+    cur.as_array().map(|a| !a.is_empty()).unwrap_or(false)
+}
+
+fn state_has_object_items(v: &serde_json::Value, key: &str) -> bool {
+    v.get(key)
+        .and_then(|x| x.as_object())
+        .map(|o| !o.is_empty())
+        .unwrap_or(false)
+}
+
+fn is_recoverable_state(blob: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(blob) else {
+        return false;
+    };
+    state_has_array_items(&v, &["today", "items"])
+        || state_has_array_items(&v, &["deferred"])
+        || state_has_object_items(&v, "tombstones")
+        || !v.get("erasedAt").unwrap_or(&serde_json::Value::Null).is_null()
+}
+
 #[tauri::command]
 fn load_state(app: AppHandle) -> Option<String> {
     let p = state_file(&app)?;
+    std::fs::read_to_string(p).ok()
+}
+
+#[tauri::command]
+fn load_recovery_state(app: AppHandle) -> Option<String> {
+    let p = recovery_state_file(&app)?;
     std::fs::read_to_string(p).ok()
 }
 
@@ -346,6 +387,16 @@ fn save_state(app: AppHandle, blob: String) -> Result<(), String> {
     let tmp = p.with_extension("json.tmp");
     std::fs::write(&tmp, blob.as_bytes()).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &p).map_err(|e| e.to_string())?;
+
+    if is_recoverable_state(&blob) {
+        if let Some(rp) = recovery_state_file(&app) {
+            let rtmp = rp.with_extension("json.tmp");
+            if std::fs::write(&rtmp, blob.as_bytes()).is_ok() {
+                let _ = std::fs::rename(&rtmp, &rp);
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -413,7 +464,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, set_reserve, check_for_update, install_update, load_state, save_state])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, set_reserve, check_for_update, install_update, load_state, load_recovery_state, save_state])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).
