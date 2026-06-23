@@ -1,0 +1,193 @@
+name: Release Mac app
+
+# After every push to main, version-bump.yml creates the next patch version.
+# This workflow runs after that bump finishes, checks out the bumped main, and
+# publishes the GitHub Release that Buddy's updater reads. Automatic publishing
+# is enabled only when repo variable AUTO_RELEASE_MAC=true, so missing signing
+# secrets do not break every merge while setup is incomplete.
+on:
+  workflow_run:
+    workflows: ["Auto version bump"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-mac-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && vars.AUTO_RELEASE_MAC == 'true')
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out bumped main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if release already exists
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG already exists; skipping."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node
+        if: steps.existing.outputs.exists != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up pnpm
+        if: steps.existing.outputs.exists != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Install JS dependencies
+        if: steps.existing.outputs.exists != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Set up Rust targets
+        if: steps.existing.outputs.exists != 'true'
+        shell: bash
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Import Apple Developer ID certificate
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        shell: bash
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ] || [ -z "$APPLE_CERTIFICATE_PASSWORD" ] || [ -z "$KEYCHAIN_PASSWORD" ]; then
+            echo "Missing Apple signing secrets. Add APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, and KEYCHAIN_PASSWORD."
+            exit 1
+          fi
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+
+          CERT_ID=$(security find-identity -v -p codesigning build.keychain | awk -F'"' '/Developer ID Application/ { print $2; exit }')
+          if [ -z "$CERT_ID" ]; then
+            echo "No Developer ID Application certificate found in imported keychain."
+            security find-identity -v -p codesigning build.keychain
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$CERT_ID" >> "$GITHUB_ENV"
+          echo "Using signing identity: $CERT_ID"
+
+      - name: Write App Store Connect API key
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        shell: bash
+        run: |
+          if [ -z "$APPLE_API_KEY_P8" ]; then
+            echo "Missing APPLE_API_KEY_P8 secret."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/apple-api-key"
+          printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/apple-api-key/AuthKey.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/apple-api-key/AuthKey.p8" >> "$GITHUB_ENV"
+
+      - name: Build signed, notarized universal app
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          if [ -z "$APPLE_API_ISSUER" ] || [ -z "$APPLE_API_KEY" ] || [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "Missing release secrets. Need APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_P8, and TAURI_SIGNING_PRIVATE_KEY."
+            exit 1
+          fi
+          pnpm tauri build --target universal-apple-darwin
+
+      - name: Create updater manifest
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          SIG_PATH="src-tauri/target/universal-apple-darwin/release/bundle/macos/Buddy.app.tar.gz.sig"
+          if [ ! -f "$SIG_PATH" ]; then
+            echo "Missing updater signature at $SIG_PATH"
+            exit 1
+          fi
+
+          node <<'NODE'
+          const fs = require('fs');
+          const version = process.env.VERSION;
+          const tag = process.env.TAG;
+          const signature = fs.readFileSync('src-tauri/target/universal-apple-darwin/release/bundle/macos/Buddy.app.tar.gz.sig', 'utf8').trim();
+          const url = `https://github.com/whale/buddy/releases/download/${tag}/Buddy.app.tar.gz`;
+          const manifest = {
+            version,
+            notes: `Buddy ${version}`,
+            pub_date: new Date().toISOString(),
+            platforms: {
+              'darwin-aarch64': { signature, url },
+              'darwin-x86_64': { signature, url },
+            },
+          };
+          fs.writeFileSync('latest.json', JSON.stringify(manifest, null, 2) + '\n');
+          NODE
+
+      - name: Publish GitHub Release
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          TARGET_SHA: ${{ steps.version.outputs.sha }}
+        shell: bash
+        run: |
+          DMG="src-tauri/target/universal-apple-darwin/release/bundle/dmg/Buddy_${VERSION}_universal.dmg"
+          APP_TAR="src-tauri/target/universal-apple-darwin/release/bundle/macos/Buddy.app.tar.gz"
+          test -f "$DMG"
+          test -f "$APP_TAR"
+          test -f latest.json
+
+          gh release create "$TAG" \
+            "$DMG" \
+            "$APP_TAR" \
+            latest.json \
+            --target "$TARGET_SHA" \
+            --title "Buddy $VERSION" \
+            --notes "Automated release for Buddy $VERSION."

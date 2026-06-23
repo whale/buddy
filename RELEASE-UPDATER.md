@@ -15,6 +15,55 @@ installs, and relaunches.
   plugin registered in `run()`.
 - **UI/JS**: the `#updateBtn` flow in `dist/index.html`.
 
+
+## Automatic releases from `main`
+
+Buddy now has a GitHub Actions workflow: `.github/workflows/release-mac.yml`.
+
+Flow:
+1. A change is merged/pushed to `main`.
+2. `.github/workflows/version-bump.yml` bumps the patch version.
+3. When that workflow finishes, `release-mac.yml` checks out the bumped `main`.
+4. If `AUTO_RELEASE_MAC=true`, it builds a signed/notarized universal Mac app, creates `latest.json`, and publishes a GitHub Release.
+5. Installed Buddy apps see the new release because the updater reads `releases/latest/download/latest.json`.
+
+Automatic publishing is intentionally gated by the repo variable `AUTO_RELEASE_MAC`.
+Leave it unset or `false` until the signing secrets below are installed, otherwise the release job will fail on every update.
+
+Required GitHub **secrets** for automatic release:
+
+- `APPLE_CERTIFICATE` — base64-encoded Developer ID Application `.p12` certificate.
+- `APPLE_CERTIFICATE_PASSWORD` — password used when exporting that `.p12`.
+- `KEYCHAIN_PASSWORD` — temporary CI keychain password; generate a long random value.
+- `APPLE_API_ISSUER` — App Store Connect Issuer ID.
+- `APPLE_API_KEY` — App Store Connect API Key ID.
+- `APPLE_API_KEY_P8` — full contents of the downloaded `AuthKey_XXXXXX.p8` file.
+- `APPLE_TEAM_ID` — Apple Developer Team ID. Optional for some accounts, but set it to avoid ambiguity.
+- `TAURI_SIGNING_PRIVATE_KEY` — contents of `~/.tauri/buddy-updater.key`.
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — updater key password; currently blank if the key was generated without one.
+
+Required GitHub **variable** once secrets are ready:
+
+- `AUTO_RELEASE_MAC=true`
+
+Useful setup commands:
+
+```bash
+# Example only: choose your actual exported .p12 path.
+gh secret set APPLE_CERTIFICATE < <(base64 -i path/to/DeveloperIDApplication.p12)
+gh secret set APPLE_CERTIFICATE_PASSWORD
+gh secret set KEYCHAIN_PASSWORD
+gh secret set APPLE_API_ISSUER --body "$APPLE_API_ISSUER"
+gh secret set APPLE_API_KEY --body "$APPLE_API_KEY"
+gh secret set APPLE_API_KEY_P8 < "$APPLE_API_KEY_PATH"
+gh secret set APPLE_TEAM_ID --body "<TEAM_ID>"
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/buddy-updater.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --body ""
+gh variable set AUTO_RELEASE_MAC --body true
+```
+
+You can also run the workflow manually from GitHub Actions → **Release Mac app**.
+
 ## One-time, before updates can flow
 
 1. **Scrub old Apple IDs from git history**, then make the repo public (see
