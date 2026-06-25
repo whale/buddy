@@ -11,8 +11,9 @@ permissions:
 
 jobs:
   bump:
-    # Skip the bot's own bump commit so it doesn't loop.
-    if: "!contains(github.event.head_commit.message, 'chore: bump version')"
+    # Skip the bot's own bump commit so it doesn't loop, and skip when the commit
+    # asks for a repo-only landing ([skip release]) — no version bump, no release.
+    if: "!contains(github.event.head_commit.message, 'chore: bump version') && !contains(github.event.head_commit.message, '[skip release]')"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
