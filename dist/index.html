@@ -27,6 +27,10 @@
     --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);   /* iOS drawer curve */
   }
   html,body{height:100%} body{margin:0; font-family:var(--font);}
+  /* Trim text to cap-height/baseline so the date header aligns by BASELINE (not
+     line-box) and the weekday/month gap matches Figma exactly. Matches Figma's
+     text-box-trim export; harmlessly ignored on engines that lack it. */
+  .tbt{ text-box-trim: trim-both; text-box-edge: cap alphabetic; }
   .ease-d{transition:transform .24s var(--ease-drawer), width .24s var(--ease-drawer)}
   /* keyboard-initiated drawer toggle is INSTANT (no transition) — §3.4 */
   .ease-d.no-anim{transition:none !important}
@@ -289,10 +293,10 @@
     <div class="divider h-px w-full bg-[#d9d9d9]"></div>
     <div class="flex items-end justify-between pl-8 pr-[26px] py-8">
       <div class="flex items-end gap-3">
-        <div id="dNum" class="chrome text-[62px] font-medium tracking-[-1.24px] leading-none">24</div>
+        <div id="dNum" class="tbt chrome text-[62px] font-medium tracking-[-1.24px] leading-none">24</div>
         <div class="flex flex-col items-start gap-3">
-          <div id="dWeekday" class="chrome text-[24px] font-medium tracking-[-0.48px] leading-none">Thursday</div>
-          <div id="dMonth" class="chrome text-[18px] text-black/60 tracking-[-0.36px] leading-none">November</div>
+          <div id="dWeekday" class="tbt chrome text-[24px] font-medium tracking-[-0.48px] leading-none">Thursday</div>
+          <div id="dMonth" class="tbt chrome text-[18px] text-black/60 tracking-[-0.36px] leading-none">November</div>
         </div>
       </div>
       <div id="dWeather" class="chrome shrink-0 grid place-items-center size-[50px]" aria-hidden="true"></div>
@@ -367,10 +371,10 @@
     <!-- date header: number · weekday/month · weather (Figma 17:72) -->
     <div class="shrink-0 flex items-end justify-between pl-8 pr-[26px] py-8">
       <div class="flex items-end gap-3">
-        <div id="mNum" class="text-[62px] font-medium tracking-[-1.24px] leading-none" style="color:var(--ink)">24</div>
+        <div id="mNum" class="tbt text-[62px] font-medium tracking-[-1.24px] leading-none" style="color:var(--ink)">24</div>
         <div class="flex flex-col items-start gap-3">
-          <div id="mWeekday" class="text-[24px] font-medium tracking-[-0.48px] leading-none" style="color:var(--ink)">Thursday</div>
-          <div id="mMonth" class="text-[18px] tracking-[-0.36px] leading-none" style="color:var(--ink-dim)">November</div>
+          <div id="mWeekday" class="tbt text-[24px] font-medium tracking-[-0.48px] leading-none" style="color:var(--ink)">Thursday</div>
+          <div id="mMonth" class="tbt text-[18px] tracking-[-0.36px] leading-none" style="color:var(--ink-dim)">November</div>
         </div>
       </div>
       <div id="mWeather" class="shrink-0 grid place-items-center size-[50px]" style="color:var(--ink)" aria-hidden="true"></div>
