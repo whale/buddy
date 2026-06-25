@@ -343,10 +343,6 @@
         </div>
         <button id="exportBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Export my done tasks</button>
         <button id="restartBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Restart Buddy <span class="text-black/30">· dev</span></button>
-        <button id="wxLocBtn" class="pressable w-full px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02] flex items-center justify-between gap-3 text-left">
-          <span>Improve weather location</span>
-          <span id="wxLocStatus" class="text-[15px] text-black/35 shrink-0"></span>
-        </button>
         <button id="updateBtn" class="pressable w-full px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02] flex items-center justify-between gap-3 text-left">
           <span class="flex items-center gap-2 min-w-0">
             <span id="updateGift" class="hidden shrink-0 text-[#15a34a]"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M20 11v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8"/><path d="M7.5 7a1 1 0 0 1 0-5A4.8 8 0 0 1 12 7a4.8 8 0 0 1 4.5-5 1 1 0 0 1 0 5"/><rect x="3" y="7" width="18" height="4" rx="1"/></svg></span>
@@ -541,7 +537,7 @@ function wxKey(code,isDay){
   if(code>=95) return 'cloud-lightning';
   return isDay?'cloud-sun':'cloud-moon';
 }
-const WX_CACHE='buddy.weather.v1', WX_LOCKEY='buddy.weather.loc';
+const WX_CACHE='buddy.weather.v1';
 function wxSvg(key){ const b=WX_ICONS[key]; return b ? '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+b+'</svg>' : ''; }
 function renderWeather(key){ const svg=wxSvg(key); const m=$('#mWeather'), d=$('#dWeather'); if(m) m.innerHTML=svg; if(d) d.innerHTML=svg; }
 function wxRead(k){ try{ return JSON.parse(localStorage.getItem(k)||'null'); }catch(_){ return null; } }
@@ -561,24 +557,12 @@ async function updateWeather(force){
   if(cache && cache.key) renderWeather(cache.key);                 // paint last-known instantly
   if(cache && !force && (Date.now()-cache.ts) < 3600000) return;   // fresh within the hour
   try{
-    const loc = wxRead(WX_LOCKEY) || await wxGeoIP();              // precise opt-in coords, else IP
+    const loc = await wxGeoIP();                                   // IP-based — follows you when you travel
     const w = await wxForecast(loc.lat, loc.lon);
     const key = wxKey(w.code, w.isDay);
     renderWeather(key);
     wxWrite(WX_CACHE, { ts:Date.now(), key, code:w.code, isDay:w.isDay });
   }catch(e){ T('weather: '+(e&&e.message)); }                      // silent — keep whatever is shown
-}
-// "Improve weather location": ask the OS for precise coords (macOS prompt via the
-// webview's geolocation). On grant, persist + refresh; on denial, stay on IP.
-function improveWeatherLocation(){
-  const st=$('#wxLocStatus');
-  if(!navigator.geolocation){ if(st) st.textContent='Not available'; return; }
-  if(st) st.textContent='Asking…';
-  navigator.geolocation.getCurrentPosition(
-    pos=>{ wxWrite(WX_LOCKEY,{ lat:pos.coords.latitude, lon:pos.coords.longitude }); if(st) st.textContent='Precise ✓'; updateWeather(true); },
-    err=>{ if(st) st.textContent=(err&&err.code===1)?'Denied — using approximate':'Unavailable'; },
-    { enableHighAccuracy:false, timeout:10000, maximumAge:600000 }
-  );
 }
 
 /* ====================================================================
@@ -1924,7 +1908,6 @@ let markUpdateAvailable = ()=>{};   // set below; called by the background auto-
     }catch(err){ set('idle','Check for Updates','check failed'); }
   });
 })();
-$('#wxLocBtn')?.addEventListener('click', e=>{ e.stopPropagation(); improveWeatherLocation(); });
 // Update banner: auto-check on launch; if a newer version exists, slide in a clear
 // banner with an Install button (the unmissable path, vs the Settings row).
 (function(){
@@ -2116,7 +2099,7 @@ window.__buddy = {
   generateSyncKey, deriveOwnerId, pairingPayload, parsePairingPayload,   // QR pairing core
   openDrawer, closeDrawer,
   showMorning, render,
-  renderWeather, wxKey, updateWeather, improveWeatherLocation,
+  renderWeather, wxKey, updateWeather,
   markUpdateAvailable:(v)=>markUpdateAvailable(v),
   restartFresh, fillFromRestartStash,
   restoreLastList, mostRecentRestorableRecord,
