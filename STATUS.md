@@ -1,9 +1,37 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-06-23. Current branch: `main`. Latest local commit: `8d227e7` (`chore: bump version [skip ci]`). Working tree has uncommitted session changes. Main app version: `0.2.31`. Public signed release status was not verified this session._
+_Last updated: 2026-06-25. Current branch: `main` (clean). Latest commit: `7b21ff9` (Merge PR #40). Released app version: **`0.2.37`** (signed + notarized + published)._
 
 Buddy is a shipped, public, self-updating macOS menu-bar focus app for ADHD.
 Repo: `github.com/whale/buddy`.
+
+## Session summary — 2026-06-25
+
+A long build session. Shipped **6 public releases** (0.2.32 → 0.2.37). The auto-release pipeline is now fully working end to end.
+
+### Completed & shipped (all on `main`, released in 0.2.37)
+- **Restart-to-fresh:** "Restart Buddy" stashes the current plan and shows a blank morning with a "Restore your last list" row.
+- **Fade+Drift motion (app-wide):** unified show/hide style (fade + small drift + slight scale, ease-out, `--t-drift` = .48s) on the drawer, morning leave, settings/history sheets, and update banner. Micro-interactions (row add, Donezo, crossfade, confetti) left as short ease-out fades. Started as a morning→drawer handoff animation, then unified per user pick of "Fade + Drift".
+- **Font → Geist** (self-hosted variable woff2, SIL OFL; Inter removed).
+- **Weather date header** (per Figma): number left, weekday/month stacked, weather icon right, 32/26/32 spacing, baseline-aligned via `.tbt` (text-box-trim). Live weather: IP (ipwho.is) → Open-Meteo (no key) → 13-icon **Lucide outline** set (`WX_ICONS`/`wxKey`), day/night aware, cached 1h, fails silently. Applied to morning + drawer headers.
+- **History:** store ~1 year (`pruneHistory`, RETENTION_DAYS=365), show a fixed **14-day** Done window for everyone (`HISTORY_DAYS=14`). Removed the per-user "days of history" slider.
+- **Settings:** "Give Buddy room" pin label (was "Reserve space when pinned"); done-task count beside Export (`#exportCount`); Quit/Restart as matching pill buttons; removed the green auto "Update available" indicator AND the manual "Check for Updates" (the banner is the only update path); removed "Improve weather location" (see below).
+- **Notch top padding:** window top inset `MENUBAR` const (currently **30pt**) so the drawer's top gap matches the bottom on notch Macs. Tuned by eye.
+- **Release workflow protocol:** "ship it" → public signed release; "just land it" → `[skip release]` in the commit skips bump+release (added to `.github/workflows/version-bump.yml`).
+
+### Verified this session
+- `pnpm ui:smoke` passes (incl. the hit-target audit, now skips `pointer-events:none`/`opacity:0`).
+- **v0.2.37 published** — signed, notarized, with DMG + `Buddy.app.tar.gz` + `latest.json` (version 0.2.37). The full auto-pipeline (version-bump → release-mac) works; `AUTO_RELEASE_MAC=true` and all 9 signing secrets present.
+- The in-app updater works end to end (user updated across multiple releases).
+- Browser-verified: header layout/baseline, weather-icon mapping (injected codes), settings layout, drawer drift states, export count, Done 14-day window.
+
+### Not verified / open
+- **Live weather fetch** (ipwho.is → Open-Meteo) only verified with *injected* weather codes — the real network fetch + correct local conditions need confirming in the running app. Fails silently if it doesn't work.
+- **Native feel** of Fade+Drift and the **30pt top padding** are eyeball estimates — confirm on-device; both are one-token/number tweaks (`--t-drift`, `MENUBAR`).
+- **Precise weather location** deferred: a Tauri/WKWebView app can't reach macOS location via `navigator.geolocation` (returns PERMISSION_DENIED with no prompt). Would need native CoreLocation (Rust) if revisited. IP-based already follows travel.
+
+### Gotcha worth remembering
+- **Apple notarization 403 "agreement missing/expired"** blocked two release builds. Apple periodically re-issues the Developer Program agreement; the account holder must re-accept at developer.apple.com/account, then re-run `gh workflow run release-mac.yml`. Not a code/credentials problem.
 
 
 ## Session summary — 2026-06-23
@@ -88,7 +116,7 @@ Repo: `github.com/whale/buddy`.
 - New recovery file path after PR #33:
   `~/Library/Application Support/fyi.whale.buddy/buddy-state.recovery.json`.
 - Auto-updater is wired to GitHub Releases via `RELEASE-UPDATER.md`.
-- `main` version is `0.2.31`; public signed release status was not verified in the 2026-06-23 session.
+- Released version is **`0.2.37`** (signed + notarized + published). Auto-release pipeline is live and verified.
 
 ### iOS companion
 - Main now includes the iOS parity work from PR #32.
@@ -100,23 +128,15 @@ Repo: `github.com/whale/buddy`.
 
 ## Next recommended milestone
 
-Commit the 2026-06-23 local fixes, then cut and verify a signed macOS release that includes the recovery, restore, red-toggle, and hit-target guardrail changes.
-
-Recommended release verification:
-1. Build signed/notarized Buddy from `main`.
-2. Seed `buddy-state.json` with a task list.
-3. Force a stale/empty same-day primary/cache condition.
-4. Relaunch the built app and confirm recovery restores the task list.
-5. Publish release artifacts and verify `/Applications/Buddy.app` updates past `0.2.21`.
+Confirm the 0.2.37 native polish on-device (Fade+Drift feel, 30pt top padding, real weather fetch). Tune the one token/number per item if needed and ship a follow-up. Then the app is in a solid resting state.
 
 ## Next likely work
-1. Review and commit the 2026-06-23 working tree changes after confirming the live app feels right.
-2. Cut the next signed Mac release from `main` (`0.2.31` or the next bumped version) using `RELEASE-UPDATER.md`.
-3. Before each install/release, run `pnpm ui:smoke` to catch interaction and hit-target regressions.
-4. Add GitHub release secrets and set `AUTO_RELEASE_MAC=true` so future main updates publish releases automatically.
-5. Review local branch `feat/sync-live` before doing more sync work.
-6. Continue QR pairing / user-facing sync setup after the recovery release is safely shipped.
-7. Later launch-page concept: use `https://joi.software/` as inspiration for Buddy’s launch page. Current reference notes: Joi positions itself as “The daily planner to keep distracted minds on track,” with a simple product-focused landing page, iOS download CTA, Apple ecosystem framing, and a calm timeline/calendar/to-do/habit story. Do not work on this now.
+1. **On-device confirm of 0.2.37:** does the weather icon show your real local conditions? Does the top gap match top/bottom? Does Fade+Drift feel right on each panel? Tune `MENUBAR` and `--t-drift` (in `dist/index.html`) if needed → ship.
+2. **Workflow reminder:** say "ship it" for a public release, "just land it" for repo-only (`[skip release]`). Releases are fully automatic on merge to `main`.
+3. Optional: decouple the Done view further or add an "always show everything" mode (currently fixed 14-day display, ~1yr storage).
+4. Optional: precise weather location via native CoreLocation (Rust) — only if IP location proves wrong (e.g. on VPN).
+5. Review local branch `feat/sync-live` before doing more sync work (unmerged live Supabase/iOS sync).
+6. Later launch-page concept: `https://joi.software/` as inspiration ("The daily planner to keep distracted minds on track" — simple product landing, iOS CTA, calm timeline/to-do/habit story). Not now.
 
 ## Useful commands
 

@@ -1,72 +1,59 @@
 # Buddy — Next Session Handoff
 
-_Last updated: 2026-06-23._
+_Last updated: 2026-06-25._
 
 ## Start here
 
-- Branch: `main`
-- Latest local commit: `8d227e7 chore: bump version [skip ci]`
-- Current app version: `0.2.31`
-- Working tree is intentionally dirty from the 2026-06-23 session. Review before committing.
-- Installed local app has been replaced with the fixed build at `/Applications/Buddy.app`.
+- Branch: `main` (clean, in sync with `origin/main`).
+- Latest commit: `7b21ff9 Merge pull request #40`.
+- Released app version: **`0.2.37`** (signed + notarized + published).
+- Working tree is clean. The auto-release pipeline is live: merging to `main` cuts a signed release automatically.
 
-## What just happened
+## What just happened (2026-06-25)
 
-A real Tuesday morning data-loss bug was reproduced from local files. The live installed app had saved Tuesday, June 23 as an empty day while Monday, June 22’s six tasks remained in history/recovery. The old running app also overwrote an initial manual repair.
+A large feature/polish session — shipped 0.2.32 → **0.2.37**. See STATUS.md for the full list. Highlights:
 
-Fixes made locally:
+- **Restart-to-fresh** ("Restore your last list"), **Fade+Drift** motion app-wide (`--t-drift`), **Geist** font, **weather date header** (IP → Open-Meteo → Lucide icons), **history** (store ~1yr / show fixed 14 days, slider removed), Settings cleanup ("Give Buddy room" pin label, Export count, Quit/Restart pills, removed Check-for-Updates), **notch top-padding** fix (`MENUBAR` const).
+- **Release pipeline proven:** `AUTO_RELEASE_MAC=true` + all 9 signing secrets present; merge-to-main auto-publishes. Workflow protocol: "ship it" = release, "just land it" = `[skip release]`.
+- **Apple gotcha:** notarization 403 "agreement missing/expired" blocked a build — account holder re-accepted the Developer Program agreement at developer.apple.com/account, then re-ran the workflow. Not a code problem.
 
-- Recovery merge now preserves an older live list as history when a newer different-day empty state wins live.
-- Empty, unplanned mornings can auto-restore yesterday’s unfinished list.
-- Empty today views can show a “Restore [weekday]’s list” row.
-- The user’s six tasks were restored into `~/Library/Application Support/fyi.whale.buddy/buddy-state.json` and `buddy-state.recovery.json`.
-- The settings reserve switch now uses deep Buddy red on the red panel instead of black.
-- Top icon hit targets were fixed: 44×44 minimum, SVGs no longer steal pointer hits, and smaller controls were brought up to target size.
-- `pnpm ui:smoke` was added and passes. It runs Buddy’s internal smoke test, including the new hit-target audit.
-- `Buddy-Old.app` was moved to Trash. If System Settings still lists “Buddy-Old” under Accessibility, remove the stale row manually with the minus button.
-- Later todo preserved: use `https://joi.software/` as a concept reference for Buddy’s launch page, not for now.
+## Needs on-device confirmation (the only open items)
+
+These are eyeball/feel estimates verified only in the browser — confirm in the running 0.2.37 app, each a one-token tweak:
+
+- **Live weather:** does the icon show your *actual* local conditions? (verified only with injected codes)
+- **Top padding:** `MENUBAR=30` in `dist/index.html` — does the top gap match the bottom?
+- **Fade+Drift feel:** `--t-drift` (.48s) — right amount of drift on each panel?
 
 ## Verified commands from this session
 
 ```bash
-pnpm ui:smoke
+pnpm ui:smoke   # passes (internal smoke + hit-target audit)
 ```
 
-Passed.
+Release pipeline (GitHub Actions) verified end to end: version-bump → release-mac → published v0.2.37 with DMG + Buddy.app.tar.gz + latest.json.
 
-Additional verified checks run during the session:
+## User-facing review instructions (for 0.2.37)
 
-- Playwright recovery/smoke test passed.
-- Playwright full sync test passed.
-- `pnpm build` produced the `.app` and `.dmg`, then failed only at updater signing because `TAURI_SIGNING_PRIVATE_KEY` is not set locally.
-
-Installed app check:
-
-```text
-/Applications/Buddy.app/Contents/MacOS/buddy
-```
-
-was verified running, and the restored six tasks remained in the state file after relaunch.
-
-## User-facing review instructions
-
-1. Open Buddy from the menu bar or right edge.
-2. Confirm the six restored tasks are visible and usable.
-3. In the red over-limit state, open Settings and confirm the reserve switch is deep red, not black.
-4. Click around the pin, calendar, and gear icons. Their hit areas should feel centered and reliable.
-5. If Accessibility still shows “Buddy-Old,” remove that stale row with the minus button.
+1. Quit Buddy from its Settings, reopen — the update banner appears; click **Install**.
+2. Open the calendar/history → **Done**: you should see ~2 weeks of completed tasks (not just 2 days).
+3. Open/close the **drawer**, hit **Buddy!/Skip** in the morning, open **Settings** — all should Fade+Drift (calm fade + slight drift).
+4. Check the date header **weather icon** — does it match your real local conditions?
+5. Check the **top gap** above the first panel matches the gap below the last one.
+6. Settings: confirm **"Give Buddy room"**, **Export · <count>**, **Quit/Restart** pills, and no "Check for Updates".
 
 ## Next 3–5 tasks
 
-1. Review the working tree and commit the 2026-06-23 fixes if everything feels good.
-2. Run `pnpm ui:smoke` before every future install/release.
-3. Configure release signing: set `TAURI_SIGNING_PRIVATE_KEY` and the GitHub release secrets in `RELEASE-UPDATER.md`.
-4. Cut a signed/notarized release so installed users get the recovery and hit-target fixes.
-5. After release, verify the in-app updater moves `/Applications/Buddy.app` to the new version.
+1. Get on-device feedback on 0.2.37 (weather, top padding, Fade+Drift feel). Tune `MENUBAR` and `--t-drift` in `dist/index.html` if needed, then "ship it".
+2. Confirm the real weather fetch works in the app (only injected-code tested).
+3. (Optional) Decouple Done view from the 14-day cap, or precise location via native CoreLocation — only if needed.
+4. Review local branch `feat/sync-live` before more sync work.
+5. Run `pnpm ui:smoke` before every change (it's the gate).
 
 ## Blockers / cautions
 
 - Do not edit `AGENTS.md` or `CLAUDE.md`; they are managed elsewhere.
 - Do not commit `.env`, private exports, app data files, or generated build artifacts.
-- `pnpm build` locally will keep failing at updater signing until `TAURI_SIGNING_PRIVATE_KEY` is available, even though the `.app` bundle is produced.
-- The current fixes are installed locally but not shipped publicly until a signed release is cut.
+- **Releases are automatic** on merge to `main` (`AUTO_RELEASE_MAC=true`). To land code WITHOUT a release, put `[skip release]` in the commit message.
+- If a release fails at notarization with a 403 "agreement" error, the account holder must re-accept Apple's Developer Program agreement, then re-run `gh workflow run release-mac.yml`.
+- Local `pnpm build` still fails at updater signing (no `TAURI_SIGNING_PRIVATE_KEY` locally) — that's expected; CI does the signed build.
