@@ -1,54 +1,72 @@
 # Buddy — Next Session Handoff
 
-_Last updated: 2026-06-22._
+_Last updated: 2026-06-23._
 
 ## Start here
 
 - Branch: `main`
-- Latest local/remote commit: `2127325 chore: bump version [skip ci]`
-- Current app version on `main`: `0.2.29`
-- Important merged PR: #33 — recovery-file protection for accidental empty-state overwrites.
-- New workflow: `.github/workflows/release-mac.yml` publishes Mac releases after version bumps once `AUTO_RELEASE_MAC=true` and signing secrets are configured.
+- Latest local commit: `8d227e7 chore: bump version [skip ci]`
+- Current app version: `0.2.31`
+- Working tree is intentionally dirty from the 2026-06-23 session. Review before committing.
+- Installed local app has been replaced with the fixed build at `/Applications/Buddy.app`.
 
 ## What just happened
 
-A user restart/update made the current task list appear lost. Investigation found the tasks still existed in both:
+A real Tuesday morning data-loss bug was reproduced from local files. The live installed app had saved Tuesday, June 23 as an empty day while Monday, June 22’s six tasks remained in history/recovery. The old running app also overwrote an initial manual repair.
 
-- `~/Library/Application Support/fyi.whale.buddy/buddy-state.json`
-- WebKit localStorage for `fyi.whale.buddy`
+Fixes made locally:
 
-PR #33 added a native recovery file and boot-time merge so an accidental empty same-day state should not permanently overwrite real task data.
+- Recovery merge now preserves an older live list as history when a newer different-day empty state wins live.
+- Empty, unplanned mornings can auto-restore yesterday’s unfinished list.
+- Empty today views can show a “Restore [weekday]’s list” row.
+- The user’s six tasks were restored into `~/Library/Application Support/fyi.whale.buddy/buddy-state.json` and `buddy-state.recovery.json`.
+- The settings reserve switch now uses deep Buddy red on the red panel instead of black.
+- Top icon hit targets were fixed: 44×44 minimum, SVGs no longer steal pointer hits, and smaller controls were brought up to target size.
+- `pnpm ui:smoke` was added and passes. It runs Buddy’s internal smoke test, including the new hit-target audit.
+- `Buddy-Old.app` was moved to Trash. If System Settings still lists “Buddy-Old” under Accessibility, remove the stale row manually with the minus button.
+- Later todo preserved: use `https://joi.software/` as a concept reference for Buddy’s launch page, not for now.
 
 ## Verified commands from this session
 
 ```bash
-cargo check
-node --check /private/tmp/buddy-app-script-main.js
+pnpm ui:smoke
 ```
 
-Both passed before PR #33 was merged.
+Passed.
+
+Additional verified checks run during the session:
+
+- Playwright recovery/smoke test passed.
+- Playwright full sync test passed.
+- `pnpm build` produced the `.app` and `.dmg`, then failed only at updater signing because `TAURI_SIGNING_PRIVATE_KEY` is not set locally.
+
+Installed app check:
+
+```text
+/Applications/Buddy.app/Contents/MacOS/buddy
+```
+
+was verified running, and the restored six tasks remained in the state file after relaunch.
 
 ## User-facing review instructions
 
-After cutting a new build, test this exact scenario:
-
-1. Install/open the new Buddy build.
-2. Confirm a non-empty today list is saved.
-3. Simulate or force a stale/empty same-day state in the primary store.
-4. Relaunch Buddy.
-5. Confirm today’s real list is restored from `buddy-state.recovery.json`.
-6. Confirm intentional delete/erase does not resurrect old tasks.
+1. Open Buddy from the menu bar or right edge.
+2. Confirm the six restored tasks are visible and usable.
+3. In the red over-limit state, open Settings and confirm the reserve switch is deep red, not black.
+4. Click around the pin, calendar, and gear icons. Their hit areas should feel centered and reliable.
+5. If Accessibility still shows “Buddy-Old,” remove that stale row with the minus button.
 
 ## Next 3–5 tasks
 
-1. Add the GitHub release secrets listed in `RELEASE-UPDATER.md`, then set `AUTO_RELEASE_MAC=true`.
-2. Run **Release Mac app** manually once, or merge a small update to trigger the version bump + release chain.
-3. Verify the in-app updater moves `/Applications/Buddy.app` beyond `0.2.21`.
-4. Run an on-device recovery simulation against the built app.
-5. Inspect local branch `feat/sync-live` before doing any more sync work; it contains unmerged live-sync progress.
+1. Review the working tree and commit the 2026-06-23 fixes if everything feels good.
+2. Run `pnpm ui:smoke` before every future install/release.
+3. Configure release signing: set `TAURI_SIGNING_PRIVATE_KEY` and the GitHub release secrets in `RELEASE-UPDATER.md`.
+4. Cut a signed/notarized release so installed users get the recovery and hit-target fixes.
+5. After release, verify the in-app updater moves `/Applications/Buddy.app` to the new version.
 
 ## Blockers / cautions
 
 - Do not edit `AGENTS.md` or `CLAUDE.md`; they are managed elsewhere.
-- Do not commit `.env`, private exports, or build artifacts.
-- The recovery fix is on `main`, but not shipped to installed users until a release is cut.
+- Do not commit `.env`, private exports, app data files, or generated build artifacts.
+- `pnpm build` locally will keep failing at updater signing until `TAURI_SIGNING_PRIVATE_KEY` is available, even though the `.app` bundle is produced.
+- The current fixes are installed locally but not shipped publicly until a signed release is cut.

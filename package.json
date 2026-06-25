@@ -8,7 +8,8 @@
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
-    "icons": "python3 src-tauri/gen-icons.py"
+    "icons": "python3 src-tauri/gen-icons.py",
+    "ui:smoke": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-ui-smoke.spec.js --reporter=line"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
