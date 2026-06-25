@@ -149,6 +149,11 @@
   #updateBanner.banner-in{ animation: banner-down .28s var(--ease-out) both; }
   @keyframes banner-down{ from{ opacity:0; transform:translateY(-8px); } to{ opacity:1; transform:none; } }
 
+  /* Morning → drawer handoff: clicking Buddy!/Skip fades the planner out and
+     shrinks it to 90% (linear, .5s, from centre) while the drawer slides in from
+     the right on its own ease-out curve, arriving just as the planner vanishes. */
+  #morning.morning-leaving{ transition: opacity .5s linear, transform .5s linear; opacity:0; transform:scale(.9); pointer-events:none; }
+
   /* Settings / history sheets: translateY(100%). enter ~220ms / exit ~180ms. */
   .sheet{ transition: transform .22s var(--ease-out); will-change:transform; }
   .sheet.closing{ transition: transform .18s var(--ease-out); }
@@ -207,6 +212,7 @@
     .donezo-leaving{ transition: opacity .12s ease; transform:none; opacity:0; }
     .stagger > *{ animation: rm-fade .14s ease both; animation-delay:0ms !important; }
     .hist-fade{ animation: rm-fade .16s ease both; }
+    #morning.morning-leaving{ transition: opacity .2s ease; transform:none; }   /* fade only, no shrink */
     @keyframes rm-fade{ from{opacity:0;} to{opacity:1;} }
   }
 </style>
@@ -1247,15 +1253,38 @@ function maybeAutoRestoreLastList(){
   if(state.today.date!==localDate() || state.today.morningDone || state.items.length) return false;
   return restoreLastList();
 }
-function buildRestoreRow(rec, texts, rowStyle, morning, first){
+// Shared restore-row chrome. Adaptive on red (RULE 1): label = --ink, count = --ink-dim.
+function buildRestoreRowEl(labelText, count, onClick, rowStyle, morning, first){
   const row=document.createElement('div');
   row.style.cssText=rowStyle;
   row.className='buddy-row addrow pressable row-neutral bd group relative flex items-center cursor-pointer overflow-hidden '+(first?'':'border-t border-[#d9d9d9]');
-  const label=(rec.weekday || DOW[new Date(rec.date+'T00:00:00').getDay()] || 'Last') + '’s list';
-  row.innerHTML='<div class="flex items-baseline justify-between gap-4 w-full"><span class="font-medium tracking-[-0.48px]" style="font-size:var(--fs);color:var(--ink)">Restore '+label+'</span><span class="shrink-0 tracking-[-0.28px]" style="font-size:'+(morning?'16px':'14px')+';color:var(--ink-dim)">'+texts.length+' task'+(texts.length===1?'':'s')+'</span></div>';
+  row.innerHTML='<div class="flex items-baseline justify-between gap-4 w-full"><span class="font-medium tracking-[-0.48px]" style="font-size:var(--fs);color:var(--ink)">'+labelText+'</span><span class="shrink-0 tracking-[-0.28px]" style="font-size:'+(morning?'16px':'14px')+';color:var(--ink-dim)">'+count+' task'+(count===1?'':'s')+'</span></div>';
   row.addEventListener('mousedown',e=>e.preventDefault());
-  row.addEventListener('click',()=>restoreLastList());
+  row.addEventListener('click',onClick);
   return row;
+}
+function buildRestoreRow(rec, texts, rowStyle, morning, first){
+  const label='Restore '+((rec.weekday || DOW[new Date(rec.date+'T00:00:00').getDay()] || 'Last') + '’s list');
+  return buildRestoreRowEl(label, texts.length, ()=>restoreLastList(), rowStyle, morning, first);
+}
+
+// Restart stash — "Restart Buddy" sets your current plan aside HERE (not into
+// history, so the real day-rollover stays clean) and drops you on the blank morning.
+// The empty-list restore row then offers it back; one click refills the planner.
+// In-memory only: a genuine app relaunch starts truly fresh.
+let restartStash=null;
+function restartFresh(){
+  const texts=state.items.filter(i=>i.state!=='done').map(i=>String(i.text||'').trim()).filter(Boolean);
+  restartStash = texts.length ? { texts } : null;
+  state.items=[];
+  state.today.morningDone=false;
+  save(); closeSettings(); showMorning();
+}
+function fillFromRestartStash(){
+  if(!restartStash || !restartStash.texts.length || activeCount()>=HARD_CAP) return;
+  const existing=new Set(state.items.map(i=>String(i.text||'').trim()).filter(Boolean));
+  restartStash.texts.forEach(t=>{ if(activeCount()<HARD_CAP && !existing.has(t)){ state.items.push(newItem(t)); existing.add(t); } });
+  render(); save();
 }
 
 // Renders the live task list into `wrap`. minRows pads empty "Add" rows so the
@@ -1315,12 +1344,20 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     wrap.appendChild(row);
   });
 
-  // Empty-day recovery: if yesterday's work was archived but the live list is
-  // empty, offer a plain restore row before the normal Add rows.
-  const restoreRec = state.items.length===0 ? mostRecentRestorableRecord() : null;
-  const restoreTexts = restoreRec ? restorableTexts(restoreRec) : [];
-  const showRestore = restoreTexts.length>0 && activeCount()<HARD_CAP;
-  if(showRestore) wrap.appendChild(buildRestoreRow(restoreRec, restoreTexts, rowStyle, morning, true));
+  // Empty-list restore row (before the Add rows). Prefer the just-restarted plan
+  // (the stash); otherwise offer the most recent archived day's unfinished work.
+  let showRestore=false, restoreRow=null;
+  if(state.items.length===0 && activeCount()<HARD_CAP){
+    if(restartStash && restartStash.texts.length){
+      restoreRow=buildRestoreRowEl('Restore your last list', restartStash.texts.length, ()=>fillFromRestartStash(), rowStyle, morning, true);
+      showRestore=true;
+    } else {
+      const restoreRec=mostRecentRestorableRecord();
+      const restoreTexts=restoreRec?restorableTexts(restoreRec):[];
+      if(restoreTexts.length){ restoreRow=buildRestoreRow(restoreRec, restoreTexts, rowStyle, morning, true); showRestore=true; }
+    }
+  }
+  if(showRestore) wrap.appendChild(restoreRow);
 
   // Empty "Add" rows — one in the drawer, padded to minRows in the morning. None
   // at the hard cap (full red — there is no 7th).
@@ -1539,14 +1576,31 @@ function toggleUndone(){
   }
   save(); render();
 }
-function showMorning(){ T('showMorning'); undoneAdded=false; undoneIds=[]; morning.classList.remove('hidden'); render(); nativeFit('full'); }
-// "Buddy!" — the plan is already live in state.items; commit the day, then show
-// the drawer for ~2s before it tucks to the edge.
-function buddyStart(){
-  T('buddy'); state.today.morningDone=true; save(); morning.classList.add('hidden'); render();
-  openDrawer(); setTimeout(()=>{ if(!state.pinned) closeDrawer(); }, 2000);
+function showMorning(){ T('showMorning'); undoneAdded=false; undoneIds=[]; morning.classList.remove('morning-leaving','hidden'); render(); nativeFit('full'); }
+// Morning → drawer handoff. The planner fades + shrinks out (~.5s linear) while the
+// drawer slides in from the right (its existing ease-out curve), arriving just as
+// the planner vanishes. Native: hold the window full-screen through the fade, then
+// shrink it to hug the drawer once the planner is hidden. `tuckMs` = how long the
+// drawer lingers before tucking to the edge (skipped when pinned).
+function leaveMorningToDrawer(tuckMs){
+  const reduce=reducedMotion();
+  const FADE=reduce?0:500, SLIDE_AT=reduce?0:250;
+  nativeFocus();
+  clearTimeout(closeTimer); clearTimeout(openTimer); clearTimeout(shrinkTimer);
+  if(!reduce) morning.classList.add('morning-leaving');
+  // Slide the drawer in over the still-full-screen window (no native resize yet).
+  setTimeout(()=>{ drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }, SLIDE_AT);
+  // Planner is gone → drop it, then shrink the window to the drawer (panel stays put).
+  setTimeout(()=>{
+    morning.classList.add('hidden'); morning.classList.remove('morning-leaving'); render();
+    if(NATIVE) nativeFit('drawer');
+    if(!state.pinned && tuckMs!=null) closeTimer=setTimeout(()=>{ if(!state.pinned) closeDrawer(); }, tuckMs);
+  }, FADE);
 }
-function skip(){ T('skip'); state.today.morningDone=true; save(); morning.classList.add('hidden'); render(); settleNative(); }
+// "Buddy!" — the plan is already live in state.items; commit the day, then hand off
+// to the drawer (lingers ~2s before tucking to the edge).
+function buddyStart(){ T('buddy'); state.today.morningDone=true; save(); leaveMorningToDrawer(2000); }
+function skip(){ T('skip'); state.today.morningDone=true; save(); leaveMorningToDrawer(1600); }
 $('#undoneBtn')?.addEventListener('click', e=>{ e.stopPropagation(); toggleUndone(); });
 $('#buddyBtn')?.addEventListener('click', e=>{ e.stopPropagation(); buddyStart(); });
 $('#devMorning').addEventListener('click',showMorning);
@@ -1747,7 +1801,7 @@ $('#exportBtn').addEventListener('click', e=>{ e.stopPropagation();
   }catch(err){ console.warn('[buddy] export failed', err); }
 });
 // dev: restart the app (reloads the webview)
-$('#restartBtn')?.addEventListener('click', e=>{ e.stopPropagation(); state.today.morningDone=false; save(); closeSettings(); showMorning(); });
+$('#restartBtn')?.addEventListener('click', e=>{ e.stopPropagation(); restartFresh(); });
 // Quit (native): ask the Rust shell to exit. Harmless no-op in the web demo.
 // (Uses window.__TAURI__ directly — the NATIVE const isn't defined this early.)
 $('#quitBtn')?.addEventListener('click', e=>{ e.stopPropagation();
@@ -1972,7 +2026,8 @@ window.__buddy = {
   syncOnce, makeFakeCASStore,                // sync step 5: CAS-on-client loop + reference store
   generateSyncKey, deriveOwnerId, pairingPayload, parsePairingPayload,   // QR pairing core
   openDrawer, closeDrawer,
-  showMorning,
+  showMorning, render,
+  restartFresh, fillFromRestartStash,
   restoreLastList, mostRecentRestorableRecord,
   hitTargetAudit,
   // Phase B hooks (confetti / settings / keyboard verification)
@@ -1994,6 +2049,7 @@ window.__buddy = {
     const R=[]; const ok=(name,cond,detail)=>R.push({name,pass:!!cond,detail:detail||''});
     const snap=JSON.parse(JSON.stringify({today:state.today,history:state.history,deferred:state.deferred,settings:state.settings,pinned:state.pinned,tombstones:state.tombstones,erasedAt:state.erasedAt}));
     const wasSup=saveSuppressed; saveSuppressed=true;
+    const stashSnap=restartStash; restartStash=null;   // hermetic: a prior Restart must not skew the restore-row test
     try{
       state.tombstones={};
       state.today={ date:localDate(), morningDone:true, items:[
@@ -2067,6 +2123,7 @@ window.__buddy = {
     }catch(e){ ok('ran without throwing', false, e&&e.message); }
     state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
     state.tombstones=snap.tombstones||{}; state.erasedAt=(typeof snap.erasedAt==='number')?snap.erasedAt:null;
+    restartStash=stashSnap;
     editingId=null; render(); saveSuppressed=wasSup;
     const failed=R.filter(r=>!r.pass);
     return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
