@@ -25,19 +25,21 @@
     --ease-out:    cubic-bezier(0.23, 1, 0.32, 1);   /* enter/exit, feedback */
     --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);  /* on-screen movement */
     --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);   /* iOS drawer curve */
+    --t-drift:     .48s;                             /* Fade+Drift panel show/hide duration */
   }
   html,body{height:100%} body{margin:0; font-family:var(--font);}
   /* Trim text to cap-height/baseline so the date header aligns by BASELINE (not
      line-box) and the weekday/month gap matches Figma exactly. Matches Figma's
      text-box-trim export; harmlessly ignored on engines that lack it. */
   .tbt{ text-box-trim: trim-both; text-box-edge: cap alphabetic; }
-  .ease-d{transition:transform .24s var(--ease-drawer), width .24s var(--ease-drawer), opacity .24s var(--ease-drawer)}
+  /* Fade + Drift — the app-wide show/hide style: fade + a small drift + a touch of
+     scale, on the ease-out (fast→slow) curve. Used by the drawer, morning, sheets
+     and update banner so every panel enters/leaves the same calm way. */
+  .ease-d{transition:transform var(--t-drift) var(--ease-out), width var(--t-drift) var(--ease-out), opacity var(--t-drift) var(--ease-out)}
   /* keyboard-initiated drawer toggle is INSTANT (no transition) — §3.4 */
   .ease-d.no-anim{transition:none !important}
-  /* Drawer show/hide: fade alongside the slide (the morning handoff idea) — fades
-     out as it tucks away, fades in as it reveals. Stays off-screen when hidden so
-     it's genuinely gone (no stray hit targets). */
-  #drawer.translate-x-full{ opacity:0; }
+  #drawer{ transform-origin:right center; }
+  #drawer.translate-x-full{ opacity:0; transform:translateX(22px) scale(.975); pointer-events:none; }
   .no-sb{scrollbar-width:none} .no-sb::-webkit-scrollbar{display:none}
   [contenteditable]:focus{outline:none}
   [contenteditable].empty:before{content:attr(data-ph);color:rgba(0,0,0,.2)}
@@ -152,19 +154,19 @@
      the content just cross-fades in so the task→Donezo swap isn't an abrupt pop. */
   .donezo-enter{ animation: donezo-in .3s var(--ease-out) both; }
   @keyframes donezo-in{ from{ opacity:.35; } to{ opacity:1; } }
-  #updateBanner.banner-in{ animation: banner-down .28s var(--ease-out) both; }
-  @keyframes banner-down{ from{ opacity:0; transform:translateY(-8px); } to{ opacity:1; transform:none; } }
+  /* Update banner: Fade+Drift in from the top. */
+  #updateBanner.banner-in{ animation: banner-down var(--t-drift) var(--ease-out) both; }
+  @keyframes banner-down{ from{ opacity:0; transform:translateY(-14px) scale(.985); } to{ opacity:1; transform:none; } }
 
-  /* Morning → drawer handoff: clicking Buddy!/Skip fades the planner out and
-     shrinks it to 90% (linear, .5s, from centre) while the drawer slides in from
-     the right on its own ease-out curve, arriving just as the planner vanishes. */
-  #morning.morning-leaving{ transition: opacity .5s linear, transform .5s linear; opacity:0; transform:scale(.9); pointer-events:none; }
+  /* Morning → drawer handoff: Buddy!/Skip Fade+Drift the planner out (fade + small
+     drift + slight scale, ease-out) while the drawer drifts in from the right. */
+  #morning.morning-leaving{ transition: opacity var(--t-drift) var(--ease-out), transform var(--t-drift) var(--ease-out); opacity:0; transform:translateX(22px) scale(.975); pointer-events:none; }
 
-  /* Settings / history sheets: translateY(100%). enter ~220ms / exit ~180ms. */
-  .sheet{ transition: transform .22s var(--ease-out); will-change:transform; }
-  .sheet.closing{ transition: transform .18s var(--ease-out); }
-  .sheet[data-open="false"]{ transform: translateY(100%); }
-  .sheet[data-open="true"]{ transform: translateY(0); }
+  /* Settings / history sheets: Fade+Drift up (fade + small rise + slight scale). */
+  .sheet{ transition: transform var(--t-drift) var(--ease-out), opacity var(--t-drift) var(--ease-out); will-change:transform,opacity; }
+  .sheet.closing{ transition: transform .34s var(--ease-out), opacity .34s var(--ease-out); }
+  .sheet[data-open="false"]{ transform: translateY(22px) scale(.99); opacity:0; }
+  .sheet[data-open="true"]{ transform: translateY(0) scale(1); opacity:1; }
 
   /* Last-7-days crossfade — blur-masked so it reads as ONE motion (§3.4).
      blur ≤ 4px (Safari cost). Crossfade, no bar-travel tween. */
@@ -337,7 +339,7 @@
         </div>
         <div class="border-b border-[#d9d9d9] px-8 py-5">
           <button id="reserveBtn" role="switch" aria-checked="false" class="pressable tap-target w-full flex items-center justify-between">
-            <span class="text-[18px] text-black/60 tracking-[-0.36px] text-left">Reserve space when pinned</span>
+            <span class="text-[18px] text-black/60 tracking-[-0.36px] text-left">Give Buddy room</span>
             <span id="reserveTrack" class="relative shrink-0 w-[44px] h-[26px] rounded-full bg-black/15 transition-colors">
               <span id="reserveKnob" class="absolute top-[3px] left-[3px] size-[20px] rounded-full bg-white shadow transition-transform"></span>
             </span>
@@ -2013,6 +2015,9 @@ function visibleInteractiveElements(){
   return [...document.querySelectorAll(sel)].filter(el=>{
     const r=el.getBoundingClientRect(), cs=getComputedStyle(el);
     if(r.width<=0 || r.height<=0 || cs.display==='none' || cs.visibility==='hidden' || el.disabled) return false;
+    // Skip truly non-interactive / invisible controls (e.g. the hidden drawer mid
+    // Fade+Drift: opacity 0 + pointer-events none — not a real hit target).
+    if(cs.pointerEvents==='none' || +cs.opacity===0) return false;
     if(r.right<0 || r.left>innerWidth || r.bottom<0 || r.top>innerHeight) return false;
     if(el.closest('[aria-hidden="true"]')) return false;
     return true;
