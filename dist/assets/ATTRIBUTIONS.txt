@@ -1,0 +1,20 @@
+Third-party open-source assets bundled in Buddy
+================================================
+
+Geist (font)
+  Files: assets/fonts/Geist-Variable.woff2
+  Author: Vercel
+  License: SIL Open Font License 1.1
+  https://github.com/vercel/geist-font
+
+Lucide (weather icons)
+  The weather glyphs in the date header are inlined SVG paths from Lucide.
+  (sun, moon, cloud, cloud-sun, cloud-moon, cloud-rain, cloud-drizzle,
+   cloud-snow, cloud-fog, cloud-lightning, cloud-hail, cloud-sun-rain,
+   cloud-moon-rain) plus the "gift" glyph in Settings.
+  License: ISC
+  https://github.com/lucide-icons/lucide
+
+Weather data
+  Open-Meteo (https://open-meteo.com) — free, no API key. CC BY 4.0.
+  Approximate location via ipwho.is (free, no key).
