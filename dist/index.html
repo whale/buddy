@@ -31,9 +31,13 @@
      line-box) and the weekday/month gap matches Figma exactly. Matches Figma's
      text-box-trim export; harmlessly ignored on engines that lack it. */
   .tbt{ text-box-trim: trim-both; text-box-edge: cap alphabetic; }
-  .ease-d{transition:transform .24s var(--ease-drawer), width .24s var(--ease-drawer)}
+  .ease-d{transition:transform .24s var(--ease-drawer), width .24s var(--ease-drawer), opacity .24s var(--ease-drawer)}
   /* keyboard-initiated drawer toggle is INSTANT (no transition) — §3.4 */
   .ease-d.no-anim{transition:none !important}
+  /* Drawer show/hide: fade alongside the slide (the morning handoff idea) — fades
+     out as it tucks away, fades in as it reveals. Stays off-screen when hidden so
+     it's genuinely gone (no stray hit targets). */
+  #drawer.translate-x-full{ opacity:0; }
   .no-sb{scrollbar-width:none} .no-sb::-webkit-scrollbar{display:none}
   [contenteditable]:focus{outline:none}
   [contenteditable].empty:before{content:attr(data-ph);color:rgba(0,0,0,.2)}
@@ -350,11 +354,10 @@
           <span id="updateLabel">Check for Updates</span>
           <span id="updateStatus" class="text-[15px] text-black/35 shrink-0"></span>
         </button>
-        <!-- Quit / Restart: compact pair at the bottom -->
+        <!-- Quit / Restart: matching pill buttons at the bottom -->
         <div class="flex items-center gap-3 px-8 py-5 border-b border-[#d9d9d9]">
-          <button id="quitBtn" class="pressable text-[16px] text-black/60 tracking-[-0.32px] hover:text-black/90">Quit Buddy</button>
-          <span class="text-black/20 select-none">/</span>
-          <button id="restartBtn" class="pressable text-[16px] text-black/45 tracking-[-0.32px] hover:text-black/75">Restart Buddy <span class="text-black/25 text-[13px]">dev</span></button>
+          <button id="quitBtn" class="pressable tap-target inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] hover:bg-black/[0.04]">Quit Buddy</button>
+          <button id="restartBtn" class="pressable tap-target inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] hover:bg-black/[0.04]">Restart Buddy</button>
         </div>
         <div class="px-8 pt-5 pb-7 text-[13px] text-black/30 tracking-[-0.26px]">Buddy <span id="appVersion">—</span></div>
       </div>
@@ -2477,10 +2480,10 @@ async function reportBug(){
 }
 const SLIVER=2;    // hidden width — just enough to keep the webview alive (no widget)
 const DRAWERW=452; // revealed/pinned window width — wider than the 416 drawer so the card's soft left (screen-facing) drop shadow has room to fade instead of being clipped by the window edge
-// Top inset to clear the menu bar so the window doesn't tuck under it (which ate the
-// drawer's top padding). 37pt covers notch MacBooks (taller menu bar); standard
-// displays get a touch more top breathing room, which is the desired look anyway.
-const MENUBAR=37;
+// Top inset so the window clears the menu bar AND leaves a small gap above the top
+// panel matching the drawer's 8px bottom padding. Tuned by eye (37 read as ~2x too
+// much); 30 gives roughly symmetric top/bottom breathing room.
+const MENUBAR=30;
 async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
   T('nativeFit('+mode+')');
   if(!NATIVE) return;
