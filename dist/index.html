@@ -344,10 +344,9 @@
           </button>
           <p class="mt-2 text-[13px] text-black/35 tracking-[-0.26px] leading-snug">Pushes other windows out of Buddy's column. Asks for Accessibility permission the first time.</p>
         </div>
-        <button id="exportBtn" class="pressable w-full text-left px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02]">Export my done tasks</button>
-        <button id="updateBtn" class="pressable w-full px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02] flex items-center justify-between gap-3 text-left">
-          <span id="updateLabel">Check for Updates</span>
-          <span id="updateStatus" class="text-[15px] text-black/35 shrink-0"></span>
+        <button id="exportBtn" class="pressable w-full px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02] flex items-center justify-between gap-3 text-left">
+          <span>Export my done tasks</span>
+          <span id="exportCount" class="text-[15px] text-black/35 shrink-0"></span>
         </button>
         <!-- Quit / Restart: matching pill buttons at the bottom -->
         <div class="flex items-center gap-3 px-8 py-5 border-b border-[#d9d9d9]">
@@ -1798,12 +1797,20 @@ function applyReserve(){
   if(!NATIVE) return;
   try{ window.__TAURI__.core.invoke('set_reserve', { on: !!(state.pinned && state.settings.reserveSpace) }); }catch(_){}
 }
+// Total completed tasks the Export will write (today + every archived day) — shown
+// to the right of the Export row.
+function doneCount(){
+  let n=state.items.filter(it=>it.state==='done').length;
+  (state.history||[]).forEach(d=>{ n+=(d.items||[]).filter(it=>it.done).length; });
+  return n;
+}
+function syncExportCount(){ const el=$('#exportCount'); if(el) el.textContent=String(doneCount()); }
 function openSettings(){
   settingsOpen=true;
   settingsSheet.classList.remove('closing');
   settingsSheet.setAttribute('data-open','true');
   settingsSheet.setAttribute('aria-hidden','false');
-  syncCelebrate(); syncReserve(); syncChrome();
+  syncCelebrate(); syncReserve(); syncExportCount(); syncChrome();
 }
 function closeSettings(){
   settingsOpen=false;
@@ -1866,33 +1873,8 @@ $('#quitBtn')?.addEventListener('click', e=>{ e.stopPropagation();
   try{ const t=window.__TAURI__; if(t&&t.core) v=await t.core.invoke('app_version'); }catch(_){}
   const el=$('#appVersion'); if(el) el.textContent='v'+v;
 })();
-// Check for Updates: first click checks; if one's found, the button becomes
-// "Install … & Relaunch" — a second click downloads, installs, and restarts
-// into the new version. All native (Rust commands); inert in the web demo.
-(function(){
-  const btn=$('#updateBtn'), label=$('#updateLabel'), status=$('#updateStatus');
-  if(!btn) return;
-  let mode='idle';   // idle | checking | available | working
-  function set(m, l, s){ mode=m; if(l!=null) label.textContent=l; status.textContent=s||''; }
-  btn.addEventListener('click', async e=>{
-    e.stopPropagation();
-    const t=window.__TAURI__;
-    if(!t||!t.core){ set('idle','Check for Updates','native only'); return; }
-    if(mode==='checking'||mode==='working') return;
-    if(mode==='available'){
-      set('working','Updating…','please wait');
-      try{ await t.core.invoke('install_update'); /* app relaunches on success */ }
-      catch(err){ set('idle','Check for Updates','update failed'); }
-      return;
-    }
-    set('checking','Checking…','');
-    try{
-      const ver=await t.core.invoke('check_for_update');
-      if(ver) set('available','Install v'+ver+' & Relaunch','ready');
-      else set('idle','Check for Updates','up to date ✓');
-    }catch(err){ set('idle','Check for Updates','check failed'); }
-  });
-})();
+// (Manual "Check for Updates" removed — the auto-check banner below is the only
+// update path; a manual check is redundant.)
 // Update banner: auto-check on launch; if a newer version exists, slide in a clear
 // banner with an Install button (the unmissable path, vs the Settings row).
 (function(){
