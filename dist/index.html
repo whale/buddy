@@ -89,9 +89,11 @@
 
   /* Header chrome icons (pin / calendar / settings): identical default, hover and
      selected looks, all driven by the variables above. */
-  .chrome-btn{ color:var(--chrome-ink); transition:color .2s ease, background-color .15s ease; }
+  .chrome-btn{ min-width:44px; min-height:44px; color:var(--chrome-ink); transition:color .2s ease, background-color .15s ease; }
+  .chrome-btn svg, .chrome-btn svg *{ pointer-events:none; }
   @media (hover:hover) and (pointer:fine){ .chrome-btn:hover{ background-color:var(--chrome-hover); } }
   .chrome-btn.sel, .chrome-btn.sel:hover{ background-color:var(--sel-bg); color:var(--sel-ink); }
+  .tap-target{ min-width:44px; min-height:44px; }
 
   /* Settings sheet adopts the state colours (red bg + light text) on red-bg. */
   #settings{ background:var(--card); transition:background-color .2s ease; }
@@ -234,7 +236,7 @@
 </div>
 
 <button id="devMorning"
-  class="fixed bottom-4 left-4 z-[60] text-[11px] text-black/50 hover:text-black/80 bg-white/70 backdrop-blur px-2.5 py-1 rounded-md border border-black/5">
+  class="tap-target fixed bottom-4 left-4 z-[60] text-[11px] text-black/50 hover:text-black/80 bg-white/70 backdrop-blur px-3 py-2 rounded-md border border-black/5">
   ↻ restart morning (dev)
 </button>
 
@@ -320,7 +322,7 @@
           <div class="flex items-center justify-between mt-2 text-[13px] text-black/35 tracking-[-0.26px]"><span>No days</span><span>14 days</span></div>
         </div>
         <div class="border-b border-[#d9d9d9] px-8 py-5">
-          <button id="reserveBtn" role="switch" aria-checked="false" class="pressable w-full flex items-center justify-between">
+          <button id="reserveBtn" role="switch" aria-checked="false" class="pressable tap-target w-full flex items-center justify-between">
             <span class="text-[18px] text-black/60 tracking-[-0.36px] text-left">Reserve space when pinned</span>
             <span id="reserveTrack" class="relative shrink-0 w-[44px] h-[26px] rounded-full bg-black/15 transition-colors">
               <span id="reserveKnob" class="absolute top-[3px] left-[3px] size-[20px] rounded-full bg-white shadow transition-transform"></span>
@@ -369,7 +371,7 @@
     </div>
     <!-- footer -->
     <div class="shrink-0 flex items-center justify-between px-3 pt-2">
-      <button id="skipToday" class="text-[16px] tracking-[-0.32px] transition-colors" style="color:var(--ink-dim)">Skip</button>
+      <button id="skipToday" class="tap-target -ml-3 px-3 text-[16px] tracking-[-0.32px] transition-colors" style="color:var(--ink-dim)">Skip</button>
       <button id="buddyBtn" class="pressable rounded-full px-7 py-3 text-[18px] font-medium" style="background:var(--sel-bg); color:var(--sel-ink)">Buddy!</button>
     </div>
   </div>
@@ -476,6 +478,7 @@ const UNDO='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="
 const EDIT_SM='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
 const SLEEP_SM='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/><path d="M8 2v4"/><path d="M16 2v4"/><path d="M9.5 16h5"/><path d="m12.5 14 2 2-2 2"/></svg>';
 const XLG='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+function muteIconPointerEvents(button){ button.querySelectorAll('svg, svg *').forEach(n=>{ n.style.pointerEvents='none'; }); return button; }
 // History button: the lucide calendar icon (replaces the day-count disc).
 const CAL='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>';
 function updateHistBtn(){
@@ -671,6 +674,14 @@ function mergeItems(primary, secondary, tombstones){
   }
   return out;
 }
+function todayToHistoryRecord(today){
+  if(!today || !today.date || !Array.isArray(today.items) || !today.items.length) return null;
+  const wd = DOW[new Date(today.date+'T00:00:00').getDay()];
+  return {
+    date: today.date, weekday: wd,
+    items: today.items.map((it,i)=>({ id:`h-${today.date}-${i}`, text:it.text, done: it.state==='done' })),
+  };
+}
 function mergeHistRecord(x, y){
   const items = new Map();
   for(const it of [...(x.items||[]), ...(y.items||[])]){
@@ -710,7 +721,7 @@ function merge(a, b){
   const older = newer===va ? vb : va;
   const tombstones = mergeTombstones(va.tombstones, vb.tombstones);
 
-  let today;
+  let today, carryHistory=[];
   if(va.today && vb.today && va.today.date === vb.today.date){
     today = {
       date: va.today.date,
@@ -718,12 +729,21 @@ function merge(a, b){
       items: mergeItems(newer.today.items, older.today.items, tombstones),
     };
   } else {
-    today = newer.today || older.today || null;   // different/missing days → newer day wins whole
+    today = newer.today || older.today || null;   // different/missing days → newer day wins live
+    // Lossless daily merge: if the older snapshot still has yesterday's live list,
+    // archive it instead of dropping it. This is the recovery path for an empty
+    // new-day save racing with the durable backup from the night before.
+    const liveDate = today && today.date;
+    const oldLive = older && older.today;
+    if(oldLive && oldLive.items && oldLive.items.length && oldLive.date && (!liveDate || oldLive.date < liveDate)){
+      const rec = todayToHistoryRecord(oldLive);
+      if(rec) carryHistory.push(rec);
+    }
   }
 
   return {
     today, hadToday: !!today,
-    history: mergeHistory(va.history, vb.history),
+    history: mergeHistory([...(va.history||[]), ...carryHistory], vb.history),
     deferred: mergeDeferred(va.deferred, vb.deferred, tombstones),
     settings: newer.settings,
     pinned: newer.pinned,
@@ -966,6 +986,7 @@ function lastNDays(n){
 
 /* ----------------------- sleep / defer to tomorrow --------------- */
 function tomorrowDate(){ const d=new Date(); d.setDate(d.getDate()+1); return localDate(d); }
+function yesterdayDate(){ const d=new Date(); d.setDate(d.getDate()-1); return localDate(d); }
 /* "Sleep till tomorrow": pull the task out of today and park it to return
    on the next day (handled by wakeDeferred at boot/rollover). */
 function sleepItem(id){
@@ -1159,6 +1180,7 @@ function render(){
   morning.classList.toggle('lvl2', lvl===2);
   edgeBar.classList.toggle('edge-alert', lvl>=1);   // escalation shows on the hidden tab too
   syncChrome();                                     // pin / calendar / settings selected states
+  if(settingsOpen) syncReserve();                  // reserve switch color follows red/normal theme live
   if(morningUp()){ renderToday(morningList, 3, true); renderMorningUndone(); }
 
   // FLIP: remember where each row was, so after the rebuild every row that moved
@@ -1192,6 +1214,49 @@ function render(){
   save();                                  // debounced persist after any mutation
 }
 function warnLevel(){ const n=activeCount(); return n>=HARD_CAP?2 : n===SOFT_CAP?1 : 0; }
+
+function mostRecentRestorableRecord(){
+  const today=localDate();
+  return (state.history||[])
+    .filter(rec=>rec && typeof rec.date==='string' && rec.date<today && Array.isArray(rec.items))
+    .sort((a,b)=> a.date<b.date ? 1 : a.date>b.date ? -1 : 0)
+    .find(rec=>rec.items.some(it=>it && !it.done && String(it.text||'').trim()));
+}
+function restorableTexts(rec=mostRecentRestorableRecord()){
+  return rec ? rec.items.filter(it=>it && !it.done).map(it=>String(it.text||'').trim()).filter(Boolean) : [];
+}
+function restoreLastList(){
+  const rec=mostRecentRestorableRecord();
+  const texts=restorableTexts(rec);
+  if(!texts.length || activeCount()>=HARD_CAP) return false;
+  const existing=new Set(state.items.map(i=>String(i.text||'').trim()).filter(Boolean));
+  let added=0;
+  texts.forEach(text=>{
+    if(activeCount()<HARD_CAP && !existing.has(text)){ state.items.push(newItem(text)); existing.add(text); added++; }
+  });
+  if(!added) return false;
+  T('restoreLastList '+(rec&&rec.date)+' added='+added);
+  render(); writeNow();
+  return true;
+}
+function maybeAutoRestoreLastList(){
+  // Only auto-fill an unplanned, empty morning from YESTERDAY. If the user already
+  // skipped/started the day, leave it alone and rely on the visible restore row.
+  const rec=mostRecentRestorableRecord();
+  if(!rec || rec.date!==yesterdayDate()) return false;
+  if(state.today.date!==localDate() || state.today.morningDone || state.items.length) return false;
+  return restoreLastList();
+}
+function buildRestoreRow(rec, texts, rowStyle, morning, first){
+  const row=document.createElement('div');
+  row.style.cssText=rowStyle;
+  row.className='buddy-row addrow pressable row-neutral bd group relative flex items-center cursor-pointer overflow-hidden '+(first?'':'border-t border-[#d9d9d9]');
+  const label=(rec.weekday || DOW[new Date(rec.date+'T00:00:00').getDay()] || 'Last') + '’s list';
+  row.innerHTML='<div class="flex items-baseline justify-between gap-4 w-full"><span class="font-medium tracking-[-0.48px]" style="font-size:var(--fs);color:var(--ink)">Restore '+label+'</span><span class="shrink-0 tracking-[-0.28px]" style="font-size:'+(morning?'16px':'14px')+';color:var(--ink-dim)">'+texts.length+' task'+(texts.length===1?'':'s')+'</span></div>';
+  row.addEventListener('mousedown',e=>e.preventDefault());
+  row.addEventListener('click',()=>restoreLastList());
+  return row;
+}
 
 // Renders the live task list into `wrap`. minRows pads empty "Add" rows so the
 // morning shows ≥3 slots; the drawer passes 1 (just one Add row). Same rows,
@@ -1238,7 +1303,7 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     acts.style.right=ICON_RIGHT;    // universal right padding (aligns with the sheet ✕)
     const mkBtn=(icon,title,fn)=>{ const b=document.createElement('button'); b.title=title;
       b.className='size-[30px] grid place-items-center rounded-full '+(onRed?'text-white hover:bg-white/20':'text-black/40 hover:bg-black/5');
-      b.innerHTML=icon;
+      b.innerHTML=icon; muteIconPointerEvents(b);
       b.addEventListener('mousedown',e=>e.preventDefault());
       b.addEventListener('click',e=>{ e.stopPropagation(); fn(); });
       return b; };
@@ -1250,11 +1315,19 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     wrap.appendChild(row);
   });
 
+  // Empty-day recovery: if yesterday's work was archived but the live list is
+  // empty, offer a plain restore row before the normal Add rows.
+  const restoreRec = state.items.length===0 ? mostRecentRestorableRecord() : null;
+  const restoreTexts = restoreRec ? restorableTexts(restoreRec) : [];
+  const showRestore = restoreTexts.length>0 && activeCount()<HARD_CAP;
+  if(showRestore) wrap.appendChild(buildRestoreRow(restoreRec, restoreTexts, rowStyle, morning, true));
+
   // Empty "Add" rows — one in the drawer, padded to minRows in the morning. None
   // at the hard cap (full red — there is no 7th).
-  const addRows = activeCount()<HARD_CAP ? Math.max(1, minRows-state.items.length) : 0;
+  const occupiedRows = state.items.length + (showRestore ? 1 : 0);
+  const addRows = activeCount()<HARD_CAP ? Math.max(1, minRows-occupiedRows) : 0;
   for(let k=0;k<addRows;k++){
-    const first = state.items.length===0 && k===0;
+    const first = state.items.length===0 && !showRestore && k===0;
     const add=document.createElement('div');
     add.style.cssText=rowStyle;
     const addRing = (k===0 && kbActive && cursor===state.items.length) ? ' cursor-ring' : '';
@@ -1293,7 +1366,7 @@ function buildDonezoRow(it, idx, morning){
   acts.style.right=ICON_RIGHT;
   const b=document.createElement('button'); b.title='Restore to list';
   b.className='size-[30px] grid place-items-center rounded-full hover:bg-black/10'; b.style.color='var(--ink-dim)';
-  b.innerHTML=UNDO;
+  b.innerHTML=UNDO; muteIconPointerEvents(b);
   b.addEventListener('mousedown',e=>e.preventDefault());
   b.addEventListener('click',e=>{ e.stopPropagation(); restoreItem(it.id); });
   acts.appendChild(b); row.appendChild(acts);
@@ -1338,7 +1411,7 @@ function renderPast(){
         const u=document.createElement('button'); u.title='Restore to list';
         u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full hover:bg-black/10 opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
         u.style.right=ICON_RIGHT;
-        u.innerHTML=UNDO;
+        u.innerHTML=UNDO; muteIconPointerEvents(u);
         u.addEventListener('mousedown',e=>e.preventDefault());
         u.addEventListener('click',()=>restoreItem(it.id));
         r.appendChild(u);
@@ -1369,7 +1442,7 @@ function renderFuture(){
       // Edit (left): inline-edit the future task's text.
       const edit=document.createElement('button'); edit.title='Edit';
       edit.className='chrome absolute right-9 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 opacity-0 group-hover/h:opacity-100 transition-opacity';
-      edit.innerHTML=EDIT_SM;
+      edit.innerHTML=EDIT_SM; muteIconPointerEvents(edit);
       edit.addEventListener('mousedown',e=>e.preventDefault());
       edit.addEventListener('click',()=>{ t.contentEditable='true'; t.focus();
         const sel=getSelection(); sel.selectAllChildren(t); sel.collapseToEnd(); });
@@ -1380,7 +1453,7 @@ function renderFuture(){
       // Delete (right): drop it so it won't come back.
       const del=document.createElement('button'); del.title='Delete — won’t come back';
       del.className='chrome absolute right-0 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 opacity-0 group-hover/h:opacity-100 transition-opacity';
-      del.innerHTML=XICON;
+      del.innerHTML=XICON; muteIconPointerEvents(del);
       del.addEventListener('mousedown',e=>e.preventDefault());
       del.addEventListener('click',()=>deleteDeferred(d.id));
       r.appendChild(del);
@@ -1599,7 +1672,10 @@ function syncReserve(){
   const on=!!state.settings.reserveSpace, t=$('#reserveTrack'), k=$('#reserveKnob'), b=$('#reserveBtn');
   if(!b) return;
   b.setAttribute('aria-checked', on?'true':'false');
-  t.style.backgroundColor = on ? '#000' : 'rgba(0,0,0,.15)';
+  // On a red warning panel, black reads like a foreign control. Use a deeper
+  // Buddy red so the switch still has contrast but belongs to the surface.
+  const onColor = warnLevel()===2 ? '#b92f34' : '#000';
+  t.style.backgroundColor = on ? onColor : (warnLevel()===2 ? 'rgba(255,255,255,.30)' : 'rgba(0,0,0,.15)');
   k.style.transform = on ? 'translateX(18px)' : 'translateX(0)';
 }
 function applyReserve(){
@@ -1839,6 +1915,36 @@ window.addEventListener('focus', liveRolloverCheck);
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') liveRolloverCheck(); });
 setInterval(liveRolloverCheck, 60000);
 
+function visibleInteractiveElements(){
+  const sel='button,a,input,[role="button"],[role="switch"]';
+  return [...document.querySelectorAll(sel)].filter(el=>{
+    const r=el.getBoundingClientRect(), cs=getComputedStyle(el);
+    if(r.width<=0 || r.height<=0 || cs.display==='none' || cs.visibility==='hidden' || el.disabled) return false;
+    if(r.right<0 || r.left>innerWidth || r.bottom<0 || r.top>innerHeight) return false;
+    if(el.closest('[aria-hidden="true"]')) return false;
+    return true;
+  });
+}
+function hitTargetAudit(){
+  const sel='button,a,input,[role="button"],[role="switch"]';
+  const issues=[];
+  visibleInteractiveElements().forEach(el=>{
+    if(el.id==='devMorning' && document.body.classList.contains('native')) return;
+    const r=el.getBoundingClientRect();
+    const label=el.id || el.getAttribute('title') || el.textContent.trim().replace(/\s+/g,' ').slice(0,40) || el.tagName;
+    if(el.tagName!=='INPUT' && (r.width<44 || r.height<44)) issues.push({ label, type:'small-target', width:Math.round(r.width), height:Math.round(r.height) });
+    const pts=[[r.left+r.width/2,r.top+r.height/2,'center'],[r.left+2,r.top+r.height/2,'left'],[r.right-2,r.top+r.height/2,'right'],[r.left+r.width/2,r.top+2,'top'],[r.left+r.width/2,r.bottom-2,'bottom']];
+    pts.forEach(([x,y,name])=>{
+      const hit=document.elementFromPoint(x,y);
+      const hitControl=hit && hit.closest ? hit.closest(sel) : null;
+      if(!(hit===el || el.contains(hit) || hitControl===el)){
+        issues.push({ label, type:'miss', point:name, hit: hit ? (hit.id || hit.tagName) : null, hitControl: hitControl ? (hitControl.id || hitControl.tagName) : null });
+      }
+    });
+  });
+  return { ok:issues.length===0, issues, count:visibleInteractiveElements().length };
+}
+
 /* ====================================================================
    TEST HOOK  — read / inject state without depending on hover timers.
    Used by the Playwright acceptance suite (§7).
@@ -1867,6 +1973,8 @@ window.__buddy = {
   generateSyncKey, deriveOwnerId, pairingPayload, parsePairingPayload,   // QR pairing core
   openDrawer, closeDrawer,
   showMorning,
+  restoreLastList, mostRecentRestorableRecord,
+  hitTargetAudit,
   // Phase B hooks (confetti / settings / keyboard verification)
   fireConfetti: ()=>fireConfetti(),
   openSettings: ()=>openSettings(),
@@ -1921,6 +2029,24 @@ window.__buddy = {
          'tombstones='+Object.keys(state.tombstones||{}).join(','));
       ok('rows do NOT reuse data-tid (FLIP collision guard)',
          ![...todayWrap.querySelectorAll('.buddy-row')].some(r=>r.dataset&&r.dataset.tid));
+      // Recovery: an empty morning should offer and perform "restore last list".
+      const yday=yesterdayDate();
+      state.today={date:localDate(),morningDone:false,items:[]};
+      state.history=[{date:yday,weekday:DOW[new Date(yday+'T00:00:00').getDay()],items:[{id:'hy0',text:'lost task',done:false},{id:'hy1',text:'done task',done:true}]}];
+      render();
+      ok('restore row appears when today is empty and yesterday has unfinished work',
+         !!todayWrap.textContent.includes('Restore') && !!todayWrap.textContent.includes('1 task'));
+      restoreLastList();
+      ok('restore last list brings back unfinished tasks only',
+         state.items.length===1 && state.items[0].text==='lost task');
+      // Hit targets: open the drawer/settings in an over-limit state and verify
+      // visible controls are large enough and edge clicks resolve to themselves.
+      state.today.items=[{id:'ha',text:'a',state:'neutral',v:1},{id:'hb',text:'b',state:'neutral',v:1},{id:'hc',text:'c',state:'neutral',v:1},{id:'hd',text:'d',state:'neutral',v:1},{id:'he',text:'e',state:'neutral',v:1},{id:'hf',text:'f',state:'neutral',v:1}];
+      state.pinned=true; settingsOpen=true; morning.classList.add('hidden'); render(); openSettings();
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+      const ht=hitTargetAudit();
+      ok('hit targets: visible controls have aligned clickable areas', ht.ok, JSON.stringify(ht.issues));
+      settingsOpen=false; closeSettings();
       // Escalation legibility: at lvl2 (red bg) the done/Donezo text MUST adapt to
       // light via --ink-dim, not stay dark. Catches hardcoded text-black on red.
       const dn=Date.now()-5000;
@@ -2032,15 +2158,18 @@ window.__buddy = {
          m11.today.items.length===1 && m11.today.items[0].id==='safe',
          'items='+ids(m11));
 
-      // 12. But a new-day rollover should stay empty if there is no carry-over.
-      // This prevents the recovery file from dragging yesterday's list back into
-      // a genuinely fresh day.
+      // 12. A different-day empty live state should stay empty LIVE, but the
+      // older live list must be preserved as history so it can be restored.
       const m12=merge(
         snap({savedAt:3000,today:{date:'2026-06-23',morningDone:false,items:[]}}),
         snap({savedAt:2000,today:{date:'2026-06-22',morningDone:true,items:[item('y','yesterday','neutral',1)]}}));
-      ok('different-day empty state does not resurrect yesterday',
+      const h12=m12.history.find(d=>d.date==='2026-06-22');
+      ok('different-day empty state does not resurrect yesterday live',
          m12.today.date==='2026-06-23' && m12.today.items.length===0,
          'date='+m12.today.date+' items='+ids(m12));
+      ok('different-day merge preserves older live list in history for restore',
+         h12 && h12.items.length===1 && h12.items[0].text==='yesterday' && h12.items[0].done===false,
+         'history='+JSON.stringify(m12.history));
     }catch(e){ ok('mergeTest ran without throwing', false, e&&e.message); }
     const failed=R.filter(r=>!r.pass);
     return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
@@ -2262,13 +2391,15 @@ function bootFinish(recovered){
   if(rolled){
     // Hybrid carry-over: if we just archived yesterday, pre-fill today's planner
     // with its UNFINISHED tasks so your working set is never silently dropped on a
-    // new day — you trim down to your three. (Fixes the "my tasks vanished" feel.)
+    // new day. Keep up to the hard cap, then you trim down to your three.
     if(state.history.length>histBefore){
-      state.history[0].items.filter(it=>!it.done).slice(0,SOFT_CAP).forEach(it=>{
+      state.history[0].items.filter(it=>!it.done).slice(0,HARD_CAP).forEach(it=>{
         if(activeCount()<HARD_CAP) state.items.push(newItem(it.text));
       });
     }
     writeNow();                              // commit the rollover + carry-over SYNCHRONOUSLY (no debounce gap)
+  } else {
+    maybeAutoRestoreLastList();              // heals an empty new-day save using yesterday's archived list
   }
   wakeDeferred();                            // bring back any tasks slept till today
   if(!bootHadStored && !recovered) seedDemoHistory();   // demo seed ONLY on a genuine first run
