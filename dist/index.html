@@ -2477,6 +2477,10 @@ async function reportBug(){
 }
 const SLIVER=2;    // hidden width — just enough to keep the webview alive (no widget)
 const DRAWERW=452; // revealed/pinned window width — wider than the 416 drawer so the card's soft left (screen-facing) drop shadow has room to fade instead of being clipped by the window edge
+// Top inset to clear the menu bar so the window doesn't tuck under it (which ate the
+// drawer's top padding). 37pt covers notch MacBooks (taller menu bar); standard
+// displays get a touch more top breathing room, which is the desired look anyway.
+const MENUBAR=37;
 async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
   T('nativeFit('+mode+')');
   if(!NATIVE) return;
@@ -2485,7 +2489,7 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
     const win=W.getCurrentWindow(), mon=await W.currentMonitor();
     if(!mon || !D.PhysicalSize || !D.PhysicalPosition) return;
     const sz=mon.size, p=mon.position, sf=mon.scaleFactor;
-    const top=Math.round(25*sf);          // sit below the menu bar (≈25pt)
+    const top=Math.round(MENUBAR*sf);     // clear the menu bar so the top panel gets the same breathing room as the bottom
     const h=sz.height - top;
     if(mode==='full'){
       await win.setSize(new D.PhysicalSize(sz.width, h));
