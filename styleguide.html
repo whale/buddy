@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buddy — Style Guide</title>
+<style>
+  /* ---- Mirror Buddy's foundations (dist/index.html) ---- */
+  @font-face{font-family:'Geist';font-weight:100 900;font-style:normal;font-display:swap;src:url('dist/assets/fonts/Geist-Variable.woff2') format('woff2');}
+  :root{
+    --font:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --red:#e5484d;
+    --ease-out:cubic-bezier(0.23,1,0.32,1);
+    /* lvl0 tokens (the default escalation state) */
+    --card:#fff; --ink:#000; --ink-dim:rgba(0,0,0,.45);
+    --chrome-ink:rgba(0,0,0,.45); --chrome-hover:rgba(0,0,0,.06);
+    --sel-bg:#000; --sel-ink:#fff; --line:#d9d9d9;
+    /* style-guide page chrome */
+    --bg:#f4f4f5; --panel:#fff; --muted:#6b7280; --hair:#e5e7eb; --accent:#111;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--font);background:var(--bg);color:#111;-webkit-font-smoothing:antialiased;line-height:1.5;}
+  /* layout: sticky left nav + content (best-practice styleguide shell) */
+  .wrap{display:grid;grid-template-columns:230px 1fr;gap:0;max-width:1180px;margin:0 auto;}
+  nav{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:32px 20px;border-right:1px solid var(--hair);}
+  nav h1{font-size:18px;letter-spacing:-.4px;margin:0 0 4px}
+  nav .sub{font-size:12px;color:var(--muted);margin-bottom:20px}
+  nav a{display:block;padding:5px 10px;border-radius:7px;color:#374151;text-decoration:none;font-size:13.5px;letter-spacing:-.2px}
+  nav a:hover{background:#ececee}
+  main{padding:48px 56px;min-width:0}
+  section{margin:0 0 64px;scroll-margin-top:24px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:600;margin:0 0 4px}
+  h3{font-size:24px;letter-spacing:-.5px;margin:2px 0 6px}
+  .lede{color:var(--muted);font-size:14.5px;max-width:62ch;margin:0 0 22px}
+  .grid{display:grid;gap:14px}
+  .cols-3{grid-template-columns:repeat(3,1fr)}
+  .cols-2{grid-template-columns:repeat(2,1fr)}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:14px;padding:18px}
+  .label{font-size:12px;color:var(--muted);letter-spacing:-.1px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;background:#eceef1;padding:1px 6px;border-radius:5px}
+  /* swatches */
+  .swatch{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--hair)}
+  .swatch:first-child{border-top:0}
+  .chip{width:40px;height:40px;border-radius:9px;border:1px solid rgba(0,0,0,.08);flex:none}
+  .chip.ck{background-image:linear-gradient(45deg,#ddd 25%,transparent 25%),linear-gradient(-45deg,#ddd 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#ddd 75%),linear-gradient(-45deg,transparent 75%,#ddd 75%);background-size:10px 10px;background-position:0 0,0 5px,5px -5px,-5px 0}
+  .swatch .meta{min-width:0}
+  .swatch .nm{font-size:13.5px;font-weight:500;letter-spacing:-.2px}
+  .swatch .val{font-size:12px;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:9px 10px;border-top:1px solid var(--hair);vertical-align:top}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;border-top:0}
+  /* ===== live Buddy surface previews ===== */
+  .surface{border-radius:18px;overflow:hidden;border:1px solid rgba(0,0,0,.06)}
+  .surface.lvl0{background:#fff}
+  .surface.lvl1{background:#fff}
+  .surface.lvl2{background:var(--red)}
+  .surface.lvl1{--chrome-ink:var(--red);--sel-bg:var(--red);--sel-ink:#fff}
+  .surface.lvl2{--card:var(--red);--ink:#fff;--ink-dim:rgba(255,255,255,.6);--chrome-ink:#fff;--sel-bg:#fff;--sel-ink:var(--red);--line:rgba(255,255,255,.30)}
+  .b-row{padding:16px 20px;border-top:1px solid var(--line)}
+  .b-row:first-child{border-top:0}
+  .b-title{font-size:18px;font-weight:500;letter-spacing:-.48px}
+  .b-row.neutral .b-title{color:var(--ink)}
+  .b-row.focused{background:#f4f4f4}
+  .surface.lvl2 .b-row.focused{background-image:linear-gradient(rgba(0,0,0,.15),rgba(0,0,0,.15))}
+  .b-row.focused .b-title{color:var(--ink)}
+  .b-done{display:flex;gap:8px;align-items:baseline;padding:16px 20px;border-top:1px solid var(--line)}
+  .b-done .tag{font-weight:600;letter-spacing:-.3px;font-size:15px;color:var(--ink)}
+  .b-done .ttl{font-size:15px;color:var(--ink-dim);text-decoration:line-through}
+  .stateflag{font-size:18px;font-weight:500;letter-spacing:-.48px}
+  .stateflag.lvl1c{color:var(--red)}
+  /* buttons mirrored */
+  .pill{border:0;border-radius:9999px;padding:12px 28px;font:500 18px var(--font);background:var(--sel-bg);color:var(--sel-ink);cursor:pointer}
+  .skip{border:0;background:none;font:400 16px var(--font);color:var(--ink-dim);cursor:pointer;letter-spacing:-.32px;padding:8px 12px}
+  .loadmore{border:0;background:none;width:100%;padding:14px;font:400 15px var(--font);color:var(--ink-dim);border-top:1px solid var(--line);cursor:pointer}
+  .seg{display:inline-flex;background:rgba(0,0,0,.05);border-radius:9999px;padding:3px}
+  .seg b{padding:7px 18px;border-radius:9999px;font:500 14px var(--font);color:var(--ink-dim)}
+  .seg b.on{background:#fff;color:#111}
+  .note{font-size:12.5px;color:var(--muted);margin-top:8px}
+  /* discrepancy panel */
+  .sev{display:inline-block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;padding:2px 7px;border-radius:999px;color:#fff}
+  .sev.fixed{background:#16a34a}.sev.low{background:#9ca3af}.sev.med{background:#d97706}
+  .disc{border:1px solid var(--hair);border-radius:12px;overflow:hidden}
+  .disc table{font-size:13px}
+  .pillrow{display:flex;flex-wrap:wrap;gap:8px}
+  .wordchip{font:600 13px var(--font);background:#111;color:#fff;padding:5px 11px;border-radius:8px;letter-spacing:-.2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h1>Buddy</h1>
+  <div class="sub">Style Guide · v0.2.x</div>
+  <a href="#overview">Overview</a>
+  <a href="#color">Color &amp; escalation</a>
+  <a href="#type">Typography</a>
+  <a href="#space">Spacing &amp; radius</a>
+  <a href="#motion">Motion</a>
+  <a href="#icons">Icons</a>
+  <a href="#buttons">Buttons</a>
+  <a href="#rows">Task rows</a>
+  <a href="#done">Done &amp; rotation</a>
+  <a href="#states">State matrix</a>
+  <a href="#disc">Discrepancies</a>
+</nav>
+<main>
+
+  <section id="overview">
+    <h2>Overview</h2>
+    <h3>One system, three pressure levels</h3>
+    <p class="lede">Buddy re-themes itself by <b>active task count</b>, entirely through CSS custom properties.
+      Every surface reads from tokens so it adapts automatically. The cardinal rule: never hardcode an
+      adaptive color — bind it to a token. This guide is the visual mirror of that system and flags where the
+      code drifts from it.</p>
+    <div class="grid cols-3">
+      <div class="card"><div class="label">lvl0 — normal</div><div style="margin-top:8px;font-size:14px">≤4 active · black on white</div></div>
+      <div class="card"><div class="label">lvl1 — warning</div><div style="margin-top:8px;font-size:14px">5 active · text turns <span style="color:#e5484d">red</span></div></div>
+      <div class="card" style="background:#e5484d;color:#fff;border-color:#e5484d"><div class="label" style="color:rgba(255,255,255,.7)">lvl2 — full</div><div style="margin-top:8px;font-size:14px">6 active · whole drawer red, text light</div></div>
+    </div>
+  </section>
+
+  <section id="color">
+    <h2>Foundations</h2>
+    <h3>Color &amp; escalation tokens</h3>
+    <p class="lede">The same token name resolves to a different value per level. Bind to the token, not the value.</p>
+    <div class="grid cols-3">
+      <div class="card">
+        <div class="label" style="margin-bottom:8px">lvl0 (white)</div>
+        <div class="swatch"><span class="chip" style="background:#000"></span><div class="meta"><div class="nm">--ink</div><div class="val">#000</div></div></div>
+        <div class="swatch"><span class="chip" style="background:rgba(0,0,0,.45)"></span><div class="meta"><div class="nm">--ink-dim</div><div class="val">rgba(0,0,0,.45)</div></div></div>
+        <div class="swatch"><span class="chip" style="background:#000"></span><div class="meta"><div class="nm">--sel-bg / ink</div><div class="val">#000 / #fff</div></div></div>
+        <div class="swatch"><span class="chip" style="background:#d9d9d9"></span><div class="meta"><div class="nm">--line</div><div class="val">#d9d9d9</div></div></div>
+      </div>
+      <div class="card">
+        <div class="label" style="margin-bottom:8px">lvl1 (warning)</div>
+        <div class="swatch"><span class="chip" style="background:#000"></span><div class="meta"><div class="nm">--ink</div><div class="val">#000 (unchanged)</div></div></div>
+        <div class="swatch"><span class="chip" style="background:#e5484d"></span><div class="meta"><div class="nm">--chrome-ink</div><div class="val">var(--red)</div></div></div>
+        <div class="swatch"><span class="chip" style="background:#e5484d"></span><div class="meta"><div class="nm">--sel-bg / ink</div><div class="val">red / #fff</div></div></div>
+      </div>
+      <div class="card" style="background:#e5484d;border-color:#e5484d;color:#fff">
+        <div class="label" style="margin-bottom:8px;color:rgba(255,255,255,.75)">lvl2 (red)</div>
+        <div class="swatch" style="border-color:rgba(255,255,255,.2)"><span class="chip" style="background:#fff"></span><div class="meta"><div class="nm">--ink</div><div class="val" style="color:rgba(255,255,255,.7)">#fff</div></div></div>
+        <div class="swatch" style="border-color:rgba(255,255,255,.2)"><span class="chip" style="background:rgba(255,255,255,.6)"></span><div class="meta"><div class="nm">--ink-dim</div><div class="val" style="color:rgba(255,255,255,.7)">rgba(255,255,255,.6)</div></div></div>
+        <div class="swatch" style="border-color:rgba(255,255,255,.2)"><span class="chip" style="background:#fff"></span><div class="meta"><div class="nm">--sel-bg / ink</div><div class="val" style="color:rgba(255,255,255,.7)">#fff / red</div></div></div>
+        <div class="swatch" style="border-color:rgba(255,255,255,.2)"><span class="chip" style="background:rgba(255,255,255,.3)"></span><div class="meta"><div class="nm">--line</div><div class="val" style="color:rgba(255,255,255,.7)">rgba(255,255,255,.30)</div></div></div>
+      </div>
+    </div>
+    <p class="note">Brand red <code>--red: #e5484d</code>. Adaptation hooks (classes that flip at lvl2):
+      <code>.bcard</code> <code>.divider</code> <code>.bd</code> <code>.chrome</code> <code>.buddy-row</code> <code>.todaybadge</code>.</p>
+  </section>
+
+  <section id="type">
+    <h3>Typography</h3>
+    <p class="lede">One typeface: <b>Geist</b> (variable, bundled). Tight tracking throughout (negative letter-spacing scales with size).</p>
+    <div class="card">
+      <div style="font-size:62px;font-weight:500;letter-spacing:-1.24px;line-height:1">26</div>
+      <div class="label" style="margin:4px 0 16px">Date numeral · 62px / 500 / -1.24px</div>
+      <div style="font-size:24px;font-weight:500;letter-spacing:-.48px">Friday — weekday · 24px / 500</div>
+      <div style="font-size:18px;font-weight:500;letter-spacing:-.48px;margin-top:10px">Task title · 18px / 500 / -.48px</div>
+      <div style="font-size:18px;letter-spacing:-.36px;margin-top:10px">Day header &amp; settings label · 18px / 400 / -.36px</div>
+      <div style="font-size:16px;letter-spacing:-.32px;margin-top:10px">Morning action (Skip) · 16px / 400</div>
+      <div style="font-size:15px;letter-spacing:-.3px;margin-top:10px">Done word &amp; secondary · 15px / 600–400</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:10px">Settings sub-text · 13px / 400</div>
+    </div>
+  </section>
+
+  <section id="space">
+    <h3>Spacing &amp; radius</h3>
+    <div class="grid cols-2">
+      <div class="card">
+        <div class="label" style="margin-bottom:10px">Radii</div>
+        <div style="display:flex;gap:14px;align-items:flex-end">
+          <div><div style="width:64px;height:48px;background:#111;border-radius:24px"></div><div class="note">cards · 24px</div></div>
+          <div><div style="width:64px;height:48px;background:#111;border-radius:9999px"></div><div class="note">pills/buttons · full</div></div>
+          <div><div style="width:64px;height:48px;background:#111;border-radius:9px"></div><div class="note">small · ~9px</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="label" style="margin-bottom:10px">Row rhythm</div>
+        <div class="note">Task rows: 16px vertical (18px in the morning). Section blocks: <code>px-8 py-5</code> (32 / 20). Action targets: 30–44px hit area.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="motion">
+    <h3>Motion</h3>
+    <div class="card">
+      <table>
+        <tr><th>Token</th><th>Value</th><th>Use</th></tr>
+        <tr><td><code>--ease-out</code></td><td>cubic-bezier(.23,1,.32,1)</td><td>enter/exit, feedback</td></tr>
+        <tr><td><code>--ease-in-out</code></td><td>cubic-bezier(.77,0,.175,1)</td><td>on-screen movement</td></tr>
+        <tr><td><code>--ease-drawer</code></td><td>cubic-bezier(.32,.72,0,1)</td><td>iOS-style drawer</td></tr>
+        <tr><td><code>--t-drift</code></td><td>.48s</td><td>panel show/hide (Fade+Drift)</td></tr>
+        <tr><td>hover/color</td><td>.15s–.2s ease</td><td>state transitions</td></tr>
+      </table>
+      <p class="note">Respects <code>prefers-reduced-motion</code> (live via matchMedia).</p>
+    </div>
+  </section>
+
+  <section id="icons">
+    <h3>Icons</h3>
+    <p class="lede">Lucide-style line icons, <code>currentColor</code> (so they inherit token color). <b>Stroke width is currently inconsistent</b> — see discrepancies.</p>
+    <div class="card" style="display:flex;gap:28px;align-items:center;color:#111">
+      <div style="text-align:center"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg><div class="note">+ · 2.2</div></div>
+      <div style="text-align:center"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg><div class="note">calendar · 2.0</div></div>
+      <div style="text-align:center"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg><div class="note">restore ↩ · 2.2</div></div>
+      <div style="text-align:center"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg><div class="note">weather · 1.4</div></div>
+    </div>
+  </section>
+
+  <section id="buttons">
+    <h2>Elements</h2>
+    <h3>Buttons</h3>
+    <p class="lede">Primary CTA (Buddy!) is a filled pill from <code>--sel-bg/--sel-ink</code>. Hover <b>darkens</b> on light/colored surfaces, only lightening the pure-black lvl0 pill. Skip is a dim-ink text button that brightens to full ink on hover.</p>
+    <div class="grid cols-3">
+      <div class="card surface lvl0" style="padding:22px;display:flex;gap:14px;align-items:center;justify-content:center"><button class="skip">Skip</button><button class="pill">Buddy!</button></div>
+      <div class="card surface lvl1" style="padding:22px;display:flex;gap:14px;align-items:center;justify-content:center"><button class="skip">Skip</button><button class="pill">Buddy!</button></div>
+      <div class="card surface lvl2" style="padding:22px;display:flex;gap:14px;align-items:center;justify-content:center"><button class="skip">Skip</button><button class="pill">Buddy!</button></div>
+    </div>
+    <div class="grid cols-2" style="margin-top:14px">
+      <div class="card"><div class="label" style="margin-bottom:10px">Segmented toggle (Future / Done)</div><div class="seg"><b>Future</b><b class="on">Done</b></div></div>
+      <div class="card"><div class="label" style="margin-bottom:10px">Load more</div><div style="border:1px solid var(--hair);border-radius:10px"><button class="loadmore" style="--ink-dim:rgba(0,0,0,.45);--line:#d9d9d9">Load more</button></div></div>
+    </div>
+  </section>
+
+  <section id="rows">
+    <h2>Components</h2>
+    <h3>Task rows — neutral · focused · done</h3>
+    <p class="lede">Active task text is the deliberate exception to the token rule: it uses escalation color directly (black → <span style="color:#e5484d">red</span> → white). The "now"/focused row gets a subtle grey (a darkening overlay on red).</p>
+    <div class="grid cols-3">
+      <div class="surface lvl0">
+        <div class="b-row neutral"><div class="b-title">Experts page</div></div>
+        <div class="b-row focused"><div class="b-title">Plan for Q3 Design</div></div>
+        <div class="b-done"><span class="tag">Sorted!</span><span class="ttl">Warren Logo</span></div>
+      </div>
+      <div class="surface lvl1">
+        <div class="b-row neutral"><div class="stateflag lvl1c">Experts page</div></div>
+        <div class="b-row focused"><div class="stateflag lvl1c">Plan for Q3 Design</div></div>
+        <div class="b-done"><span class="tag" style="color:#000">Sorted!</span><span class="ttl" style="color:rgba(0,0,0,.45)">Warren Logo</span></div>
+      </div>
+      <div class="surface lvl2">
+        <div class="b-row neutral"><div class="stateflag" style="color:#fff">Experts page</div></div>
+        <div class="b-row focused"><div class="stateflag" style="color:#fff">Plan for Q3 Design</div></div>
+        <div class="b-done"><span class="tag">Sorted!</span><span class="ttl">Warren Logo</span></div>
+      </div>
+    </div>
+    <p class="note">Done rows are <b>neutral but adaptive</b> (<code>--ink</code> + <code>--ink-dim</code>) — they must not use <code>.chrome</code> (would turn red at lvl1; finished work isn't pressure).</p>
+  </section>
+
+  <section id="done">
+    <h3>Done label rotation</h3>
+    <p class="lede">The completed-row label rotates through 25 calm phrases, picked deterministically per task id (stable, equal-weight). Title Case, each ends in "!".</p>
+    <div class="card">
+      <div class="pillrow">
+        <span class="wordchip">Donezo!</span><span class="wordchip">Done!</span><span class="wordchip">Done &amp; Dusted!</span><span class="wordchip">Sorted!</span><span class="wordchip">Wrapped!</span><span class="wordchip">Handled!</span><span class="wordchip">Bagged!</span><span class="wordchip">Squared Away!</span><span class="wordchip">Locked In!</span><span class="wordchip">Ticked Off!</span><span class="wordchip">Checked Off!</span><span class="wordchip">Buttoned Up!</span><span class="wordchip">All Set!</span><span class="wordchip">Good To Go!</span><span class="wordchip">Cleared!</span><span class="wordchip">Settled!</span><span class="wordchip">Tidied!</span><span class="wordchip">Put To Bed!</span><span class="wordchip">Golden!</span><span class="wordchip">There It Is!</span><span class="wordchip">Ta-Da!</span><span class="wordchip">Voilà!</span><span class="wordchip">Finito!</span><span class="wordchip">Fin!</span><span class="wordchip">Shipped!</span>
+      </div>
+    </div>
+    <h3 style="margin-top:28px">Done tab — completed &amp; skipped</h3>
+    <p class="lede">Completed past tasks show the done word + strikethrough. Skipped (undone) tasks show plain, with a restore arrow (↩) to send them back to today.</p>
+    <div class="grid cols-2">
+      <div class="surface lvl0">
+        <div style="padding:14px 20px 4px;font-size:18px;font-weight:500;letter-spacing:-.36px;color:var(--ink)">Thursday</div>
+        <div class="b-done" style="border-top:0"><span class="tag">Golden!</span><span class="ttl">Review icon builder</span></div>
+        <div class="b-row neutral" style="border-top:0;padding-top:6px"><div style="font-size:18px;color:var(--ink);letter-spacing:-.36px">Experts page <span style="float:right;color:var(--ink-dim)">↩</span></div></div>
+        <button class="loadmore" style="--ink-dim:rgba(0,0,0,.45);--line:#d9d9d9">Load more</button>
+      </div>
+      <div class="surface lvl2">
+        <div style="padding:14px 20px 4px;font-size:18px;font-weight:500;letter-spacing:-.36px;color:var(--ink)">Thursday</div>
+        <div class="b-done" style="border-top:0"><span class="tag">Golden!</span><span class="ttl">Review icon builder</span></div>
+        <div class="b-row neutral" style="border-top:0;padding-top:6px"><div style="font-size:18px;color:var(--ink);letter-spacing:-.36px">Experts page <span style="float:right;color:var(--ink-dim)">↩</span></div></div>
+        <button class="loadmore">Load more</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="states">
+    <h3>State matrix</h3>
+    <p class="lede">Every interactive component should be checked across all three levels and every interactive state (default · hover · focus/now · done). This is the gate (RULE 2) for any UI change.</p>
+    <div class="card">
+      <table>
+        <tr><th>Component</th><th>lvl0</th><th>lvl1</th><th>lvl2</th></tr>
+        <tr><td>Task text</td><td>#000</td><td><span style="color:#e5484d">red</span></td><td>#fff</td></tr>
+        <tr><td>Done / skipped text</td><td>--ink-dim / --ink</td><td>--ink-dim / --ink</td><td>light / light</td></tr>
+        <tr><td>Buddy! pill</td><td>black, hover lighten</td><td>red, hover darken</td><td>white, hover darken</td></tr>
+        <tr><td>Skip</td><td>dim→#000</td><td>dim→#000</td><td>dim white→#fff</td></tr>
+        <tr><td>Day header / Load more</td><td>dark</td><td>dark</td><td>light (adaptive)</td></tr>
+        <tr><td>Card / divider / border</td><td>white / #d9d9d9</td><td>white / #d9d9d9</td><td>red / white-30%</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section id="disc">
+    <h2>Audit</h2>
+    <h3>Discrepancies to tighten</h3>
+    <p class="lede">Verified against <code>dist/index.html</code>. The system is largely consistent (adaptation via class hooks + lvl2 overrides). Below: what was just resolved, and the remaining consistency opportunities — none currently break legibility on red.</p>
+    <div class="disc">
+      <table>
+        <tr><th style="width:90px">Status</th><th>Item</th><th>Recommendation</th></tr>
+        <tr><td><span class="sev fixed">Fixed</span></td><td>Done-tab day header was <code>text-black</code> (illegible on lvl2 red)</td><td>Now <code>var(--ink)</code>. (PR #46)</td></tr>
+        <tr><td><span class="sev fixed">Fixed</span></td><td>Skip base color set inline → defeated its <code>:hover</code></td><td>Moved base color into CSS so hover applies. (PR #45)</td></tr>
+        <tr><td><span class="sev fixed">Fixed</span></td><td>Buddy! hover <em>lightened</em> on red (against the darken idiom)</td><td>Darkens on lvl1/lvl2; lightens only the black lvl0 pill. (PR #45)</td></tr>
+        <tr><td><span class="sev med">Med</span></td><td>Icon stroke width inconsistent: 2.2 (+, ↩, ✕) · 2.0 (edit, sleep, calendar) · 1.4 (weather)</td><td>Pick a deliberate scale (e.g. 1.75 default, 1.4 large decorative) and apply uniformly.</td></tr>
+        <tr><td><span class="sev low">Low</span></td><td>Redundant borders: rows carry both <code>.bd</code> and literal <code>border-[#d9d9d9]</code></td><td>The <code>.bd</code> + <code>.lvl2 .bd</code> override already handles adaptation; drop the literal.</td></tr>
+        <tr><td><span class="sev low">Low</span></td><td>Hover surfaces vary: row actions use raw <code>hover:bg-black/10</code>; chrome uses <code>--chrome-hover</code></td><td>Route all hover tints through one token (<code>--chrome-hover</code>).</td></tr>
+        <tr><td><span class="sev low">Low</span></td><td>Settings adapts via <code>[class*="text-black"]</code> / <code>[class*="border-[#d9d9d9]"]</code> substring overrides</td><td>Fragile. Prefer the same <code>--ink</code> / <code>.bd</code> hooks the rest of the app uses.</td></tr>
+        <tr><td><span class="sev low">Low</span></td><td><code>.lvl2 .chrome{color:#fff !important}</code> flattens opacity (e.g. <code>text-black/40</code> → full white)</td><td>Define a dim chrome token so secondary glyphs stay secondary on red.</td></tr>
+        <tr><td><span class="sev low">Low</span></td><td>Done label is 15px in the today list but 18px in the Done tab</td><td>Confirm intent; align if it should read as one component.</td></tr>
+      </table>
+    </div>
+    <p class="note">Generated as a living reference — re-audit when components change. Open in a browser; it pulls Geist from <code>dist/assets/fonts</code>.</p>
+  </section>
+
+</main>
+</div>
+</body>
+</html>
