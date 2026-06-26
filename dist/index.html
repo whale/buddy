@@ -550,7 +550,7 @@ function wxKey(code,isDay){
   return isDay?'cloud-sun':'cloud-moon';
 }
 const WX_CACHE='buddy.weather.v1';
-function wxSvg(key){ const b=WX_ICONS[key]; return b ? '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+b+'</svg>' : ''; }
+function wxSvg(key){ const b=WX_ICONS[key]; return b ? '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">'+b+'</svg>' : ''; }
 function renderWeather(key){ const svg=wxSvg(key); const m=$('#mWeather'), d=$('#dWeather'); if(m) m.innerHTML=svg; if(d) d.innerHTML=svg; }
 function wxRead(k){ try{ return JSON.parse(localStorage.getItem(k)||'null'); }catch(_){ return null; } }
 function wxWrite(k,o){ try{ localStorage.setItem(k, JSON.stringify(o)); }catch(_){} }
