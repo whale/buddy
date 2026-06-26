@@ -366,6 +366,41 @@ fn is_recoverable_state(blob: &str) -> bool {
         || !v.get("erasedAt").unwrap_or(&serde_json::Value::Null).is_null()
 }
 
+fn today_items_len(v: &serde_json::Value) -> usize {
+    v.pointer("/today/items")
+        .and_then(|x| x.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0)
+}
+
+// DURABILITY RATCHET: the recovery file exists to survive an accidental empty save, so
+// it must NEVER be overwritten by a blob that has FEWER today-items than what it already
+// holds for the same (or older) day — unless a real "erase all" (a newer erasedAt)
+// explains the drop. Without this, a normal day's leftover tombstones made an empty-today
+// save look "recoverable" and it clobbered the last real task list (the original data-loss
+// bug). Returns true when we should KEEP the existing recovery file and skip the write.
+fn recovery_should_keep_existing(new_blob: &str, existing: &str) -> bool {
+    let (Ok(n), Ok(e)) = (
+        serde_json::from_str::<serde_json::Value>(new_blob),
+        serde_json::from_str::<serde_json::Value>(existing),
+    ) else {
+        return false; // can't compare → don't block the write
+    };
+    let n_erased = n.get("erasedAt").and_then(|x| x.as_i64());
+    let e_erased = e.get("erasedAt").and_then(|x| x.as_i64()).unwrap_or(0);
+    if n_erased.unwrap_or(0) > e_erased {
+        return false; // a real erase-all explains the empty → allow overwrite
+    }
+    let n_date = n.pointer("/today/date").and_then(|x| x.as_str());
+    let e_date = e.pointer("/today/date").and_then(|x| x.as_str());
+    if let (Some(nd), Some(ed)) = (n_date, e_date) {
+        if nd > ed {
+            return false; // genuinely a newer day → ok for it to start empty
+        }
+    }
+    today_items_len(&n) < today_items_len(&e) // same/older day with fewer items → keep existing
+}
+
 #[tauri::command]
 fn load_state(app: AppHandle) -> Option<String> {
     let p = state_file(&app)?;
@@ -390,9 +425,16 @@ fn save_state(app: AppHandle, blob: String) -> Result<(), String> {
 
     if is_recoverable_state(&blob) {
         if let Some(rp) = recovery_state_file(&app) {
-            let rtmp = rp.with_extension("json.tmp");
-            if std::fs::write(&rtmp, blob.as_bytes()).is_ok() {
-                let _ = std::fs::rename(&rtmp, &rp);
+            // Ratchet: don't let an emptier same/older-day blob overwrite a fuller recovery.
+            let keep_existing = std::fs::read_to_string(&rp)
+                .ok()
+                .map(|existing| recovery_should_keep_existing(&blob, &existing))
+                .unwrap_or(false);
+            if !keep_existing {
+                let rtmp = rp.with_extension("json.tmp");
+                if std::fs::write(&rtmp, blob.as_bytes()).is_ok() {
+                    let _ = std::fs::rename(&rtmp, &rp);
+                }
             }
         }
     }

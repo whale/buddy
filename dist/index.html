@@ -103,6 +103,16 @@
   .chrome-btn.sel, .chrome-btn.sel:hover{ background-color:var(--sel-bg); color:var(--sel-ink); }
   .tap-target{ min-width:44px; min-height:44px; }
 
+  /* Morning actions hover — same idiom as the rest of the app: dim text brightens to
+     full ink (like the Add row), and the filled CTA gets a subtle veil (like rows on
+     red). Both adapt across escalation levels via the tokens. */
+  #skipToday{ transition:color .15s ease; }
+  #buddyBtn{ transition:box-shadow .15s ease, transform .12s ease; }
+  @media (hover:hover) and (pointer:fine){
+    #skipToday:hover{ color:var(--ink); }
+    #buddyBtn:hover{ box-shadow:inset 0 0 0 999px rgba(255,255,255,.14); }
+  }
+
   /* Settings sheet adopts the state colours (red bg + light text) on red-bg. */
   #settings{ background:var(--card); transition:background-color .2s ease; }
   .lvl2 #settings [class*="text-black"]{ color:rgba(255,255,255,.92) !important; }
@@ -589,6 +599,10 @@ function serialize(){
     pinned:  !!state.pinned,
     tombstones: state.tombstones||{},
     erasedAt:   (typeof state.erasedAt==='number') ? state.erasedAt : null,
+    // Restart Buddy stashes the set-aside list HERE (persisted, not RAM-only) so a
+    // dismiss-without-restore or a relaunch can never drop it — the empty-list restore
+    // row offers it back. See restartFresh(). Cleared on restore or a real day rollover.
+    restartStash: (restartStash && Array.isArray(restartStash.texts) && restartStash.texts.length) ? { texts:restartStash.texts.slice(), date:restartStash.date||null } : null,
   });
 }
 let saveSuppressed=false;        // test hook: freeze persistence so an injected blob survives reload
@@ -671,7 +685,24 @@ function hydrate(blob){
     tombstones: (blob.tombstones && typeof blob.tombstones==='object' && !Array.isArray(blob.tombstones)) ? blob.tombstones : {},
     erasedAt: (typeof blob.erasedAt==='number') ? blob.erasedAt : null,
     savedAt: (typeof blob.savedAt==='number') ? blob.savedAt : 0,
+    restartStash: (blob.restartStash && Array.isArray(blob.restartStash.texts))
+      ? { texts: blob.restartStash.texts.map(t=>String(t||'').trim()).filter(Boolean), date: (typeof blob.restartStash.date==='string'?blob.restartStash.date:null) }
+      : null,
   };
+}
+/* Empty-over-full guard (DURABILITY). True when `cand` would LOSE today's tasks
+   versus `prev` for the SAME (or older) day, with no erase to explain it — i.e. an
+   accidental empty save that must NOT be allowed to overwrite a fuller copy.
+   A legit Restart tombstones the items it clears, so the union-merge still drops
+   them; this guard only catches UNEXPLAINED disappearance. Both args are hydrated. */
+function isTodayDowngrade(prev, cand){
+  if(!prev || !cand) return false;
+  if((cand.erasedAt||0) > (prev.erasedAt||0)) return false;       // a real "erase all" explains the drop
+  const pd=prev.today&&prev.today.date, cd=cand.today&&cand.today.date;
+  if(pd && cd && cd>pd) return false;                            // genuinely a newer day → ok to start empty
+  const pn=(prev.today&&prev.today.items&&prev.today.items.length)||0;
+  const cn=(cand.today&&cand.today.items&&cand.today.items.length)||0;
+  return cn<pn;                                                  // same/older day, fewer items → downgrade
 }
 function applyHydrated(h){
   state.today   = h.today || { date:localDate(), items:[], morningDone:false };
@@ -681,6 +712,7 @@ function applyHydrated(h){
   state.pinned  = h.pinned;
   state.tombstones = h.tombstones || {};
   state.erasedAt   = (typeof h.erasedAt==='number') ? h.erasedAt : null;
+  restartStash     = h.restartStash || null;   // persisted set-aside list (Restart Buddy)
 }
 
 /* ====================================================================
@@ -959,21 +991,34 @@ function parsePairingPayload(s){
   return null;
 }
 
-let bootHadStored=false, bootUsable=false, recoveredFromBak=false, lsHydrated=null;
+let bootHadStored=false, bootUsable=false, recoveredFromBak=false, lsHydrated=null, bakHydrated=null;
 function load(){
   const raw=lsGet(STORAGE_KEY);
   bootHadStored = raw!=null;
   lsHydrated = hydrate(migrate(parseRaw(raw)||{}));   // localStorage candidate (or null)
+  bakHydrated = hydrate(migrate(parseRaw(lsGet(BAK_KEY))||{}));   // last known-good backup (also a reconcile source)
   if(lsHydrated){
+    // DURABILITY: if the primary is valid but EMPTIER than the backup for the same/older
+    // day (an accidental empty save with no erase), heal by merging the backup back in.
+    // merge() is a lossless union, and tombstones still gate any intentional deletes —
+    // so a legit Restart (which tombstones what it clears) stays cleared.
+    if(bakHydrated && isTodayDowngrade(bakHydrated, lsHydrated)){
+      lsHydrated = merge(lsHydrated, bakHydrated);
+      recoveredFromBak=true; T('load: primary emptier than backup → healed from .bak');
+    }
     applyHydrated(lsHydrated);
     if(!lsHydrated.hadToday) state.today={ date:localDate(), items:[], morningDone:false };  // today slice bad → keep history, fresh today
     bootUsable=true;
-    if(!saveSuppressed) lsSet(BAK_KEY, serialize());   // snapshot a KNOWN-GOOD backup (never the failing raw)
+    // Never overwrite a good backup with an emptier same/older-day state (the .bak is the
+    // last line of defence against an empty-over-full save).
+    if(!saveSuppressed){
+      const next=hydrate(migrate(parseRaw(serialize())));
+      if(!(bakHydrated && next && isTodayDowngrade(bakHydrated, next))) lsSet(BAK_KEY, serialize());
+    }
     return;
   }
   // localStorage unusable → recover from the last known-good backup before giving up.
-  const bak=hydrate(parseRaw(lsGet(BAK_KEY)));
-  if(bak){ applyHydrated(bak); if(!bak.hadToday) state.today={ date:localDate(), items:[], morningDone:false }; bootUsable=true; recoveredFromBak=true; lsHydrated=bak; T('load: recovered from backup'); return; }
+  if(bakHydrated){ applyHydrated(bakHydrated); if(!bakHydrated.hadToday) state.today={ date:localDate(), items:[], morningDone:false }; bootUsable=true; recoveredFromBak=true; lsHydrated=bakHydrated; T('load: recovered from backup'); return; }
   if(raw!=null) lsSet(BAK_KEY, raw);      // preserve the unreadable raw for forensics
   freshBoot(); bootUsable=false; lsHydrated=null;   // native boot still reconciles with the file mirror
 }
@@ -1012,6 +1057,27 @@ function maybeRollover(){
     state.today={ date:cur, items:[], morningDone:false };
     return true;                              // fresh empty day → morning
   }
+}
+
+/* Roll the day over AND carry the unfinished working set forward, then wake any
+   slept-till-today tasks. SHARED by boot and the live midnight trigger so the two
+   can never diverge — previously only boot carried forward, so leaving Buddy open
+   across midnight silently dropped the day's unfinished tasks into history. */
+function rolloverAndCarry(){
+  const histBefore=state.history.length;
+  const rolled=maybeRollover();
+  if(rolled){
+    restartStash=null;                        // a real new day re-plans; an old set-aside is stale
+    if(state.history.length>histBefore){
+      // Pre-fill the new planner with yesterday's UNFINISHED tasks (up to the cap),
+      // so the working set is never silently dropped on a new day.
+      state.history[0].items.filter(it=>!it.done).slice(0,HARD_CAP).forEach(it=>{
+        if(activeCount()<HARD_CAP) state.items.push(newItem(it.text));
+      });
+    }
+  }
+  wakeDeferred();                             // bring back any tasks slept till today
+  return rolled;
 }
 
 /* ----------------------- demo history seed ----------------------- */
@@ -1345,7 +1411,12 @@ function buildRestoreRow(rec, texts, rowStyle, morning, first){
 let restartStash=null;
 function restartFresh(){
   const texts=state.items.filter(i=>i.state!=='done').map(i=>String(i.text||'').trim()).filter(Boolean);
-  restartStash = texts.length ? { texts } : null;
+  // Persist the set-aside list (serialize writes restartStash) so a dismiss or relaunch
+  // can recover it. Tombstone the cleared items so this empty IS explained — the
+  // durability guards then won't "heal" it back, and merge won't resurrect them. The
+  // restore row refills from the stash with fresh ids, so recovery still works.
+  restartStash = texts.length ? { texts, date:localDate() } : null;
+  state.items.forEach(i=>tombstone(i.id));
   state.items=[];
   state.today.morningDone=false;
   save(); closeSettings(); showMorning();
@@ -1354,6 +1425,7 @@ function fillFromRestartStash(){
   if(!restartStash || !restartStash.texts.length || activeCount()>=HARD_CAP) return;
   const existing=new Set(state.items.map(i=>String(i.text||'').trim()).filter(Boolean));
   restartStash.texts.forEach(t=>{ if(activeCount()<HARD_CAP && !existing.has(t)){ state.items.push(newItem(t)); existing.add(t); } });
+  restartStash=null;            // consumed — don't keep offering it
   render(); save();
 }
 
@@ -1418,7 +1490,7 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
   // (the stash); otherwise offer the most recent archived day's unfinished work.
   let showRestore=false, restoreRow=null;
   if(state.items.length===0 && activeCount()<HARD_CAP){
-    if(restartStash && restartStash.texts.length){
+    if(restartStash && restartStash.texts.length && (!restartStash.date || restartStash.date===localDate())){
       restoreRow=buildRestoreRowEl('Restore your last list', restartStash.texts.length, ()=>fillFromRestartStash(), rowStyle, morning, true);
       showRestore=true;
     } else {
@@ -1999,9 +2071,10 @@ document.addEventListener('keydown', e=>{
 function liveRolloverCheck(){
   T('liveRollover');
   if(editingId!==null) return;               // defer until the edit commits
-  const rolled=maybeRollover();
+  const rolled=rolloverAndCarry();           // SAME path as boot — carries unfinished forward + wakes deferred
   if(rolled){
     setDate();
+    writeNow();                              // persist the rollover + carry-over immediately
     render();
     showMorning();                           // a real day-change → morning
   }
@@ -2162,6 +2235,53 @@ window.__buddy = {
       const lum=ch?(+ch[0]+ +ch[1]+ +ch[2]):0;
       ok('lvl2: Donezo text adapts to LIGHT on red (not hardcoded dark)',
          warnLevel()===2 && lum>500, 'lvl='+warnLevel()+' color='+(dr&&getComputedStyle(dr).color));
+      // Restart Buddy must PERSIST its set-aside list (was RAM-only → lost on dismiss
+      // or relaunch — the original data-loss bug). It also tombstones what it clears so
+      // the empty is "explained" and the durability guards don't heal it back.
+      state.tombstones={}; restartStash=null;
+      state.today={ date:localDate(), morningDone:true, items:[
+        {id:'rs1',text:'keep me',state:'neutral',v:1},{id:'rs2',text:'and me',state:'focused',v:1} ] };
+      editingId=null; render();
+      restartFresh();
+      ok('restart: clears today + tombstones the cleared items (explained empty)',
+         state.items.length===0 && !!state.tombstones['rs1'] && !!state.tombstones['rs2']);
+      ok('restart: stash is written into the serialized (persisted) blob',
+         ((JSON.parse(serialize()).restartStash||{}).texts||[]).length===2);
+      const reH=hydrate(migrate(JSON.parse(serialize())));
+      ok('restart: stash survives a hydrate round-trip (relaunch-safe)',
+         !!(reH && reH.restartStash && reH.restartStash.texts.length===2));
+      fillFromRestartStash();
+      ok('restart: restore brings the set-aside list back',
+         state.items.length===2 && restartStash===null, 'items='+state.items.map(i=>i.text).join(','));
+
+      // Durability: a valid-but-EMPTY today must NOT overwrite a fuller same-day copy
+      // unless an erase explains it (the empty-over-full guard).
+      const fullH=hydrate(migrate({version:1,savedAt:2000,today:{date:'2026-06-19',morningDone:true,items:[{id:'g1',text:'x',state:'neutral',v:1},{id:'g2',text:'y',state:'neutral',v:1}]}}));
+      const emptyH=hydrate(migrate({version:1,savedAt:3000,today:{date:'2026-06-19',morningDone:true,items:[]}}));
+      ok('guard: empty-over-full same day is flagged as a downgrade', isTodayDowngrade(fullH, emptyH));
+      ok('guard: a genuinely newer empty day is NOT a downgrade',
+         !isTodayDowngrade(fullH, hydrate(migrate({version:1,savedAt:3000,today:{date:'2026-06-20',morningDone:false,items:[]}}))));
+      ok('guard: an erase explains the empty (not a downgrade)',
+         !isTodayDowngrade(fullH, hydrate(migrate({version:1,savedAt:3000,erasedAt:2500,today:{date:'2026-06-19',morningDone:false,items:[]}}))));
+
+      // Live midnight rollover (app left open across midnight — the NORMAL pinned case)
+      // must carry unfinished tasks forward AND wake deferred, exactly like boot. The
+      // live path used to drop them into history, leaving an empty morning.
+      const yd2=yesterdayDate();
+      state.tombstones={}; state.history=[]; restartStash=null;
+      state.deferred=[{id:'df1',text:'slept task',wake:localDate()}];
+      state.today={ date:yd2, morningDone:true, items:[
+        {id:'lr1',text:'carry me',state:'neutral',v:1},
+        {id:'lr2',text:'done one',state:'done',doneAt:Date.now(),v:1} ] };
+      editingId=null;
+      const rolledLive=rolloverAndCarry();
+      ok('live rollover: archives yesterday to history', rolledLive && state.history.some(h=>h.date===yd2));
+      ok('live rollover: carries UNFINISHED forward (not dropped) + drops done',
+         state.today.date===localDate() && state.items.some(i=>i.text==='carry me') && !state.items.some(i=>i.text==='done one'),
+         'items='+state.items.map(i=>i.text).join(','));
+      ok('live rollover: wakes tasks slept till today',
+         state.items.some(i=>i.text==='slept task') && state.deferred.length===0);
+
       // sync step 3: the pure merge must lose nothing. Run the full suite and gate on it.
       const mt=this.mergeTest();
       ok('sync: merge() loses nothing (full mergeTest suite)', mt.ok,
@@ -2493,22 +2613,12 @@ function settleNative(){
 
 function bootFinish(recovered){
   bumpUid();                                 // avoid id collisions with loaded tasks (the Add bug)
-  const histBefore=state.history.length;
-  const rolled=maybeRollover();              // same-day → restore; older → archive/advance
+  const rolled=rolloverAndCarry();           // same-day → restore; older → archive/advance + carry forward + wake deferred
   if(rolled){
-    // Hybrid carry-over: if we just archived yesterday, pre-fill today's planner
-    // with its UNFINISHED tasks so your working set is never silently dropped on a
-    // new day. Keep up to the hard cap, then you trim down to your three.
-    if(state.history.length>histBefore){
-      state.history[0].items.filter(it=>!it.done).slice(0,HARD_CAP).forEach(it=>{
-        if(activeCount()<HARD_CAP) state.items.push(newItem(it.text));
-      });
-    }
     writeNow();                              // commit the rollover + carry-over SYNCHRONOUSLY (no debounce gap)
   } else {
     maybeAutoRestoreLastList();              // heals an empty new-day save using yesterday's archived list
   }
-  wakeDeferred();                            // bring back any tasks slept till today
   if(!bootHadStored && !recovered) seedDemoHistory();   // demo seed ONLY on a genuine first run
   pruneHistory();                         // drop archived days older than ~1 year
   setDate();
@@ -2553,8 +2663,11 @@ async function bootReconcileFile(){
   // worst case: an accidental empty same-day launch writing over the primary file.
   // The merge is a superset that loses nothing, while tombstones/erasedAt still
   // prevent resurrecting tasks the user intentionally deleted.
-  if(fileH || recoveryH){
-    const merged = [lsHydrated, fileH, recoveryH].reduce((acc,h)=>merge(acc,h), null);
+  if(fileH || recoveryH || bakHydrated){
+    // Include the localStorage .bak too: it's a same-device snapshot that can hold tasks
+    // an accidental empty save zeroed out of the primary/file/recovery. The union-merge
+    // brings them back; tombstones/erasedAt still drop anything intentionally deleted.
+    const merged = [lsHydrated, bakHydrated, fileH, recoveryH].reduce((acc,h)=>merge(acc,h), null);
     if(merged){
       applyHydrated(merged);
       if(!merged.hadToday) state.today={ date:localDate(), items:[], morningDone:false };
