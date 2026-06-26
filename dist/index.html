@@ -165,7 +165,7 @@
   /* Settings / history sheets: Fade+Drift up (fade + small rise + slight scale). */
   .sheet{ transition: transform var(--t-drift) var(--ease-out), opacity var(--t-drift) var(--ease-out); will-change:transform,opacity; }
   .sheet.closing{ transition: transform .34s var(--ease-out), opacity .34s var(--ease-out); }
-  .sheet[data-open="false"]{ transform: translateY(22px) scale(.99); opacity:0; }
+  .sheet[data-open="false"]{ transform: translateY(22px) scale(.99); opacity:0; pointer-events:none; }
   .sheet[data-open="true"]{ transform: translateY(0) scale(1); opacity:1; }
 
   /* Last-7-days crossfade — blur-masked so it reads as ONE motion (§3.4).
@@ -213,7 +213,7 @@
     .pressable:active{ transform:none; }
     .sheet{ transition: opacity .18s ease; }
     .sheet.closing{ transition: opacity .14s ease; }
-    .sheet[data-open="false"]{ transform:none; opacity:0; }
+    .sheet[data-open="false"]{ transform:none; opacity:0; pointer-events:none; }
     .sheet[data-open="true"]{  transform:none; opacity:1; }
     .item-enter{ animation: rm-fade .14s ease both; }
     .donezo-enter{ animation: rm-fade .14s ease both; }
@@ -1582,8 +1582,9 @@ function renderHistHeader(){
   const mkSeg=(tab,label)=>{
     const b=document.createElement('button');
     const active=state.histTab===tab;
-    b.className='px-4 py-1.5 rounded-full text-[15px] tracking-[-0.3px] transition-colors '+
+    b.className='px-5 grid place-items-center rounded-full text-[15px] tracking-[-0.3px] transition-colors '+
       (active?'bg-white text-[#1a1a1a] shadow-sm':'');
+    b.style.minHeight='38px';                        // generous tap target (was ~22px — fiddly to hit)
     if(!active) b.style.color='var(--chrome-ink)';
     b.textContent=label;
     b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; render(); } });
