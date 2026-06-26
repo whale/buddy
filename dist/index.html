@@ -1486,10 +1486,13 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     wrap.appendChild(row);
   });
 
-  // Empty-list restore row (before the Add rows). Prefer the just-restarted plan
-  // (the stash); otherwise offer the most recent archived day's unfinished work.
+  // Empty-list restore row (before the Add rows). MORNING ONLY — the side drawer
+  // never shows it (per design: the drawer is today's working surface; recovery of
+  // past/unfinished work happens in the morning planner and the Done tab's per-row
+  // restore arrows). Prefer the just-restarted plan (stash); else the most recent
+  // archived day's unfinished work.
   let showRestore=false, restoreRow=null;
-  if(state.items.length===0 && activeCount()<HARD_CAP){
+  if(morning && state.items.length===0 && activeCount()<HARD_CAP){
     if(restartStash && restartStash.texts.length && (!restartStash.date || restartStash.date===localDate())){
       restoreRow=buildRestoreRowEl('Restore your last list', restartStash.texts.length, ()=>fillFromRestartStash(), rowStyle, morning, true);
       showRestore=true;
@@ -1566,33 +1569,59 @@ function histEmpty(msg){
 }
 // PAST: tasks COMPLETED in the recent days (undone items aren't shown — they
 // move forward instead). Grouped by day; only days with completions appear.
+// Bring a skipped/undone PAST task back into today's list (fresh id, capped).
+function restoreHistoryTask(text){
+  const t=String(text||'').trim(); if(!t) return;
+  if(activeCount()>=HARD_CAP) return;                                  // already full — no 7th
+  if(state.items.some(i=>String(i.text||'').trim()===t)) return;       // already on today
+  state.items.push(newItem(t));
+  save(); render();
+}
 function renderPast(){
   const todayDone = state.items.filter(it=>it.state==='done');     // live: today's completions
+  // Past days show BOTH completed tasks (Donezo) and skipped/undone ones. Undone tasks
+  // render plain (no Donezo, no strike) with a restore arrow to bring them back to today.
   const past = lastNDays(HISTORY_DAYS)
-    .map(d=>({ name:d.name, items:d.items.filter(it=>it.done) }))
+    .map(d=>({ name:d.name, items:(d.items||[]).filter(it=>it && String(it.text||'').trim()) }))
     .filter(d=>d.items.length);
   if(!todayDone.length && !past.length){ histBody.appendChild(histEmpty('No completed tasks yet.')); return; }
+  const activeTexts=new Set(state.items.map(i=>String(i.text||'').trim()).filter(Boolean));
   const groups=[];
-  if(todayDone.length) groups.push({ name:'Today', items:todayDone, today:true });
-  past.forEach(d=>groups.push({ name:d.name, items:d.items, today:false }));
+  if(todayDone.length) groups.push({ name:'Today', items:todayDone.map(it=>({text:it.text,done:true,liveId:it.id})), today:true });
+  past.forEach(d=>groups.push({ name:d.name, items:d.items.map(it=>({text:it.text,done:!!it.done})), today:false }));
   groups.forEach((day,di)=>{
     const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
     const h=document.createElement('div');
-    h.className='chrome text-[18px] font-medium tracking-[-0.36px] text-black mb-1';
+    h.className='chrome text-[18px] font-medium tracking-[-0.36px] mb-1'; h.style.color='var(--ink)';  // adaptive: light on red
     h.textContent=day.name; grp.appendChild(h);
     day.items.forEach(it=>{
-      const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(day.today?' pr-[44px]':'');
+      const tx=String(it.text||'').trim();
+      const canRestore = !it.done && !day.today && !activeTexts.has(tx) && activeCount()<HARD_CAP;
+      const showArrow = (day.today && it.done) || canRestore;
+      const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(showArrow?' pr-[44px]':'');
       const lab=document.createElement('div'); lab.className='flex items-baseline gap-2 min-w-0 flex-1';
-      const tag=document.createElement('span'); tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:18px;color:var(--ink)'; tag.textContent='Donezo.';
-      const t=document.createElement('span'); t.className='tracking-[-0.36px] line-through truncate'; t.style.cssText='font-size:18px;color:var(--ink-dim)'; t.textContent=it.text;
-      lab.append(tag,t); r.appendChild(lab);
-      if(day.today){
+      if(it.done){
+        const tag=document.createElement('span'); tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:18px;color:var(--ink)'; tag.textContent='Donezo.';
+        const t=document.createElement('span'); t.className='tracking-[-0.36px] line-through truncate'; t.style.cssText='font-size:18px;color:var(--ink-dim)'; t.textContent=it.text;
+        lab.append(tag,t);
+      } else {
+        const t=document.createElement('span'); t.className='tracking-[-0.36px] truncate'; t.style.cssText='font-size:18px;color:var(--ink)'; t.textContent=it.text;
+        lab.append(t);                                  // skipped: plain, full ink, no Donezo/strike
+      }
+      r.appendChild(lab);
+      if(day.today && it.done){
         const u=document.createElement('button'); u.title='Restore to list';
         u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full hover:bg-black/10 opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
-        u.style.right=ICON_RIGHT;
-        u.innerHTML=UNDO; muteIconPointerEvents(u);
+        u.style.right=ICON_RIGHT; u.innerHTML=UNDO; muteIconPointerEvents(u);
         u.addEventListener('mousedown',e=>e.preventDefault());
-        u.addEventListener('click',()=>restoreItem(it.id));
+        u.addEventListener('click',()=>restoreItem(it.liveId));
+        r.appendChild(u);
+      } else if(canRestore){
+        const u=document.createElement('button'); u.title='Restore to today';
+        u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full hover:bg-black/10 opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
+        u.style.right=ICON_RIGHT; u.innerHTML=UNDO; muteIconPointerEvents(u);
+        u.addEventListener('mousedown',e=>e.preventDefault());
+        u.addEventListener('click',()=>restoreHistoryTask(it.text));
         r.appendChild(u);
       }
       grp.appendChild(r);
@@ -2147,7 +2176,7 @@ window.__buddy = {
   showMorning, render,
   renderWeather, wxKey, updateWeather,
   restartFresh, fillFromRestartStash,
-  restoreLastList, mostRecentRestorableRecord,
+  restoreLastList, mostRecentRestorableRecord, restoreHistoryTask,
   hitTargetAudit,
   // Phase B hooks (confetti / settings / keyboard verification)
   fireConfetti: ()=>fireConfetti(),
@@ -2204,13 +2233,17 @@ window.__buddy = {
          'tombstones='+Object.keys(state.tombstones||{}).join(','));
       ok('rows do NOT reuse data-tid (FLIP collision guard)',
          ![...todayWrap.querySelectorAll('.buddy-row')].some(r=>r.dataset&&r.dataset.tid));
-      // Recovery: an empty morning should offer and perform "restore last list".
+      // Recovery: an empty MORNING should offer and perform "restore last list".
+      // (The restore row is morning-only — the side drawer never shows it.)
       const yday=yesterdayDate();
       state.today={date:localDate(),morningDone:false,items:[]};
       state.history=[{date:yday,weekday:DOW[new Date(yday+'T00:00:00').getDay()],items:[{id:'hy0',text:'lost task',done:false},{id:'hy1',text:'done task',done:true}]}];
       render();
-      ok('restore row appears when today is empty and yesterday has unfinished work',
-         !!todayWrap.textContent.includes('Restore') && !!todayWrap.textContent.includes('1 task'));
+      ok('drawer does NOT show a restore row (morning-only)', !todayWrap.textContent.includes('Restore'));
+      showMorning();
+      ok('restore row appears in the MORNING when empty and yesterday has unfinished work',
+         !!morningList.textContent.includes('Restore') && !!morningList.textContent.includes('1 task'));
+      morning.classList.add('hidden');
       restoreLastList();
       ok('restore last list brings back unfinished tasks only',
          state.items.length===1 && state.items[0].text==='lost task');
@@ -2281,6 +2314,27 @@ window.__buddy = {
          'items='+state.items.map(i=>i.text).join(','));
       ok('live rollover: wakes tasks slept till today',
          state.items.some(i=>i.text==='slept task') && state.deferred.length===0);
+
+      // Done tab: skipped/undone PAST tasks are shown (no Donezo) and restorable to today;
+      // the side drawer no longer shows a restore row (morning keeps it).
+      const yd3=yesterdayDate();
+      state.tombstones={}; state.deferred=[]; restartStash=null;
+      state.history=[{date:yd3,weekday:DOW[new Date(yd3+'T00:00:00').getDay()],items:[
+        {id:'hp0',text:'finished',done:true},{id:'hp1',text:'skipped one',done:false}]}];
+      // drawer (empty today) must NOT render a restore row…
+      state.today={date:localDate(),morningDone:true,items:[]}; editingId=null;
+      document.querySelector('#morning').classList.add('hidden'); state.histOpen=false; render();
+      ok('done flow: side drawer shows NO restore row', !/Restore/.test(listEl.textContent));
+      // …Past tab shows the skipped task (no Donezo) with a restore arrow…
+      state.histOpen=true; state.histTab='past'; render();
+      ok('done flow: Past tab shows skipped task without Donezo',
+         listEl.textContent.includes('skipped one') && !/Donezo\.\s*skipped one/.test(listEl.textContent));
+      ok('done flow: skipped past task has a restore arrow',
+         !!listEl.querySelector('button[title="Restore to today"]'));
+      // …and restoring brings it into today.
+      restoreHistoryTask('skipped one');
+      ok('done flow: restore brings the skipped task into today',
+         state.items.some(i=>i.text==='skipped one'));
 
       // sync step 3: the pure merge must lose nothing. Run the full suite and gate on it.
       const mt=this.mergeTest();
