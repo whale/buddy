@@ -1,9 +1,41 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-06-25. Current branch: `main` (clean). Latest commit: `7b21ff9` (Merge PR #40). Released app version: **`0.2.37`** (signed + notarized + published)._
+_Last updated: 2026-06-26. Current branch: `main` (clean). Latest commit: merge of PR #42. Released app version: **`0.2.38`** (auto-release building at wrap time — verify it published)._
 
 Buddy is a shipped, public, self-updating macOS menu-bar focus app for ADHD.
 Repo: `github.com/whale/buddy`.
+
+## Session summary — 2026-06-26
+
+Shipped a **critical click-blocking fix** as **0.2.38** (PR #42, merged → auto-release).
+
+### The bug (regression introduced 2026-06-25 in `bef4a7d`, shipped in 0.2.37)
+The Fade+Drift refactor changed the *closed* settings sheet from `translateY(100%)`
+(fully off-screen) to `translateY(22px); opacity:0` (invisible, in place) but **forgot
+`pointer-events:none`** — the same line it correctly added to `#drawer` and `#morning`.
+Result: an invisible `z-20` `#settings` sheet blanketed the whole list panel (Card 2)
+and **swallowed every click** — the Future/Done history toggle **and** task rows. So in
+0.2.37 you couldn't complete tasks or switch to the Done view; the disc/gear/pin in the
+header (Card 1) still worked because they sit outside the sheet. User reported it as
+"my dones are gone" + "the toggle doesn't work."
+
+### The fix (4 lines, `dist/index.html`)
+- `pointer-events:none` on `.sheet[data-open="false"]` (normal **and** reduced-motion variants).
+- History toggle buttons: `min-height:38px` (inline style — was ~22px) + `px-5`,
+  `grid place-items-center`. NOTE: a brand-new arbitrary Tailwind class (`min-h-[38px]`)
+  does **not** work here — this dist uses a **precompiled** Tailwind stylesheet, so only
+  classes present at build time exist. Use inline style or existing utilities.
+
+### Verified (browser, served `dist/` via Playwright real clicks)
+- Real click on closed-sheet build **timed out** (blocked by `#settings`) → after fix it **lands**.
+- Closed sheet computes `pointer-events:none`; toggle pill is 38px tall; realistic tap zone **15/15**.
+- `smokeTest`: no new failures (the lone pre-existing hit-target flag fails identically on `main`,
+  an artifact of running the audit via Playwright vs `pnpm ui:smoke`).
+
+### Not verified / open
+- **0.2.38 release**: was `in_progress` at wrap. Confirm it **published** (DMG + tarball + latest.json)
+  and that installing it actually restores clicking in the running app.
+- The 0.2.37 on-device items still pending (live weather fetch, 30pt top padding, Fade+Drift feel).
 
 ## Session summary — 2026-06-25
 
