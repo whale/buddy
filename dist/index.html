@@ -432,7 +432,7 @@ let state = {
   today:   { date:null, items:[], morningDone:false },
   history: [],
   deferred:[],                       // tasks "slept till tomorrow": {id,text,wake:"YYYY-MM-DD"}
-  settings:{ celebrate:100, historyDays:7, reserveSpace:false },   // historyDays 0(off)..14; reserveSpace pushes other windows out when pinned
+  settings:{ celebrate:100, reserveSpace:false },   // reserveSpace pushes other windows out when pinned
   pinned:  false,
   // --- sync merge foundation (step 2, no network yet) ---
   tombstones:{},                     // { [itemId]: deletedAt } — deletes persist so a stale push can't resurrect them
@@ -598,7 +598,7 @@ function serialize(){
     today:   { date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null,doneAt:i.doneAt??null,v:i.v||1})) },
     history: state.history,
     deferred:(state.deferred||[]).map(d=>({id:d.id,text:d.text,wake:d.wake})),
-    settings:{ celebrate: Math.max(0,Math.min(100, state.settings.celebrate??100)), historyDays: clamp(0, state.settings.historyDays??7, 14), reserveSpace: !!state.settings.reserveSpace },
+    settings:{ celebrate: Math.max(0,Math.min(100, state.settings.celebrate??100)), reserveSpace: !!state.settings.reserveSpace },
     pinned:  !!state.pinned,
     tombstones: state.tombstones||{},
     erasedAt:   (typeof state.erasedAt==='number') ? state.erasedAt : null,
@@ -654,7 +654,7 @@ function freshBoot(){
   state.today={ date:localDate(), items:[], morningDone:false };
   state.history=[];
   state.deferred=[];
-  state.settings={ celebrate:100, historyDays:7, reserveSpace:false };
+  state.settings={ celebrate:100, reserveSpace:false };
   state.pinned=false;
   state.tombstones={};
   state.erasedAt=null;
@@ -682,7 +682,6 @@ function hydrate(blob){
     history: Array.isArray(blob.history) ? blob.history.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items)) : [],
     deferred: Array.isArray(blob.deferred) ? blob.deferred.filter(d=>d&&typeof d.text==='string').map(d=>({id:d.id||nid(),text:String(d.text),wake:String(d.wake||'')})) : [],
     settings: { celebrate: (blob.settings && typeof blob.settings.celebrate==='number') ? Math.max(0,Math.min(100,blob.settings.celebrate)) : (blob.settings && blob.settings.confetti===false ? 0 : 100),
-                historyDays: (blob.settings && Number.isFinite(blob.settings.historyDays)) ? clamp(0, blob.settings.historyDays|0, 14) : 7,
                 reserveSpace: !!(blob.settings && blob.settings.reserveSpace) },
     pinned: !!blob.pinned,
     tombstones: (blob.tombstones && typeof blob.tombstones==='object' && !Array.isArray(blob.tombstones)) ? blob.tombstones : {},
@@ -1107,9 +1106,12 @@ function seedDemoHistory(){
   });
 }
 
-// Done history: store up to ~1 year, but only ever SHOW the last 14 days (for
-// everyone — no per-user setting). RETENTION bounds storage growth.
-const HISTORY_DAYS=14, RETENTION_DAYS=365;
+// Done history: store up to ~1 year. The Done tab shows ONE WEEK at a time and a
+// "Load more" button reveals the next week (no per-user setting). RETENTION bounds
+// storage growth. `pastDaysShown` is transient UI state, reset to a week each time
+// the panel opens or the tab switches.
+const PAST_PAGE=7, RETENTION_DAYS=365;
+let pastDaysShown=PAST_PAGE;
 // Drop archived days older than the retention window so storage stays bounded.
 function pruneHistory(){
   if(!Array.isArray(state.history)) return;
@@ -1584,7 +1586,7 @@ function renderPast(){
   const todayDone = state.items.filter(it=>it.state==='done');     // live: today's completions
   // Past days show BOTH completed tasks (Donezo) and skipped/undone ones. Undone tasks
   // render plain (no Donezo, no strike) with a restore arrow to bring them back to today.
-  const past = lastNDays(HISTORY_DAYS)
+  const past = lastNDays(pastDaysShown)
     .map(d=>({ name:d.name, items:(d.items||[]).filter(it=>it && String(it.text||'').trim()) }))
     .filter(d=>d.items.length);
   if(!todayDone.length && !past.length){ histBody.appendChild(histEmpty('No completed tasks yet.')); return; }
@@ -1631,6 +1633,18 @@ function renderPast(){
     });
     histBody.appendChild(grp);
   });
+  // "Load more" — reveal the next week if any archived day predates the shown window.
+  const boundary = localDate(new Date(Date.now()-pastDaysShown*86400000));   // = today − pastDaysShown
+  const hasMore = (state.history||[]).some(r=> r && typeof r.date==='string' && r.date < boundary);
+  if(hasMore){
+    const more=document.createElement('button');
+    more.className='bd w-full px-8 py-4 text-[15px] tracking-[-0.3px] border-t hover:bg-black/[0.03] transition-colors';
+    more.style.color='var(--ink-dim)';                       // adaptive: light on red
+    more.textContent='Load more';
+    more.addEventListener('mousedown',e=>e.preventDefault());
+    more.addEventListener('click',()=>{ pastDaysShown+=PAST_PAGE; render(); });
+    histBody.appendChild(more);
+  }
 }
 // FUTURE: tasks pushed forward (slept), grouped by the day they'll return.
 // Each can be deleted (×) so it WON'T come back.
@@ -1691,7 +1705,7 @@ function renderHistHeader(){
     b.style.minHeight='38px';                        // generous tap target (was ~22px — fiddly to hit)
     if(!active) b.style.color='var(--chrome-ink)';
     b.textContent=label;
-    b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; render(); } });
+    b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; pastDaysShown=PAST_PAGE; render(); } });
     return b;
   };
   seg.append(mkSeg('future','Future'), mkSeg('past','Done'));
@@ -1944,6 +1958,7 @@ $('#histBtn')?.addEventListener('click', e=>{ e.stopPropagation();
   const wasSettings=settingsOpen;
   if(settingsOpen) closeSettings();
   state.histOpen = wasSettings ? true : !state.histOpen;   // from settings → always show calendar
+  if(state.histOpen) pastDaysShown=PAST_PAGE;              // fresh open → back to one week
   render(); if(state.histOpen) listEl.scrollTop=0;
 });
 // keep the toggle honest if the user flips system reduced-motion live
@@ -2339,6 +2354,22 @@ window.__buddy = {
       ok('done flow: restore brings the skipped task into today',
          state.items.some(i=>i.text==='skipped one'));
 
+      // Load more: the Done tab shows ONE WEEK at a time; a "Load more" button reveals
+      // the next week. 20 days of history → 7 rows, then 14 after one click.
+      state.tombstones={}; state.deferred=[]; restartStash=null;
+      state.today={date:localDate(),morningDone:true,items:[]};
+      state.history=[];
+      for(let i=1;i<=20;i++){ const dd=localDate(new Date(Date.now()-i*86400000));
+        state.history.push({date:dd,weekday:DOW[new Date(dd+'T00:00:00').getDay()],items:[{id:'lm'+i,text:'day '+i,done:true}]}); }
+      pastDaysShown=PAST_PAGE; state.histOpen=true; state.histTab='past';
+      document.querySelector('#morning').classList.add('hidden'); editingId=null; render();
+      const lmBtn=[...listEl.querySelectorAll('button')].find(b=>b.textContent.trim()==='Load more');
+      ok('load more: one week shown initially', listEl.querySelectorAll('.hrow').length===7, 'rows='+listEl.querySelectorAll('.hrow').length);
+      ok('load more: button appears when older days exist', !!lmBtn);
+      pastDaysShown+=PAST_PAGE; render();
+      ok('load more: next week revealed on click', listEl.querySelectorAll('.hrow').length===14, 'rows='+listEl.querySelectorAll('.hrow').length);
+      pastDaysShown=PAST_PAGE; state.histOpen=false;          // reset transient UI
+
       // sync step 3: the pure merge must lose nothing. Run the full suite and gate on it.
       const mt=this.mergeTest();
       ok('sync: merge() loses nothing (full mergeTest suite)', mt.ok,
@@ -2363,7 +2394,7 @@ window.__buddy = {
     const snap = (o={}) => ({
       today: o.today!==undefined ? o.today : { date:'2026-06-19', morningDone:false, items:[] },
       hadToday:true, history:o.history||[], deferred:o.deferred||[],
-      settings:o.settings||{celebrate:100,historyDays:7,reserveSpace:false},
+      settings:o.settings||{celebrate:100,reserveSpace:false},
       pinned:!!o.pinned, tombstones:o.tombstones||{}, erasedAt:o.erasedAt??null,
       savedAt:o.savedAt||1000,
     });
@@ -2537,11 +2568,11 @@ window.__buddy = {
 
       // 10. Settings change propagates (newer save wins the scalar).
       store=makeFakeCASStore();
-      state.settings={celebrate:100,historyDays:7,reserveSpace:false};
+      state.settings={celebrate:100,reserveSpace:false};
       setLocal([{id:'s1',text:'s',state:'neutral',v:1}]); await syncOnce(store,'k');
-      state.settings={celebrate:100,historyDays:0,reserveSpace:false}; await syncOnce(store,'k');
+      state.settings={celebrate:50,reserveSpace:false}; await syncOnce(store,'k');
       row=store._rows()['k'];
-      ok('settings change propagates', row.blob.settings && row.blob.settings.historyDays===0, 'historyDays='+(row.blob.settings&&row.blob.settings.historyDays));
+      ok('settings change propagates', row.blob.settings && row.blob.settings.celebrate===50, 'celebrate='+(row.blob.settings&&row.blob.settings.celebrate));
 
       // 11. QR pairing identity: owner_id is deterministic + matches the cross-platform
       // test vector (the same string sha256'd in BuddySyncTests → JS and Swift agree).
@@ -2598,7 +2629,7 @@ function buildBugLogs(){
     'platform: '+navigator.userAgent,
     // counts only — never the task text (the screenshot is the visual report)
     'today: '+state.items.length+' tasks (focused '+state.items.filter(i=>i.state==='focused').length+', done '+state.items.filter(i=>i.state==='done').length+')',
-    'deferred: '+(state.deferred?.length||0)+' · historyDays: '+state.settings.historyDays+' · pinned: '+state.pinned+' · morningDone: '+state.today.morningDone,
+    'deferred: '+(state.deferred?.length||0)+' · pinned: '+state.pinned+' · morningDone: '+state.today.morningDone,
     '',
     '--- recent logs ---',
     ...LOGBUF.slice(-120)
