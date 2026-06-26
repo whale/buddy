@@ -62,6 +62,22 @@ A change that "looks cosmetic" can break shared plumbing three steps away
    Force a level by injecting items (see `__buddy.inject`); lvl = active count.
    Both `ok:true` AND a clean visual sweep are required — neither alone is enough.
 
+3. **Every-state interactive check (EVERY UI task, not just builds).** Any change
+   that touches colour, text, borders, icons, or interaction MUST be verified in
+   **all three escalation states (lvl0 / lvl1 / lvl2)** AND in **every interactive
+   state it has** — default, **hover**, focus/"now", selected, done. A fix that
+   only works at lvl0, or only at rest, is not done.
+   - **Hover specifically:** confirm the *post-transition* colour actually changed
+     in each state — don't trust that the rule exists. Read the computed colour
+     while hovering (a CSS `transition` will return the mid-flight value if you
+     read instantly, which once hid a hover that never applied).
+   - **Inline `style="…"` beats a stylesheet `:hover` rule.** If an element sets
+     its base colour inline, a `:hover` rule silently does nothing — move the base
+     colour into a CSS rule (or it won't hover). This is a recurring trap here.
+   - **Direction must match the system:** hover *darkens* on light/coloured
+     surfaces (the row + chrome idiom). It may only *lighten* where darkening is
+     impossible (a pure-black surface). Never lighten a red/white surface on hover.
+
 ---
 
 ## Releasing / auto-updater
