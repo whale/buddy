@@ -1240,8 +1240,12 @@ function removeItem(id){ tombstone(id); state.items=state.items.filter(x=>x.id!=
 // done rows can pile up without blocking new work. (Raw .length still bounds
 // nothing here; the cap is on active work.)
 const activeCount = () => state.items.filter(i => i.state!=='done').length;
-const DONEZO_DELAY = 2000;          // savor beat before a done row morphs to "Donezo."
+const DONEZO_DELAY = 2000;          // savor beat before a done row morphs to a "done" word
 let donezoEnterId = null;           // one-shot: the row that just became a Donezo (enter anim)
+// Rotating "done" labels — picked DETERMINISTICALLY per task id (stable across
+// re-renders, no flicker; equal weight, no favourite). Shown on every completed row.
+const DONE_WORDS = ['Donezo!','Done!','Done & Dusted!','Sorted!','Wrapped!','Handled!','Bagged!','Squared Away!','Locked In!','Ticked Off!','Checked Off!','Buttoned Up!','All Set!','Good To Go!','Cleared!','Settled!','Tidied!','Put To Bed!','Golden!','There It Is!','Ta-Da!','Voilà!','Finito!','Fin!','Shipped!'];
+function doneWord(id){ const s=String(id||''); let h=0; for(let i=0;i<s.length;i++){ h=(h*31 + s.charCodeAt(i))>>>0; } return DONE_WORDS[h % DONE_WORDS.length]; }
 // A done row shows as its struck self for DONEZO_DELAY, then becomes a Donezo row.
 const isDonezo = it => it.state==='done' && it.doneAt && (Date.now()-it.doneAt) >= DONEZO_DELAY;
 // 2s after a completion, slide the struck row out and re-render it as a Donezo row.
@@ -1543,7 +1547,7 @@ function buildDonezoRow(it, idx, morning){
   lab.style.paddingRight='44px';
   const tag=document.createElement('span');
   tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:15px;color:var(--ink)';
-  tag.textContent='Donezo.';
+  tag.textContent=doneWord(it.id);
   const ttl=document.createElement('span');
   ttl.className='line-through truncate'; ttl.style.cssText='font-size:15px;color:var(--ink-dim)';
   ttl.textContent=it.text||'';
@@ -1592,8 +1596,8 @@ function renderPast(){
   if(!todayDone.length && !past.length){ histBody.appendChild(histEmpty('No completed tasks yet.')); return; }
   const activeTexts=new Set(state.items.map(i=>String(i.text||'').trim()).filter(Boolean));
   const groups=[];
-  if(todayDone.length) groups.push({ name:'Today', items:todayDone.map(it=>({text:it.text,done:true,liveId:it.id})), today:true });
-  past.forEach(d=>groups.push({ name:d.name, items:d.items.map(it=>({text:it.text,done:!!it.done})), today:false }));
+  if(todayDone.length) groups.push({ name:'Today', items:todayDone.map(it=>({text:it.text,done:true,liveId:it.id,id:it.id})), today:true });
+  past.forEach(d=>groups.push({ name:d.name, items:d.items.map(it=>({text:it.text,done:!!it.done,id:it.id})), today:false }));
   groups.forEach((day,di)=>{
     const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
     const h=document.createElement('div');
@@ -1606,7 +1610,7 @@ function renderPast(){
       const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(showArrow?' pr-[44px]':'');
       const lab=document.createElement('div'); lab.className='flex items-baseline gap-2 min-w-0 flex-1';
       if(it.done){
-        const tag=document.createElement('span'); tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:18px;color:var(--ink)'; tag.textContent='Donezo.';
+        const tag=document.createElement('span'); tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:18px;color:var(--ink)'; tag.textContent=doneWord(it.id);
         const t=document.createElement('span'); t.className='tracking-[-0.36px] line-through truncate'; t.style.cssText='font-size:18px;color:var(--ink-dim)'; t.textContent=it.text;
         lab.append(tag,t);
       } else {
@@ -2194,7 +2198,7 @@ window.__buddy = {
   showMorning, render,
   renderWeather, wxKey, updateWeather,
   restartFresh, fillFromRestartStash,
-  restoreLastList, mostRecentRestorableRecord, restoreHistoryTask,
+  restoreLastList, mostRecentRestorableRecord, restoreHistoryTask, doneWord,
   hitTargetAudit,
   // Phase B hooks (confetti / settings / keyboard verification)
   fireConfetti: ()=>fireConfetti(),
@@ -2343,16 +2347,27 @@ window.__buddy = {
       state.today={date:localDate(),morningDone:true,items:[]}; editingId=null;
       document.querySelector('#morning').classList.add('hidden'); state.histOpen=false; render();
       ok('done flow: side drawer shows NO restore row', !/Restore/.test(listEl.textContent));
-      // …Past tab shows the skipped task (no Donezo) with a restore arrow…
+      // …Past tab shows the skipped task plain (no strike, no done-word) with a restore
+      // arrow, while the completed one is struck + carries a rotating done-word…
       state.histOpen=true; state.histTab='past'; render();
-      ok('done flow: Past tab shows skipped task without Donezo',
-         listEl.textContent.includes('skipped one') && !/Donezo\.\s*skipped one/.test(listEl.textContent));
+      const pastRows=[...listEl.querySelectorAll('.hrow')];
+      const skipRow=pastRows.find(r=>r.textContent.includes('skipped one'));
+      const doneRow=pastRows.find(r=>r.textContent.includes('finished'));
+      ok('done flow: skipped past task is plain (no strike, no done-word)',
+         !!skipRow && !skipRow.querySelector('.line-through') && !skipRow.querySelector('.font-semibold'));
+      ok('done flow: completed past task is struck + carries a done-word ending in !',
+         !!doneRow && !!doneRow.querySelector('.line-through') && /!$/.test((doneRow.querySelector('.font-semibold')||{}).textContent||''));
       ok('done flow: skipped past task has a restore arrow',
          !!listEl.querySelector('button[title="Restore to today"]'));
       // …and restoring brings it into today.
       restoreHistoryTask('skipped one');
       ok('done flow: restore brings the skipped task into today',
          state.items.some(i=>i.text==='skipped one'));
+      // Done-word rotation: deterministic per id, all end in "!", and they vary.
+      ok('done words: deterministic + end in "!"',
+         doneWord('abc')===doneWord('abc') && /!$/.test(doneWord('abc')));
+      ok('done words: rotate (not all identical)',
+         new Set(['a','b','c','d','e','f','g','h','i','j'].map(doneWord)).size>1);
 
       // Load more: the Done tab shows ONE WEEK at a time; a "Load more" button reveals
       // the next week. 20 days of history → 7 rows, then 14 after one click.
