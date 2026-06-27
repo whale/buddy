@@ -116,13 +116,16 @@
     #morning.lvl1 #buddyBtn:hover, #morning.lvl2 #buddyBtn:hover{ box-shadow:inset 0 0 0 999px rgba(0,0,0,.12); }
   }
 
-  /* Complete checkbox (PROTOTYPE) — leading circle on each task row. Adaptive:
-     empty = dim ring; done = filled with a check. Replaces tap-to-cycle. */
-  .check-btn{ width:22px; height:22px; flex:none; border-radius:9999px; display:grid; place-items:center;
+  /* Complete checkbox (PROTOTYPE) — circle on each task row's right column (where the
+     pencil was). Empty = ring; done = filled with a check. Adaptive across levels. */
+  .check-btn{ width:24px; height:24px; flex:none; border-radius:9999px; display:grid; place-items:center;
     border:1.6px solid var(--ink-dim); color:transparent; background:transparent;
     transition:border-color .15s ease, background-color .15s ease, color .15s ease; cursor:pointer; }
   @media (hover:hover) and (pointer:fine){ .check-btn:hover{ border-color:var(--ink); } }
   .check-btn.on{ border-color:var(--ink); background:var(--ink); color:var(--card); }   /* done: filled, check in card colour */
+  /* Row action glyphs (sleep, remove) — SOLID grey, never alpha. A translucent stroke
+     seams against the card border/divider; a solid colour reads clean. */
+  .icon-ink{ color:#8c8c8c; }
 
   /* Settings sheet adopts the state colours (red bg + light text) on red-bg. */
   #settings{ background:var(--card); transition:background-color .2s ease; }
@@ -1465,40 +1468,41 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     row.className='buddy-row pressable bd row-neutral'+ring+enter+' group relative flex items-center overflow-hidden '+(i>0?'border-t border-[#d9d9d9]':'');
     row.dataset.idx=idx;
 
-    // Leading checkbox — tap to complete (replaces tap-to-cycle); tap again to undo.
-    const check=document.createElement('button');
-    check.className='check-btn'+(it.state==='done'?' on':'');
-    check.title = it.state==='done' ? 'Mark not done' : 'Mark done';
-    check.style.marginRight='12px';
-    check.innerHTML = it.state==='done' ? CHECK : '';
-    muteIconPointerEvents(check);
-    check.addEventListener('mousedown',e=>e.preventDefault());
-    check.addEventListener('click',e=>{ e.stopPropagation(); kbActive=false; cursor=idx; cycle(it); });
-    row.appendChild(check);
-
     const txt=document.createElement('div');
     txt.dataset.tid=it.id; txt.dataset.ph='Untitled'; txt.style.fontSize='var(--fs)';
-    txt.style.paddingRight='44px';   // reserve room for the vertical icon stack (narrower than the old side-by-side icons → more text room)
-    txt.style.color = it.state==='done' ? 'var(--ink-dim)' : (lvl===2 ? '#fff' : lvl===1 ? RED : '#000');   // done = dim ink (adapts: grey on white, light on red); active uses the escalation colours
-    txt.className='flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2] '+(it.state==='done'?'line-through':'');
+    txt.style.paddingRight='44px';   // reserve room for the right action column
+    txt.style.color = it.state==='done' ? 'var(--ink-dim)' : (lvl===2 ? '#fff' : lvl===1 ? RED : '#000');   // done = dim ink; active uses the escalation colours
+    txt.className='flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2] '+(it.state==='done'?'line-through':(' cursor-text'));
     txt.textContent=it.text||''; if(!it.text)txt.classList.add('empty');
+    // Click the text to edit it (replaces the pencil icon). Enter finishes the edit.
+    txt.addEventListener('click',()=>{ if(editingId===it.id || it.state==='done') return; kbActive=false; cursor=idx; startEdit(it.id); });
     txt.addEventListener('input',()=>{ it.text=txt.textContent.trim(); });
     txt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); const had=txt.textContent.trim(); txt.blur(); if(had && activeCount()<HARD_CAP){ const nit=newItem(''); state.items.push(nit); render(); startEdit(nit.id); } } });
     txt.addEventListener('blur',()=>{ const prev=it.text; it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable'); editingId=null; if(!it.text){ tombstone(it.id); state.items=state.items.filter(x=>x.id!==it.id); } else if(it.text!==prev){ touch(it); } render(); });
     row.appendChild(txt);
 
     const onRed=lvl===2;
-    // Row actions stacked VERTICALLY on the right: edit, sleep-till-tomorrow, remove.
+    // Right action column: the CHECKBOX (always visible — the primary action) sits where
+    // the pencil used to be; Sleep + Remove fade in on hover beneath it (space reserved,
+    // so the checkbox never jumps). Editing is now click-the-text, so there's no pencil.
     const acts=document.createElement('div');
-    acts.className='absolute top-1/2 -translate-y-1/2 flex flex-col items-center gap-[5px] opacity-0 group-hover:opacity-100 transition-opacity';
-    acts.style.right=ICON_RIGHT;    // universal right padding (aligns with the sheet ✕)
+    acts.className='absolute top-1/2 -translate-y-1/2 flex flex-col items-center gap-[5px]';
+    acts.style.right=ICON_RIGHT;    // aligns with the sheet ✕
+    const check=document.createElement('button');
+    check.title = it.state==='done' ? 'Mark not done' : 'Mark done';
+    check.className='check-btn'+(it.state==='done'?' on':'');
+    check.innerHTML = it.state==='done' ? CHECK : '';
+    muteIconPointerEvents(check);
+    check.addEventListener('mousedown',e=>e.preventDefault());
+    check.addEventListener('click',e=>{ e.stopPropagation(); kbActive=false; cursor=idx; cycle(it); });
+    acts.appendChild(check);
+    // Sleep + Remove — SOLID icons (no alpha → no seam against borders), hover-revealed.
     const mkBtn=(icon,title,fn)=>{ const b=document.createElement('button'); b.title=title;
-      b.className='size-[30px] grid place-items-center rounded-full '+(onRed?'text-white hover:bg-white/20':'text-black/40 hover:bg-black/5');
+      b.className='size-[30px] grid place-items-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity '+(onRed?'text-white hover:bg-white/20':'icon-ink hover:bg-black/5');
       b.innerHTML=icon; muteIconPointerEvents(b);
       b.addEventListener('mousedown',e=>e.preventDefault());
       b.addEventListener('click',e=>{ e.stopPropagation(); fn(); });
       return b; };
-    acts.appendChild(mkBtn(EDIT_SM,'Edit',()=>startEdit(it.id)));
     acts.appendChild(mkBtn(SLEEP_SM,'Sleep till tomorrow',()=>sleepItem(it.id)));
     acts.appendChild(mkBtn(XLG,'Remove',()=>removeItem(it.id)));
     row.appendChild(acts);
