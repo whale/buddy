@@ -116,15 +116,8 @@
     #morning.lvl1 #buddyBtn:hover, #morning.lvl2 #buddyBtn:hover{ box-shadow:inset 0 0 0 999px rgba(0,0,0,.12); }
   }
 
-  /* Complete checkbox (PROTOTYPE) — circle on each task row's right column (where the
-     pencil was). Empty = ring; done = filled with a check. Adaptive across levels. */
-  .check-btn{ width:24px; height:24px; flex:none; border-radius:9999px; display:grid; place-items:center;
-    border:1.6px solid var(--ink-dim); color:transparent; background:transparent;
-    transition:border-color .15s ease, background-color .15s ease, color .15s ease; cursor:pointer; }
-  @media (hover:hover) and (pointer:fine){ .check-btn:hover{ border-color:var(--ink); } }
-  .check-btn.on{ border-color:var(--ink); background:var(--ink); color:var(--card); }   /* done: filled, check in card colour */
-  /* Row action glyphs (sleep, remove) — SOLID grey, never alpha. A translucent stroke
-     seams against the card border/divider; a solid colour reads clean. */
+  /* Row action glyphs (check, sleep, remove) — SOLID grey, never alpha. A translucent
+     stroke seams against the card border/divider; a solid colour reads clean. */
   .icon-ink{ color:#8c8c8c; }
 
   /* Settings sheet adopts the state colours (red bg + light text) on red-bg. */
@@ -522,7 +515,7 @@ const UNDO='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="
 const EDIT_SM='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
 const SLEEP_SM='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/><path d="M8 2v4"/><path d="M16 2v4"/><path d="M9.5 16h5"/><path d="m12.5 14 2 2-2 2"/></svg>';
 const XLG='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
-const CHECK='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+const CHECK='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 function muteIconPointerEvents(button){ button.querySelectorAll('svg, svg *').forEach(n=>{ n.style.pointerEvents='none'; }); return button; }
 // History button: the lucide calendar icon (replaces the day-count disc).
 const CAL='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>';
@@ -1485,24 +1478,18 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     // Right action column: the CHECKBOX (always visible — the primary action) sits where
     // the pencil used to be; Sleep + Remove fade in on hover beneath it (space reserved,
     // so the checkbox never jumps). Editing is now click-the-text, so there's no pencil.
+    // Whole column reveals on hover (like before). Complete = a checkmark icon at the
+    // top (where the pencil was), same 30px round-hover treatment as Sleep + Remove.
     const acts=document.createElement('div');
-    acts.className='absolute top-1/2 -translate-y-1/2 flex flex-col items-center gap-[5px]';
+    acts.className='absolute top-1/2 -translate-y-1/2 flex flex-col items-center gap-[5px] opacity-0 group-hover:opacity-100 transition-opacity';
     acts.style.right=ICON_RIGHT;    // aligns with the sheet ✕
-    const check=document.createElement('button');
-    check.title = it.state==='done' ? 'Mark not done' : 'Mark done';
-    check.className='check-btn'+(it.state==='done'?' on':'');
-    check.innerHTML = it.state==='done' ? CHECK : '';
-    muteIconPointerEvents(check);
-    check.addEventListener('mousedown',e=>e.preventDefault());
-    check.addEventListener('click',e=>{ e.stopPropagation(); kbActive=false; cursor=idx; cycle(it); });
-    acts.appendChild(check);
-    // Sleep + Remove — SOLID icons (no alpha → no seam against borders), hover-revealed.
     const mkBtn=(icon,title,fn)=>{ const b=document.createElement('button'); b.title=title;
-      b.className='size-[30px] grid place-items-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity '+(onRed?'text-white hover:bg-white/20':'icon-ink hover:bg-black/5');
+      b.className='size-[30px] grid place-items-center rounded-full '+(onRed?'text-white hover:bg-white/20':'icon-ink hover:bg-black/5');
       b.innerHTML=icon; muteIconPointerEvents(b);
       b.addEventListener('mousedown',e=>e.preventDefault());
       b.addEventListener('click',e=>{ e.stopPropagation(); fn(); });
       return b; };
+    acts.appendChild(mkBtn(CHECK, it.state==='done'?'Mark not done':'Mark done', ()=>{ kbActive=false; cursor=idx; cycle(it); }));
     acts.appendChild(mkBtn(SLEEP_SM,'Sleep till tomorrow',()=>sleepItem(it.id)));
     acts.appendChild(mkBtn(XLG,'Remove',()=>removeItem(it.id)));
     row.appendChild(acts);
