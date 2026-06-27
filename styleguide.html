@@ -221,6 +221,27 @@
       <p class="note">White-surface hover/selection keeps the lower-L move too (white → light grey), so the rule is uniform; only black-filled pills invert to lighten (raise L).</p>
     </div>
 
+    <h3 style="margin-top:30px">Adding punch — chroma boost &amp; blend modes</h3>
+    <p class="hint">Lower-L alone reads flat. These keep the red <b>saturated</b>. OKLCH can push chroma into the <b>P3 gamut</b> (your Mac display) — so judge these in Arc; the screenshots above are sRGB and undersell them. Hover the rows.</p>
+    <div class="grid" style="grid-template-columns:repeat(4,1fr)">
+      <div class="card" style="padding:0;overflow:hidden"><div class="hint" style="padding:10px 12px 6px">A · −L only <span style="color:#b45309;font-weight:600">flat</span></div><div style="height:78px;background:oklch(from var(--red) calc(l - 0.08) c h)"></div></div>
+      <div class="card" style="padding:0;overflow:hidden"><div class="hint" style="padding:10px 12px 6px">B · −L +chroma <span style="color:#16a34a;font-weight:600">rec.</span></div><div style="height:78px;background:oklch(from var(--red) calc(l - 0.05) calc(c + 0.05) h)"></div></div>
+      <div class="card" style="padding:0;overflow:hidden"><div class="hint" style="padding:10px 12px 6px">C · P3 max chroma</div><div style="height:78px;background:oklch(0.55 0.26 25)"></div></div>
+      <div class="card" style="padding:0;overflow:hidden"><div class="hint" style="padding:10px 12px 6px">D · multiply ×red</div><div style="height:78px;background:linear-gradient(var(--red),var(--red)),oklch(0.62 0.24 25);background-blend-mode:multiply"></div></div>
+    </div>
+    <p class="hint" style="margin-top:12px">Live "now" rows — hover to feel each:</p>
+    <div class="grid cols-2">
+      <div class="surface lvl2" style="border:0;border-radius:8px;overflow:hidden">
+        <div class="b-row" style="background:oklch(from var(--red) calc(l - 0.05) calc(c + 0.05) h)"><div class="b-title" style="color:#fff">B · −L +chroma (now)</div></div>
+        <div class="b-row" style="cursor:pointer;transition:background .15s" onmouseover="this.style.background='oklch(from var(--red) calc(l - 0.03) calc(c + 0.06) h)'" onmouseout="this.style.background='transparent'"><div class="b-title" style="color:#fff">B · hover me</div></div>
+      </div>
+      <div class="surface lvl2" style="border:0;border-radius:8px;overflow:hidden">
+        <div class="b-row" style="background:oklch(0.55 0.26 25)"><div class="b-title" style="color:#fff">C · P3 max (now)</div></div>
+        <div class="b-row" style="cursor:pointer;transition:background .15s" onmouseover="this.style.background='oklch(0.58 0.27 25)'" onmouseout="this.style.background='transparent'"><div class="b-title" style="color:#fff">C · hover me</div></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px"><p class="note" style="margin:0">Recommendation: <b>B</b> — <code>oklch(from var(--red) calc(l − .05) calc(c + .05) h)</code> for the "now"/hover red. It darkens <em>and</em> gains chroma, so it punches without going neon. <b>C</b> (explicit P3) is punchier still if you want maximum vibrance; <b>D</b> (multiply ×saturated-red) is the blend-mode route — same family, less controllable. We can also nudge the resting red itself toward P3 if the whole lvl2 should feel more vivid.</p></div>
+
     <h3 style="margin-top:30px">2 · Type scale — collapse near-duplicates</h3>
     <p class="hint">16 → 15, 13 → 14. Eight steps become six.</p>
     <div class="ba">
