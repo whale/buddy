@@ -1,9 +1,49 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-06-26. Current branch: `main` (clean). Latest commit: merge of PR #42. Released app version: **`0.2.38`** (auto-release building at wrap time — verify it published)._
+_Last updated: 2026-06-26 (evening). Current branch: `main`. Latest **released** version: **`0.2.39`**. `main` is at **`0.2.43`** with a batch of merged-but-UNRELEASED work — **`AUTO_RELEASE_MAC` is OFF on purpose** (see release state below)._
 
 Buddy is a shipped, public, self-updating macOS menu-bar focus app for ADHD.
 Repo: `github.com/whale/buddy`.
+
+## Session summary — 2026-06-26 (evening) — data-loss fix shipped + Done-tab/UX overhaul (batched, unreleased) + token-system spec
+
+**Released 0.2.39 (PR #44): overnight task-loss fix.** Root cause traced from the user's on-disk
+state: "Restart Buddy" stashed the list in a RAM-only var → dismissing the morning / relaunching
+lost it, and three backup layers all failed (recovery file overwritten because leftover tombstones
+made an empty-today look "recoverable"; `.bak` only healed an *unparseable* primary, not a valid-empty
+one; the empty-over-full guard lived only in the sync path). Six safety-only fixes: Restart now
+persists its stash + tombstones what it clears; Rust recovery-file ratchet; `load()` heals from `.bak`
++ won't overwrite a fuller `.bak`; `.bak` added as a boot-reconcile source; the **live midnight
+rollover** now carries unfinished forward + wakes deferred (shared `rolloverAndCarry()` with boot —
+previously only boot did, so leaving Buddy open across midnight dropped the working set); smokeTest
+cases for all of it. The user's 4 lost tasks were recovered from the `.bak`. smokeTest 24/24.
+
+**Merged but NOT released** (all in `main`; `AUTO_RELEASE_MAC` flipped OFF to batch them):
+- **#45** weather stroke 2→1.4; **Skip/Buddy! hover fixed** (an inline `style=color` was defeating the `:hover` rule; Buddy! now *darkens* on red, not lightens); RULE 2 gained an every-color+interactive-state clause.
+- **#46** Done tab now shows skipped/undone past tasks with a **↩ restore-to-today** arrow; removed the side-drawer restore row (morning restore untouched).
+- **#47** Done tab shows **one week + "Load more"**; dropped the vestigial `historyDays` setting.
+- **#48** the "Donezo." label now **rotates through 25 phrases** (deterministic per task id; Title Case + "!").
+- **#49** added **`styleguide.html`** (tokens / components / state matrix / discrepancy audit).
+- **#50** interaction change: **complete via a checkmark icon** in the hover action column (was tap-to-cycle), **edit by clicking the task text** (pencil removed; goes editable on mousedown so one click works), **removed the "now"/focused state**, solid action icons, weather icon **44→50px** (Figma node 17:78).
+
+**⚠️ Release state — READ BEFORE MERGING ANYTHING:** latest published = **0.2.39**. Everything after it
+is merged into `main` (~0.2.43) but **unreleased** by design — the user wants to review the batch first.
+`AUTO_RELEASE_MAC=false` is the guard (merging won't publish). To cut the single release after review:
+`gh variable set AUTO_RELEASE_MAC --body true` → `gh workflow run "Release Mac app"` → confirm `gh release list`.
+Gotcha: `gh pr merge --squash` drops a `[skip release]` PR-title tag (uses the commit msg), so the **var**
+is the real guard, not the tag. (Memory: `buddy-release-squash-gotcha`.)
+
+**Not built yet — the design-token system** (designer-approved; visual spec in the styleguide's
+"⚐ Proposals" section on the **unmerged** `feat/styleguide-proposals` branch; full spec in memory
+`buddy-token-system-todo`): OKLCH hover `--red-hover: oklch(from var(--red) calc(l-.05) calc(c+.05) h)`
+(darker *and* more saturated — a black veil goes muddy), type scale 16→15 / 13→14, icon weights
+≤20px→1.8 / weather→1.4, and de-inlining every render-time `style="color:…"` into utility classes.
+This is the next PR.
+
+**Verified:** every PR via `__buddy.smokeTest()` + an lvl0/lvl1/lvl2 visual sweep; the single-click
+edit confirmed with a real mouse click. **NOT verified:** none of the post-0.2.39 work has been in a
+**native build or on device** — only the browser preview. The lone smokeTest "hit targets" failure is a
+known headless artifact (30px hover icons under a parked Playwright mouse), not a regression.
 
 ## Session summary — 2026-06-26
 
