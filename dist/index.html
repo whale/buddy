@@ -87,6 +87,10 @@
     --chrome-ink:rgba(0,0,0,.45); --chrome-hover:rgba(0,0,0,.06);
     --sel-bg:#000; --sel-ink:#fff; --seg-track:rgba(0,0,0,.05); --line:#d9d9d9;
     --addtxt:rgba(0,0,0,.20); --addtxt-hover:#000;
+    /* Hover/selection darken — ONE shade, derived from the surface in OKLCH so the red
+       stays vivid (a flat black overlay goes muddy). Auto-adapts per level via --card. */
+    --surface-hover: oklch(from var(--card) calc(l - 0.05) calc(c + 0.015) h);
+    --cta-hover:     oklch(from var(--sel-bg) calc(l - 0.05) calc(c + 0.04) h);
   }
   #drawer.lvl1, #morning.lvl1{ --chrome-ink:var(--red); --sel-bg:var(--red); --sel-ink:#fff; }
   #drawer.lvl2, #morning.lvl2{
@@ -99,22 +103,26 @@
      selected looks, all driven by the variables above. */
   .chrome-btn{ min-width:44px; min-height:44px; color:var(--chrome-ink); transition:color .2s ease, background-color .15s ease; }
   .chrome-btn svg, .chrome-btn svg *{ pointer-events:none; }
-  @media (hover:hover) and (pointer:fine){ .chrome-btn:hover{ background-color:var(--chrome-hover); } }
+  @media (hover:hover) and (pointer:fine){ .chrome-btn:hover{ background-color:var(--surface-hover); } }
   .chrome-btn.sel, .chrome-btn.sel:hover{ background-color:var(--sel-bg); color:var(--sel-ink); }
   .tap-target{ min-width:44px; min-height:44px; }
 
-  /* Morning actions hover — same idiom as the rest of the app: dim text brightens to
-     full ink (like the Add row), and the filled CTA darkens (like rows + chrome).
-     Base colour lives HERE, not inline — an inline style would beat the :hover rule. */
+  /* Unified dark-hover for icon/text buttons (action icons, Export, Load more, restore,
+     Quit/Restart). One token, vivid on red. Black-filled CTAs lighten instead (#buddyBtn). */
+  .ihover{ transition:background-color .15s ease; }
+  @media (hover:hover) and (pointer:fine){ .ihover:hover{ background-color:var(--surface-hover); } }
+
+  /* Morning actions: dim text → full ink; the filled CTA darkens in OKLCH (stays vivid on
+     red), except the lvl0 pure-black pill which can only lighten. Pill bg is a class (.cta)
+     not inline, so the :hover background rule can win. */
   #skipToday{ transition:color .15s ease; color:var(--ink-dim); }
-  #buddyBtn{ transition:box-shadow .15s ease, transform .12s ease; }
+  #buddyBtn{ transition:box-shadow .15s ease, background-color .15s ease, transform .12s ease; }
   @media (hover:hover) and (pointer:fine){
     #skipToday:hover{ color:var(--ink); }
-    /* lvl0 pill is pure black → can't darken, so lighten it slightly. */
-    #buddyBtn:hover{ box-shadow:inset 0 0 0 999px rgba(255,255,255,.16); }
-    /* lvl1 (red) + lvl2 (white) pills DARKEN on hover, matching the row/chrome idiom. */
-    #morning.lvl1 #buddyBtn:hover, #morning.lvl2 #buddyBtn:hover{ box-shadow:inset 0 0 0 999px rgba(0,0,0,.12); }
+    #buddyBtn:hover{ box-shadow:inset 0 0 0 999px rgba(255,255,255,.16); }   /* lvl0 black pill → lighten */
+    #morning.lvl1 #buddyBtn:hover, #morning.lvl2 #buddyBtn:hover{ box-shadow:none; background-color:var(--cta-hover); }   /* red/white pill → OKLCH darken */
   }
+  .cta{ background:var(--sel-bg); color:var(--sel-ink); }
 
   /* Row action glyphs (check, sleep, remove) — SOLID grey, never alpha. A translucent
      stroke seams against the card border/divider; a solid colour reads clean. */
@@ -133,8 +141,8 @@
   /* ---- row hover affordance (gated behind real hover — §3.4) ---- */
   .buddy-row{ transition:background-color .1s ease; }
   @media (hover:hover) and (pointer:fine){
-    .row-neutral:hover{ background-color:rgba(0,0,0,.02); }   /* 2% black */
-    .lvl2 .buddy-row:hover{ background-color:#e85a5f !important; } /* red + ~10% white */
+    /* OKLCH darken (vivid on red); !important beats the lvl2 resting-red !important below */
+    .row-neutral:hover{ background-color:var(--surface-hover) !important; }
   }
   .lvl2 .buddy-row{ background-color:var(--red) !important; }
 
@@ -359,14 +367,14 @@
           </button>
           <p class="mt-2 text-[14px] text-black/35 tracking-[-0.26px] leading-snug">Pushes other windows out of Buddy's column. Asks for Accessibility permission the first time.</p>
         </div>
-        <button id="exportBtn" class="pressable w-full px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02] flex items-center justify-between gap-3 text-left">
+        <button id="exportBtn" class="pressable w-full px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] ihover flex items-center justify-between gap-3 text-left">
           <span>Export my done tasks</span>
           <span id="exportCount" class="text-[15px] text-black/35 shrink-0"></span>
         </button>
         <!-- Quit / Restart: matching pill buttons at the bottom -->
         <div class="flex items-center gap-3 px-8 py-5 border-b border-[#d9d9d9]">
-          <button id="quitBtn" class="pressable tap-target inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] hover:bg-black/[0.04]">Quit Buddy</button>
-          <button id="restartBtn" class="pressable tap-target inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] hover:bg-black/[0.04]">Restart Buddy</button>
+          <button id="quitBtn" class="pressable tap-target inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] ihover">Quit Buddy</button>
+          <button id="restartBtn" class="pressable tap-target inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] ihover">Restart Buddy</button>
         </div>
         <div class="px-8 pt-5 pb-7 text-[14px] text-black/30 tracking-[-0.26px]">Buddy <span id="appVersion">—</span></div>
       </div>
@@ -405,7 +413,7 @@
     <!-- footer -->
     <div class="shrink-0 flex items-center justify-between px-3 pt-2">
       <button id="skipToday" class="tap-target -ml-3 px-3 text-[15px] tracking-[-0.32px]">Skip</button>
-      <button id="buddyBtn" class="pressable rounded-full px-7 py-3 text-[18px] font-medium" style="background:var(--sel-bg); color:var(--sel-ink)">Buddy!</button>
+      <button id="buddyBtn" class="cta pressable rounded-full px-7 py-3 text-[18px] font-medium">Buddy!</button>
     </div>
   </div>
 </div>
@@ -1482,7 +1490,7 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     acts.className='absolute top-1/2 -translate-y-1/2 flex flex-col items-center gap-[5px] opacity-0 group-hover:opacity-100 transition-opacity';
     acts.style.right=ICON_RIGHT;    // aligns with the sheet ✕
     const mkBtn=(icon,title,fn)=>{ const b=document.createElement('button'); b.title=title;
-      b.className='size-[30px] grid place-items-center rounded-full '+(onRed?'text-white hover:bg-white/20':'icon-ink hover:bg-black/5');
+      b.className='size-[30px] grid place-items-center rounded-full ihover '+(onRed?'text-white':'icon-ink');
       b.innerHTML=icon; muteIconPointerEvents(b);
       b.addEventListener('mousedown',e=>e.preventDefault());
       b.addEventListener('click',e=>{ e.stopPropagation(); fn(); });
@@ -1556,7 +1564,7 @@ function buildDonezoRow(it, idx, morning){
   acts.className='absolute top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover:opacity-100 transition-opacity';
   acts.style.right=ICON_RIGHT;
   const b=document.createElement('button'); b.title='Restore to list';
-  b.className='size-[30px] grid place-items-center rounded-full hover:bg-black/10'; b.style.color='var(--ink-dim)';
+  b.className='size-[30px] grid place-items-center rounded-full ihover'; b.style.color='var(--ink-dim)';
   b.innerHTML=UNDO; muteIconPointerEvents(b);
   b.addEventListener('mousedown',e=>e.preventDefault());
   b.addEventListener('click',e=>{ e.stopPropagation(); restoreItem(it.id); });
@@ -1620,14 +1628,14 @@ function renderPast(){
       r.appendChild(lab);
       if(day.today && it.done){
         const u=document.createElement('button'); u.title='Restore to list';
-        u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full hover:bg-black/10 opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
+        u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
         u.style.right=ICON_RIGHT; u.innerHTML=UNDO; muteIconPointerEvents(u);
         u.addEventListener('mousedown',e=>e.preventDefault());
         u.addEventListener('click',()=>restoreItem(it.liveId));
         r.appendChild(u);
       } else if(canRestore){
         const u=document.createElement('button'); u.title='Restore to today';
-        u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full hover:bg-black/10 opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
+        u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
         u.style.right=ICON_RIGHT; u.innerHTML=UNDO; muteIconPointerEvents(u);
         u.addEventListener('mousedown',e=>e.preventDefault());
         u.addEventListener('click',()=>restoreHistoryTask(it.text));
@@ -1642,7 +1650,7 @@ function renderPast(){
   const hasMore = (state.history||[]).some(r=> r && typeof r.date==='string' && r.date < boundary);
   if(hasMore){
     const more=document.createElement('button');
-    more.className='bd w-full px-8 py-4 text-[15px] tracking-[-0.3px] border-t hover:bg-black/[0.03] transition-colors';
+    more.className='bd w-full px-8 py-4 text-[15px] tracking-[-0.3px] border-t ihover';
     more.style.color='var(--ink-dim)';                       // adaptive: light on red
     more.textContent='Load more';
     more.addEventListener('mousedown',e=>e.preventDefault());
@@ -1670,7 +1678,7 @@ function renderFuture(){
       t.textContent=d.text; r.appendChild(t);
       // Edit (left): inline-edit the future task's text.
       const edit=document.createElement('button'); edit.title='Edit';
-      edit.className='chrome absolute right-9 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 opacity-0 group-hover/h:opacity-100 transition-opacity';
+      edit.className='chrome absolute right-9 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
       edit.innerHTML=EDIT_SM; muteIconPointerEvents(edit);
       edit.addEventListener('mousedown',e=>e.preventDefault());
       edit.addEventListener('click',()=>{ t.contentEditable='true'; t.focus();
@@ -1681,7 +1689,7 @@ function renderFuture(){
       r.appendChild(edit);
       // Delete (right): drop it so it won't come back.
       const del=document.createElement('button'); del.title='Delete — won’t come back';
-      del.className='chrome absolute right-0 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 opacity-0 group-hover/h:opacity-100 transition-opacity';
+      del.className='chrome absolute right-0 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
       del.innerHTML=XICON; muteIconPointerEvents(del);
       del.addEventListener('mousedown',e=>e.preventDefault());
       del.addEventListener('click',()=>deleteDeferred(d.id));
