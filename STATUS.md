@@ -1,6 +1,6 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-06-26 (evening). Current branch: `main`. Latest **released** version: **`0.2.39`**. `main` is at **`0.2.43`** with a batch of merged-but-UNRELEASED work — **`AUTO_RELEASE_MAC` is OFF on purpose** (see release state below)._
+_Last updated: 2026-06-27. Current branch: `main`. Latest **released** version: **`0.2.45`** — the full batch (data-loss fix + UX overhaul + OKLCH token system) is now SHIPPED and live. `AUTO_RELEASE_MAC` is still **OFF** (manual `gh workflow run "Release Mac app"` cuts releases; flip the var to `true` to restore auto-release-on-merge). Only open work: the de-inline-styles follow-up (memory `buddy-token-system-todo`)._
 
 Buddy is a shipped, public, self-updating macOS menu-bar focus app for ADHD.
 Repo: `github.com/whale/buddy`.
