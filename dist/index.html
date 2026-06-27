@@ -1468,7 +1468,11 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     txt.className='flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2] '+(it.state==='done'?'line-through':(' cursor-text'));
     txt.textContent=it.text||''; if(!it.text)txt.classList.add('empty');
     // Click the text to edit it (replaces the pencil icon). Enter finishes the edit.
-    txt.addEventListener('click',()=>{ if(editingId===it.id || it.state==='done') return; kbActive=false; cursor=idx; startEdit(it.id); });
+    // Become editable on MOUSEDOWN — before the browser places the caret — so a single
+    // click drops the cursor at the click point (setting it on `click` was a tick too
+    // late, which is why it used to take two clicks). Don't preventDefault: let the
+    // native mousedown focus + position the caret.
+    txt.addEventListener('mousedown',()=>{ if(editingId===it.id || it.state==='done') return; kbActive=false; cursor=idx; editingId=it.id; txt.setAttribute('contenteditable','true'); txt.classList.remove('empty'); });
     txt.addEventListener('input',()=>{ it.text=txt.textContent.trim(); });
     txt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); const had=txt.textContent.trim(); txt.blur(); if(had && activeCount()<HARD_CAP){ const nit=newItem(''); state.items.push(nit); render(); startEdit(nit.id); } } });
     txt.addEventListener('blur',()=>{ const prev=it.text; it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable'); editingId=null; if(!it.text){ tombstone(it.id); state.items=state.items.filter(x=>x.id!==it.id); } else if(it.text!==prev){ touch(it); } render(); });
