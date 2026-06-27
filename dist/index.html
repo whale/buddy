@@ -1479,11 +1479,9 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     row.appendChild(txt);
 
     const onRed=lvl===2;
-    // Right action column: the CHECKBOX (always visible — the primary action) sits where
-    // the pencil used to be; Sleep + Remove fade in on hover beneath it (space reserved,
-    // so the checkbox never jumps). Editing is now click-the-text, so there's no pencil.
-    // Whole column reveals on hover (like before). Complete = a checkmark icon at the
-    // top (where the pencil was), same 30px round-hover treatment as Sleep + Remove.
+    // Right action column reveals on hover (like before). Editing is now click-the-text
+    // (no pencil). Complete = a checkmark icon at the top, where the pencil used to be,
+    // with the same 30px round-hover treatment as Sleep + Remove.
     const acts=document.createElement('div');
     acts.className='absolute top-1/2 -translate-y-1/2 flex flex-col items-center gap-[5px] opacity-0 group-hover:opacity-100 transition-opacity';
     acts.style.right=ICON_RIGHT;    // aligns with the sheet ✕
