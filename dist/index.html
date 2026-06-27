@@ -87,6 +87,10 @@
     --chrome-ink:rgba(0,0,0,.45); --chrome-hover:rgba(0,0,0,.06);
     --sel-bg:#000; --sel-ink:#fff; --seg-track:rgba(0,0,0,.05); --line:#d9d9d9;
     --addtxt:rgba(0,0,0,.20); --addtxt-hover:#000;
+    /* Hover/selection darken — ONE shade, derived from the surface in OKLCH so the red
+       stays vivid (a flat black overlay goes muddy). Auto-adapts per level via --card. */
+    --surface-hover: oklch(from var(--card) calc(l - 0.05) calc(c + 0.015) h);
+    --cta-hover:     oklch(from var(--sel-bg) calc(l - 0.05) calc(c + 0.04) h);
   }
   #drawer.lvl1, #morning.lvl1{ --chrome-ink:var(--red); --sel-bg:var(--red); --sel-ink:#fff; }
   #drawer.lvl2, #morning.lvl2{
@@ -99,22 +103,26 @@
      selected looks, all driven by the variables above. */
   .chrome-btn{ min-width:44px; min-height:44px; color:var(--chrome-ink); transition:color .2s ease, background-color .15s ease; }
   .chrome-btn svg, .chrome-btn svg *{ pointer-events:none; }
-  @media (hover:hover) and (pointer:fine){ .chrome-btn:hover{ background-color:var(--chrome-hover); } }
+  @media (hover:hover) and (pointer:fine){ .chrome-btn:hover{ background-color:var(--surface-hover); } }
   .chrome-btn.sel, .chrome-btn.sel:hover{ background-color:var(--sel-bg); color:var(--sel-ink); }
   .tap-target{ min-width:44px; min-height:44px; }
 
-  /* Morning actions hover — same idiom as the rest of the app: dim text brightens to
-     full ink (like the Add row), and the filled CTA darkens (like rows + chrome).
-     Base colour lives HERE, not inline — an inline style would beat the :hover rule. */
+  /* Unified dark-hover for icon/text buttons (action icons, Export, Load more, restore,
+     Quit/Restart). One token, vivid on red. Black-filled CTAs lighten instead (#buddyBtn). */
+  .ihover{ transition:background-color .15s ease; }
+  @media (hover:hover) and (pointer:fine){ .ihover:hover{ background-color:var(--surface-hover); } }
+
+  /* Morning actions: dim text → full ink; the filled CTA darkens in OKLCH (stays vivid on
+     red), except the lvl0 pure-black pill which can only lighten. Pill bg is a class (.cta)
+     not inline, so the :hover background rule can win. */
   #skipToday{ transition:color .15s ease; color:var(--ink-dim); }
-  #buddyBtn{ transition:box-shadow .15s ease, transform .12s ease; }
+  #buddyBtn{ transition:box-shadow .15s ease, background-color .15s ease, transform .12s ease; }
   @media (hover:hover) and (pointer:fine){
     #skipToday:hover{ color:var(--ink); }
-    /* lvl0 pill is pure black → can't darken, so lighten it slightly. */
-    #buddyBtn:hover{ box-shadow:inset 0 0 0 999px rgba(255,255,255,.16); }
-    /* lvl1 (red) + lvl2 (white) pills DARKEN on hover, matching the row/chrome idiom. */
-    #morning.lvl1 #buddyBtn:hover, #morning.lvl2 #buddyBtn:hover{ box-shadow:inset 0 0 0 999px rgba(0,0,0,.12); }
+    #buddyBtn:hover{ box-shadow:inset 0 0 0 999px rgba(255,255,255,.16); }   /* lvl0 black pill → lighten */
+    #morning.lvl1 #buddyBtn:hover, #morning.lvl2 #buddyBtn:hover{ box-shadow:none; background-color:var(--cta-hover); }   /* red/white pill → OKLCH darken */
   }
+  .cta{ background:var(--sel-bg); color:var(--sel-ink); }
 
   /* Row action glyphs (check, sleep, remove) — SOLID grey, never alpha. A translucent
      stroke seams against the card border/divider; a solid colour reads clean. */
@@ -133,8 +141,8 @@
   /* ---- row hover affordance (gated behind real hover — §3.4) ---- */
   .buddy-row{ transition:background-color .1s ease; }
   @media (hover:hover) and (pointer:fine){
-    .row-neutral:hover{ background-color:rgba(0,0,0,.02); }   /* 2% black */
-    .lvl2 .buddy-row:hover{ background-color:#e85a5f !important; } /* red + ~10% white */
+    /* OKLCH darken (vivid on red); !important beats the lvl2 resting-red !important below */
+    .row-neutral:hover{ background-color:var(--surface-hover) !important; }
   }
   .lvl2 .buddy-row{ background-color:var(--red) !important; }
 
@@ -281,11 +289,11 @@
     <div class="flex items-center justify-between gap-3 px-6 py-4">
       <div class="flex items-center gap-3 min-w-0">
         <span class="size-[34px] shrink-0 grid place-items-center rounded-full bg-black text-white">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
         </span>
         <div class="min-w-0">
           <div id="updateTitle" class="text-[15px] font-semibold tracking-[-0.3px] text-black truncate">Update ready</div>
-          <div id="updateSub" class="text-[13px] text-black/45 tracking-[-0.26px] truncate">A new version of Buddy is available</div>
+          <div id="updateSub" class="text-[14px] text-black/45 tracking-[-0.26px] truncate">A new version of Buddy is available</div>
         </div>
       </div>
       <button id="updateInstall" class="pressable shrink-0 px-4 py-2 rounded-full bg-black text-white text-[14px] font-medium tracking-[-0.28px] hover:bg-black/85">Install</button>
@@ -298,13 +306,13 @@
       <div class="flex items-center gap-2">
         <button id="pinBtn" title="Pin open"
           class="pressable chrome-btn size-[39px] grid place-items-center rounded-full">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
         </button>
         <button id="histBtn" title="History"
           class="pressable chrome-btn size-[39px] grid place-items-center rounded-full"></button>
         <button id="gearBtn" title="Settings"
           class="pressable chrome-btn size-[39px] grid place-items-center rounded-full">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
       </div>
       <span id="appTitle" class="chrome text-[18px] text-black/60 tracking-[-0.36px]">Buddy</span>
@@ -334,7 +342,7 @@
           <span class="text-[18px] font-medium text-black/80 tracking-[-0.36px]">Settings</span>
           <button id="settingsClose" title="Close"
             class="pressable chrome-btn size-[36px] grid place-items-center rounded-full">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
           </button>
         </div>
         <div class="h-px w-full bg-[#d9d9d9]"></div>
@@ -348,7 +356,7 @@
             <input id="celebrateSlider" type="range" min="0" max="100" value="100" class="flex-1 buddy-range cursor-pointer">
             <span class="text-[20px] leading-none">🦜</span>
           </div>
-          <p id="confettiOverride" class="mt-3 text-[13px] text-black/40 leading-snug hidden">Off while your system is set to reduce motion.</p>
+          <p id="confettiOverride" class="mt-3 text-[14px] text-black/40 leading-snug hidden">Off while your system is set to reduce motion.</p>
         </div>
         <div class="border-b border-[#d9d9d9] px-8 py-5">
           <button id="reserveBtn" role="switch" aria-checked="false" class="pressable tap-target w-full flex items-center justify-between">
@@ -357,18 +365,18 @@
               <span id="reserveKnob" class="absolute top-[3px] left-[3px] size-[20px] rounded-full bg-white shadow transition-transform"></span>
             </span>
           </button>
-          <p class="mt-2 text-[13px] text-black/35 tracking-[-0.26px] leading-snug">Pushes other windows out of Buddy's column. Asks for Accessibility permission the first time.</p>
+          <p class="mt-2 text-[14px] text-black/35 tracking-[-0.26px] leading-snug">Pushes other windows out of Buddy's column. Asks for Accessibility permission the first time.</p>
         </div>
-        <button id="exportBtn" class="pressable w-full px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] hover:bg-black/[0.02] flex items-center justify-between gap-3 text-left">
+        <button id="exportBtn" class="pressable w-full px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] ihover flex items-center justify-between gap-3 text-left">
           <span>Export my done tasks</span>
           <span id="exportCount" class="text-[15px] text-black/35 shrink-0"></span>
         </button>
         <!-- Quit / Restart: matching pill buttons at the bottom -->
         <div class="flex items-center gap-3 px-8 py-5 border-b border-[#d9d9d9]">
-          <button id="quitBtn" class="pressable tap-target inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] hover:bg-black/[0.04]">Quit Buddy</button>
-          <button id="restartBtn" class="pressable tap-target inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] hover:bg-black/[0.04]">Restart Buddy</button>
+          <button id="quitBtn" class="pressable tap-target inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] ihover">Quit Buddy</button>
+          <button id="restartBtn" class="pressable tap-target inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] ihover">Restart Buddy</button>
         </div>
-        <div class="px-8 pt-5 pb-7 text-[13px] text-black/30 tracking-[-0.26px]">Buddy <span id="appVersion">—</span></div>
+        <div class="px-8 pt-5 pb-7 text-[14px] text-black/30 tracking-[-0.26px]">Buddy <span id="appVersion">—</span></div>
       </div>
     </div>
   </div>
@@ -404,8 +412,8 @@
     </div>
     <!-- footer -->
     <div class="shrink-0 flex items-center justify-between px-3 pt-2">
-      <button id="skipToday" class="tap-target -ml-3 px-3 text-[16px] tracking-[-0.32px]">Skip</button>
-      <button id="buddyBtn" class="pressable rounded-full px-7 py-3 text-[18px] font-medium" style="background:var(--sel-bg); color:var(--sel-ink)">Buddy!</button>
+      <button id="skipToday" class="tap-target -ml-3 px-3 text-[15px] tracking-[-0.32px]">Skip</button>
+      <button id="buddyBtn" class="cta pressable rounded-full px-7 py-3 text-[18px] font-medium">Buddy!</button>
     </div>
   </div>
 </div>
@@ -502,19 +510,19 @@ const todayWrap=document.createElement('div'); todayWrap.className='flex-1 min-h
 const histBody =document.createElement('div');
 const last7    =document.createElement('div');
 
-const XICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
-const PLUS='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
-const UNDO='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';
+const XICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+const PLUS='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
+const UNDO='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';
 // Row action icons — smaller glyphs inside the unchanged 30px circle targets.
 // Edit (pencil) + Sleep (calendar→arrow) shrink to 14px; Remove uses the larger
 // lucide X at 20px.
-const EDIT_SM='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
-const SLEEP_SM='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/><path d="M8 2v4"/><path d="M16 2v4"/><path d="M9.5 16h5"/><path d="m12.5 14 2 2-2 2"/></svg>';
-const XLG='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
-const CHECK='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+const EDIT_SM='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
+const SLEEP_SM='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/><path d="M8 2v4"/><path d="M16 2v4"/><path d="M9.5 16h5"/><path d="m12.5 14 2 2-2 2"/></svg>';
+const XLG='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+const CHECK='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 function muteIconPointerEvents(button){ button.querySelectorAll('svg, svg *').forEach(n=>{ n.style.pointerEvents='none'; }); return button; }
 // History button: the lucide calendar icon (replaces the day-count disc).
-const CAL='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>';
+const CAL='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>';
 function updateHistBtn(){
   const btn=$('#histBtn'); if(!btn) return;
   btn.style.display = '';            // history is always available (14-day view)
@@ -1397,7 +1405,7 @@ function buildRestoreRowEl(labelText, count, onClick, rowStyle, morning, first){
   const row=document.createElement('div');
   row.style.cssText=rowStyle;
   row.className='buddy-row addrow pressable row-neutral bd group relative flex items-center cursor-pointer overflow-hidden '+(first?'':'border-t border-[#d9d9d9]');
-  row.innerHTML='<div class="flex items-baseline justify-between gap-4 w-full"><span class="font-medium tracking-[-0.48px]" style="font-size:var(--fs);color:var(--ink)">'+labelText+'</span><span class="shrink-0 tracking-[-0.28px]" style="font-size:'+(morning?'16px':'14px')+';color:var(--ink-dim)">'+count+' task'+(count===1?'':'s')+'</span></div>';
+  row.innerHTML='<div class="flex items-baseline justify-between gap-4 w-full"><span class="font-medium tracking-[-0.48px]" style="font-size:var(--fs);color:var(--ink)">'+labelText+'</span><span class="shrink-0 tracking-[-0.28px]" style="font-size:'+(morning?'15px':'14px')+';color:var(--ink-dim)">'+count+' task'+(count===1?'':'s')+'</span></div>';
   row.addEventListener('mousedown',e=>e.preventDefault());
   row.addEventListener('click',onClick);
   return row;
@@ -1482,7 +1490,7 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     acts.className='absolute top-1/2 -translate-y-1/2 flex flex-col items-center gap-[5px] opacity-0 group-hover:opacity-100 transition-opacity';
     acts.style.right=ICON_RIGHT;    // aligns with the sheet ✕
     const mkBtn=(icon,title,fn)=>{ const b=document.createElement('button'); b.title=title;
-      b.className='size-[30px] grid place-items-center rounded-full '+(onRed?'text-white hover:bg-white/20':'icon-ink hover:bg-black/5');
+      b.className='size-[30px] grid place-items-center rounded-full ihover '+(onRed?'text-white':'icon-ink');
       b.innerHTML=icon; muteIconPointerEvents(b);
       b.addEventListener('mousedown',e=>e.preventDefault());
       b.addEventListener('click',e=>{ e.stopPropagation(); fn(); });
@@ -1556,7 +1564,7 @@ function buildDonezoRow(it, idx, morning){
   acts.className='absolute top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover:opacity-100 transition-opacity';
   acts.style.right=ICON_RIGHT;
   const b=document.createElement('button'); b.title='Restore to list';
-  b.className='size-[30px] grid place-items-center rounded-full hover:bg-black/10'; b.style.color='var(--ink-dim)';
+  b.className='size-[30px] grid place-items-center rounded-full ihover'; b.style.color='var(--ink-dim)';
   b.innerHTML=UNDO; muteIconPointerEvents(b);
   b.addEventListener('mousedown',e=>e.preventDefault());
   b.addEventListener('click',e=>{ e.stopPropagation(); restoreItem(it.id); });
@@ -1572,7 +1580,7 @@ function renderHist(){
 }
 function histEmpty(msg){
   const e=document.createElement('div');
-  e.className='px-8 py-10 text-[16px] tracking-[-0.32px]';
+  e.className='px-8 py-10 text-[15px] tracking-[-0.32px]';
   e.style.color='var(--ink-dim)';   // adapts on red bg
   e.textContent=msg; return e;
 }
@@ -1620,14 +1628,14 @@ function renderPast(){
       r.appendChild(lab);
       if(day.today && it.done){
         const u=document.createElement('button'); u.title='Restore to list';
-        u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full hover:bg-black/10 opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
+        u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
         u.style.right=ICON_RIGHT; u.innerHTML=UNDO; muteIconPointerEvents(u);
         u.addEventListener('mousedown',e=>e.preventDefault());
         u.addEventListener('click',()=>restoreItem(it.liveId));
         r.appendChild(u);
       } else if(canRestore){
         const u=document.createElement('button'); u.title='Restore to today';
-        u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full hover:bg-black/10 opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
+        u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
         u.style.right=ICON_RIGHT; u.innerHTML=UNDO; muteIconPointerEvents(u);
         u.addEventListener('mousedown',e=>e.preventDefault());
         u.addEventListener('click',()=>restoreHistoryTask(it.text));
@@ -1642,7 +1650,7 @@ function renderPast(){
   const hasMore = (state.history||[]).some(r=> r && typeof r.date==='string' && r.date < boundary);
   if(hasMore){
     const more=document.createElement('button');
-    more.className='bd w-full px-8 py-4 text-[15px] tracking-[-0.3px] border-t hover:bg-black/[0.03] transition-colors';
+    more.className='bd w-full px-8 py-4 text-[15px] tracking-[-0.3px] border-t ihover';
     more.style.color='var(--ink-dim)';                       // adaptive: light on red
     more.textContent='Load more';
     more.addEventListener('mousedown',e=>e.preventDefault());
@@ -1670,7 +1678,7 @@ function renderFuture(){
       t.textContent=d.text; r.appendChild(t);
       // Edit (left): inline-edit the future task's text.
       const edit=document.createElement('button'); edit.title='Edit';
-      edit.className='chrome absolute right-9 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 opacity-0 group-hover/h:opacity-100 transition-opacity';
+      edit.className='chrome absolute right-9 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
       edit.innerHTML=EDIT_SM; muteIconPointerEvents(edit);
       edit.addEventListener('mousedown',e=>e.preventDefault());
       edit.addEventListener('click',()=>{ t.contentEditable='true'; t.focus();
@@ -1681,7 +1689,7 @@ function renderFuture(){
       r.appendChild(edit);
       // Delete (right): drop it so it won't come back.
       const del=document.createElement('button'); del.title='Delete — won’t come back';
-      del.className='chrome absolute right-0 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 hover:bg-black/5 opacity-0 group-hover/h:opacity-100 transition-opacity';
+      del.className='chrome absolute right-0 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
       del.innerHTML=XICON; muteIconPointerEvents(del);
       del.addEventListener('mousedown',e=>e.preventDefault());
       del.addEventListener('click',()=>deleteDeferred(d.id));
