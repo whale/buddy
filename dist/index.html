@@ -132,18 +132,14 @@
 
   /* ---- row hover affordance (gated behind real hover — §3.4) ---- */
   .buddy-row{ transition:background-color .1s ease; }
-  .row-focused{ background-color:#f4f4f4; }
   @media (hover:hover) and (pointer:fine){
     .row-neutral:hover{ background-color:rgba(0,0,0,.02); }   /* 2% black */
-    .row-focused:hover{ background-color:#f7f7f7; }           /* selected: lightens slightly on hover, stays grey (still reads as selected) */
     .lvl2 .buddy-row:hover{ background-color:#e85a5f !important; } /* red + ~10% white */
   }
   .lvl2 .buddy-row{ background-color:var(--red) !important; }
-  /* focused/"now" on red: 15% black laid over the red to darken it */
-  .lvl2 .row-focused{ background-image: linear-gradient(rgba(0,0,0,.15),rgba(0,0,0,.15)) !important; }
 
-  /* ---- keyboard cursor ring: a transient nav cursor, distinct from the
-     grey "now"/focused STATE (§3.2). Inset ring so it reads on any bg. ---- */
+  /* ---- keyboard cursor ring: a transient nav cursor. Inset ring so it reads
+     on any bg. ---- */
   /* keyboard cursor = a darker background, no border/box */
   .cursor-ring{ background-color: rgba(0,0,0,.06); }
   .lvl2 .cursor-ring{ background-image: linear-gradient(rgba(0,0,0,.10),rgba(0,0,0,.10)); }
@@ -2038,8 +2034,7 @@ $('#skipToday')?.addEventListener('click', e=>{ e.stopPropagation(); skip(); });
 
 /* ====================================================================
    KEYBOARD LAYER  (§3.2) — one cursor model. The cursor RING is a
-   transient navigation marker; the grey "now"/focused is a task STATE.
-   They look different by design (see .cursor-ring CSS).
+   transient navigation marker (see .cursor-ring CSS).
    While editingId!==null the global layer is INERT (Enter commits the
    edit; no double-fire).
    ==================================================================== */
@@ -2222,7 +2217,7 @@ window.__buddy = {
     try{
       state.tombstones={};
       state.today={ date:localDate(), morningDone:true, items:[
-        {id:'s1',text:'alpha',state:'neutral',v:1},{id:'s2',text:'beta',state:'focused',v:1} ] };
+        {id:'s1',text:'alpha',state:'neutral',v:1},{id:'s2',text:'beta',state:'neutral',v:1} ] };
       editingId=null; render();
       addAndEdit();
       ok('add creates a new item', state.items.length===3, 'len='+state.items.length);
@@ -2294,7 +2289,7 @@ window.__buddy = {
       // the empty is "explained" and the durability guards don't heal it back.
       state.tombstones={}; restartStash=null;
       state.today={ date:localDate(), morningDone:true, items:[
-        {id:'rs1',text:'keep me',state:'neutral',v:1},{id:'rs2',text:'and me',state:'focused',v:1} ] };
+        {id:'rs1',text:'keep me',state:'neutral',v:1},{id:'rs2',text:'and me',state:'neutral',v:1} ] };
       editingId=null; render();
       restartFresh();
       ok('restart: clears today + tombstones the cleared items (explained empty)',
@@ -2642,7 +2637,7 @@ function buildBugLogs(){
     'when: '+new Date().toISOString(),
     'platform: '+navigator.userAgent,
     // counts only — never the task text (the screenshot is the visual report)
-    'today: '+state.items.length+' tasks (focused '+state.items.filter(i=>i.state==='focused').length+', done '+state.items.filter(i=>i.state==='done').length+')',
+    'today: '+state.items.length+' tasks (done '+state.items.filter(i=>i.state==='done').length+')',
     'deferred: '+(state.deferred?.length||0)+' · pinned: '+state.pinned+' · morningDone: '+state.today.morningDone,
     '',
     '--- recent logs ---',
