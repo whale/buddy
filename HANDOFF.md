@@ -1,13 +1,14 @@
 # Buddy — Next Session Handoff
 
-_Last updated: 2026-06-26 (evening)._
+_Last updated: 2026-06-27._
 
 ## Start here
 
-- Branch: `main`. Latest commit: merge of **PR #50**.
-- **Released** app version: **`0.2.39`** (the data-loss fix). `main` is at **`0.2.43`** with a batch of merged-but-**unreleased** UX work.
-- **`AUTO_RELEASE_MAC` is OFF on purpose.** Merging won't publish. The user is reviewing the batch before one release. To ship it once approved: `gh variable set AUTO_RELEASE_MAC --body true` → `gh workflow run "Release Mac app"` → `gh release list`.
-- Working tree clean, no open PRs.
+- Branch: `main`, clean, no open PRs.
+- **Released = `0.2.45`** (Latest). The whole batch shipped: data-loss fix (0.2.39) + UX overhaul (#45–#50) + OKLCH token system (#52).
+- `AUTO_RELEASE_MAC` is **OFF** — releases are manual: `gh workflow run "Release Mac app"` (it bumps + builds + publishes). Flip the var to `true` to restore auto-release-on-merge.
+- **Only open work:** the de-inline-styles follow-up (move render-time `style="color:…"` → utility classes). Spec in memory `buddy-token-system-todo`.
+- Also unmerged: `feat/styleguide-proposals` (the styleguide's Proposals/discrepancy spec) — merge or drop.
 
 ## Next 3–5 tasks
 
