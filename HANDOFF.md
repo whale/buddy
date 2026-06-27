@@ -1,13 +1,32 @@
 # Buddy — Next Session Handoff
 
-_Last updated: 2026-06-26._
+_Last updated: 2026-06-26 (evening)._
 
 ## Start here
 
-- Branch: `main` (clean, in sync with `origin/main`).
-- Latest commit: merge of **PR #42** (toggle click fix).
-- Released app version: **`0.2.38`** — ⚠️ auto-release was **building** at wrap. First thing next session: confirm it published (`gh release view`) and that installing it restores clicking.
-- Working tree is clean. The auto-release pipeline is live: merging to `main` cuts a signed release automatically.
+- Branch: `main`. Latest commit: merge of **PR #50**.
+- **Released** app version: **`0.2.39`** (the data-loss fix). `main` is at **`0.2.43`** with a batch of merged-but-**unreleased** UX work.
+- **`AUTO_RELEASE_MAC` is OFF on purpose.** Merging won't publish. The user is reviewing the batch before one release. To ship it once approved: `gh variable set AUTO_RELEASE_MAC --body true` → `gh workflow run "Release Mac app"` → `gh release list`.
+- Working tree clean, no open PRs.
+
+## Next 3–5 tasks
+
+1. **Build the design-token system** as the next PR (branch off `main`). Spec: memory `buddy-token-system-todo` + the styleguide's "⚐ Proposals" section (on **unmerged** `feat/styleguide-proposals`). OKLCH hover (`--red-hover: oklch(from var(--red) calc(l-.05) calc(c+.05) h)`), type scale 16→15 / 13→14, icon weights ≤20→1.8 / weather 1.4, de-inline all `style="color:…"`. Verify all three colour states.
+2. **Decide on `feat/styleguide-proposals`** — merge it (keeps the Proposals/discrepancy spec in the styleguide) or fold its content into task 1's PR.
+3. **Cut the batched release** when the user has reviewed: flip `AUTO_RELEASE_MAC` on, dispatch the release workflow, verify it publishes (DMG + tarball + `latest.json`), and that the in-app updater offers it.
+4. **On-device check** of the new interaction (checkbox-complete, click-to-edit) and the post-0.2.39 UX in a real native build — so far only browser-verified.
+5. **Prune stale local branches** (`feat/sync-*`, `worktree-agent-*`, merged `feat/styleguide`, `docs/session-wrap-*`).
+
+## What just happened (2026-06-26 evening)
+
+Shipped **0.2.39** (PR #44) — the **overnight task-loss fix** (Restart stashed the list in RAM only;
+3 backup layers had holes; 6 safety-only fixes; recovered the user's 4 lost tasks from the `.bak`).
+Then merged a **batch of UX work, intentionally unreleased** (`AUTO_RELEASE_MAC` off): hover fix +
+weather stroke (#45), Done-tab restore-from-skipped + drawer-restore removed (#46), Done tab
+one-week + Load more (#47), 25 rotating done-words (#48), `styleguide.html` (#49), and the big
+**interaction change** (#50): complete via a **checkmark icon**, **edit by clicking the text**, the
+**"now"/focused state removed**, solid icons, weather icon 50px. Full detail + the locked token-system
+spec in STATUS.md (2026-06-26 evening entry). Everything browser-verified only; not yet in a native build.
 
 ## What just happened (2026-06-26)
 
