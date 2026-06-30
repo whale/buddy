@@ -516,7 +516,6 @@ const UNDO='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="
 // Row action icons — smaller glyphs inside the unchanged 30px circle targets.
 // Edit (pencil) + Sleep (calendar→arrow) shrink to 14px; Remove uses the larger
 // lucide X at 20px.
-const EDIT_SM='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
 const SLEEP_SM='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/><path d="M8 2v4"/><path d="M16 2v4"/><path d="M9.5 16h5"/><path d="m12.5 14 2 2-2 2"/></svg>';
 const XLG='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
 const CHECK='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
@@ -1070,10 +1069,11 @@ function maybeRollover(){
   }
 }
 
-/* Roll the day over AND carry the unfinished working set forward, then wake any
-   slept-till-today tasks. SHARED by boot and the live midnight trigger so the two
-   can never diverge — previously only boot carried forward, so leaving Buddy open
-   across midnight silently dropped the day's unfinished tasks into history. */
+/* Roll the day over AND carry the unfinished working set forward. SHARED by boot
+   and the live midnight trigger so the two can never diverge — previously only boot
+   carried forward, so leaving Buddy open across midnight silently dropped the day's
+   unfinished tasks into history. (Future/deferred tasks are a manual holding pen now
+   — they no longer auto-return; you add them yourself from the Future tab.) */
 function rolloverAndCarry(){
   const histBefore=state.history.length;
   const rolled=maybeRollover();
@@ -1087,7 +1087,6 @@ function rolloverAndCarry(){
       });
     }
   }
-  wakeDeferred();                             // bring back any tasks slept till today
   return rolled;
 }
 
@@ -1143,24 +1142,24 @@ function lastNDays(n){
 /* ----------------------- sleep / defer to tomorrow --------------- */
 function tomorrowDate(){ const d=new Date(); d.setDate(d.getDate()+1); return localDate(d); }
 function yesterdayDate(){ const d=new Date(); d.setDate(d.getDate()-1); return localDate(d); }
-/* "Sleep till tomorrow": pull the task out of today and park it to return
-   on the next day (handled by wakeDeferred at boot/rollover). */
+/* "Move to Future": pull the task out of today and park it in the Future holding
+   pen. It stays there until you add it back yourself (no auto-return). `wake` is
+   kept only as a record of when it was parked. */
 function sleepItem(id){
   const it=state.items.find(x=>x.id===id); if(!it) return;
   state.deferred.push({ id:nid(), text:it.text, wake:tomorrowDate() });
   tombstone(id);                                   // it leaves today under a new deferred id → tombstone the old one
   state.items=state.items.filter(x=>x.id!==id);
-  render();
+  save(); render();
 }
-/* Wake any parked tasks whose day has arrived back into today's list. */
-function wakeDeferred(){
-  if(!state.deferred || !state.deferred.length) return;
-  const today=localDate(); const keep=[];
-  state.deferred.forEach(d=>{
-    if(d.wake && d.wake<=today && activeCount()<HARD_CAP){ state.items.push(newItem(d.text)); }
-    else keep.push(d);
-  });
-  state.deferred=keep;
+/* Pull ONE parked (Future) task into today's list, then drop it from Future.
+   Capped — the + is hidden at HARD_CAP, so this only fires when there's room. */
+function addDeferredToToday(id){
+  const d=(state.deferred||[]).find(x=>x.id===id); if(!d) return;
+  if(activeCount()>=HARD_CAP) return;              // today is full — no 7th
+  state.items.push(newItem(d.text));
+  state.deferred=state.deferred.filter(x=>x.id!==id);
+  save(); render();
 }
 
 /* ----------------------- drawer open / close --------------------- */
@@ -1496,7 +1495,7 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
       b.addEventListener('click',e=>{ e.stopPropagation(); fn(); });
       return b; };
     acts.appendChild(mkBtn(CHECK, it.state==='done'?'Mark not done':'Mark done', ()=>{ kbActive=false; cursor=idx; cycle(it); }));
-    acts.appendChild(mkBtn(SLEEP_SM,'Sleep till tomorrow',()=>sleepItem(it.id)));
+    acts.appendChild(mkBtn(SLEEP_SM,'Move to Future',()=>sleepItem(it.id)));
     acts.appendChild(mkBtn(XLG,'Remove',()=>removeItem(it.id)));
     row.appendChild(acts);
 
@@ -1576,7 +1575,9 @@ function buildDonezoRow(it, idx, morning){
 function renderHist(){
   histBody.innerHTML='';
   histBody.className='stagger';     // day-groups stagger in on open (§3.4)
-  if(state.histTab==='future') renderFuture(); else renderPast();
+  if(state.histTab==='future') renderFuture();
+  else if(state.histTab==='skipped') renderSkipped();
+  else renderPast();
 }
 function histEmpty(msg){
   const e=document.createElement('div');
@@ -1584,9 +1585,8 @@ function histEmpty(msg){
   e.style.color='var(--ink-dim)';   // adapts on red bg
   e.textContent=msg; return e;
 }
-// PAST: tasks COMPLETED in the recent days (undone items aren't shown — they
-// move forward instead). Grouped by day; only days with completions appear.
-// Bring a skipped/undone PAST task back into today's list (fresh id, capped).
+// Bring a PAST task back into today's list (fresh id, capped). Used by the
+// Skipped tab's + button to resurrect an undone task on purpose.
 function restoreHistoryTask(text){
   const t=String(text||'').trim(); if(!t) return;
   if(activeCount()>=HARD_CAP) return;                                  // already full — no 7th
@@ -1594,49 +1594,69 @@ function restoreHistoryTask(text){
   state.items.push(newItem(t));
   save(); render();
 }
+// DONE tab = COMPLETED only. Today's live completions + each past day's done:true
+// tasks, struck with a rotating done-word. Skipped (undone) tasks are NOT here —
+// they live in the Skipped tab.
 function renderPast(){
   const todayDone = state.items.filter(it=>it.state==='done');     // live: today's completions
-  // Past days show BOTH completed tasks (Donezo) and skipped/undone ones. Undone tasks
-  // render plain (no Donezo, no strike) with a restore arrow to bring them back to today.
   const past = lastNDays(pastDaysShown)
-    .map(d=>({ name:d.name, items:(d.items||[]).filter(it=>it && String(it.text||'').trim()) }))
+    .map(d=>({ name:d.name, items:(d.items||[]).filter(it=>it && it.done && String(it.text||'').trim()) }))
     .filter(d=>d.items.length);
   if(!todayDone.length && !past.length){ histBody.appendChild(histEmpty('No completed tasks yet.')); return; }
-  const activeTexts=new Set(state.items.map(i=>String(i.text||'').trim()).filter(Boolean));
   const groups=[];
-  if(todayDone.length) groups.push({ name:'Today', items:todayDone.map(it=>({text:it.text,done:true,liveId:it.id,id:it.id})), today:true });
-  past.forEach(d=>groups.push({ name:d.name, items:d.items.map(it=>({text:it.text,done:!!it.done,id:it.id})), today:false }));
+  if(todayDone.length) groups.push({ name:'Today', items:todayDone.map(it=>({text:it.text,liveId:it.id,id:it.id})), today:true });
+  past.forEach(d=>groups.push({ name:d.name, items:d.items.map(it=>({text:it.text,id:it.id})), today:false }));
   groups.forEach((day,di)=>{
     const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
     const h=document.createElement('div');
     h.className='chrome text-[18px] font-medium tracking-[-0.36px] mb-1'; h.style.color='var(--ink)';  // adaptive: light on red
     h.textContent=day.name; grp.appendChild(h);
     day.items.forEach(it=>{
-      const tx=String(it.text||'').trim();
-      const canRestore = !it.done && !day.today && !activeTexts.has(tx) && activeCount()<HARD_CAP;
-      const showArrow = (day.today && it.done) || canRestore;
-      const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(showArrow?' pr-[44px]':'');
+      // Today's completions get an ↩ undo (back to active); past completions are history.
+      const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(day.today?' pr-[44px]':'');
       const lab=document.createElement('div'); lab.className='flex items-baseline gap-2 min-w-0 flex-1';
-      if(it.done){
-        const tag=document.createElement('span'); tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:18px;color:var(--ink)'; tag.textContent=doneWord(it.id);
-        const t=document.createElement('span'); t.className='tracking-[-0.36px] line-through truncate'; t.style.cssText='font-size:18px;color:var(--ink-dim)'; t.textContent=it.text;
-        lab.append(tag,t);
-      } else {
-        const t=document.createElement('span'); t.className='tracking-[-0.36px] truncate'; t.style.cssText='font-size:18px;color:var(--ink)'; t.textContent=it.text;
-        lab.append(t);                                  // skipped: plain, full ink, no Donezo/strike
-      }
-      r.appendChild(lab);
-      if(day.today && it.done){
+      const tag=document.createElement('span'); tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:18px;color:var(--ink)'; tag.textContent=doneWord(it.id);
+      const t=document.createElement('span'); t.className='tracking-[-0.36px] line-through truncate'; t.style.cssText='font-size:18px;color:var(--ink-dim)'; t.textContent=it.text;
+      lab.append(tag,t); r.appendChild(lab);
+      if(day.today){
         const u=document.createElement('button'); u.title='Restore to list';
         u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
         u.style.right=ICON_RIGHT; u.innerHTML=UNDO; muteIconPointerEvents(u);
         u.addEventListener('mousedown',e=>e.preventDefault());
         u.addEventListener('click',()=>restoreItem(it.liveId));
         r.appendChild(u);
-      } else if(canRestore){
-        const u=document.createElement('button'); u.title='Restore to today';
+      }
+      grp.appendChild(r);
+    });
+    histBody.appendChild(grp);
+  });
+  histLoadMore();
+}
+// SKIPPED tab = PAST tasks left undone. Plain (no strike, no done-word), each
+// restorable into today via + — hidden when today is full (HARD_CAP), so a skipped
+// task can be pulled back UNLESS the day is already maxed (full red).
+function renderSkipped(){
+  const past = lastNDays(pastDaysShown)
+    .map(d=>({ name:d.name, items:(d.items||[]).filter(it=>it && !it.done && String(it.text||'').trim()) }))
+    .filter(d=>d.items.length);
+  if(!past.length){ histBody.appendChild(histEmpty('Nothing skipped yet.')); return; }
+  const activeTexts=new Set(state.items.map(i=>String(i.text||'').trim()).filter(Boolean));
+  past.forEach((day,di)=>{
+    const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
+    const h=document.createElement('div');
+    h.className='chrome text-[18px] font-medium tracking-[-0.36px] mb-1'; h.style.color='var(--ink)';  // adaptive: light on red
+    h.textContent=day.name; grp.appendChild(h);
+    day.items.forEach(it=>{
+      const tx=String(it.text||'').trim();
+      const canAdd = !activeTexts.has(tx) && activeCount()<HARD_CAP;
+      const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(canAdd?' pr-[44px]':'');
+      const lab=document.createElement('div'); lab.className='flex items-baseline gap-2 min-w-0 flex-1';
+      const t=document.createElement('span'); t.className='tracking-[-0.36px] truncate'; t.style.cssText='font-size:18px;color:var(--ink)'; t.textContent=it.text;
+      lab.append(t); r.appendChild(lab);
+      if(canAdd){
+        const u=document.createElement('button'); u.title='Add to today';
         u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
-        u.style.right=ICON_RIGHT; u.innerHTML=UNDO; muteIconPointerEvents(u);
+        u.style.right=ICON_RIGHT; u.innerHTML=PLUS; muteIconPointerEvents(u);
         u.addEventListener('mousedown',e=>e.preventDefault());
         u.addEventListener('click',()=>restoreHistoryTask(it.text));
         r.appendChild(u);
@@ -1645,61 +1665,63 @@ function renderPast(){
     });
     histBody.appendChild(grp);
   });
-  // "Load more" — reveal the next week if any archived day predates the shown window.
+  histLoadMore();
+}
+// Shared "Load more" — Done + Skipped both page one week at a time.
+function histLoadMore(){
   const boundary = localDate(new Date(Date.now()-pastDaysShown*86400000));   // = today − pastDaysShown
   const hasMore = (state.history||[]).some(r=> r && typeof r.date==='string' && r.date < boundary);
-  if(hasMore){
-    const more=document.createElement('button');
-    more.className='bd w-full px-8 py-4 text-[15px] tracking-[-0.3px] border-t ihover';
-    more.style.color='var(--ink-dim)';                       // adaptive: light on red
-    more.textContent='Load more';
-    more.addEventListener('mousedown',e=>e.preventDefault());
-    more.addEventListener('click',()=>{ pastDaysShown+=PAST_PAGE; render(); });
-    histBody.appendChild(more);
-  }
+  if(!hasMore) return;
+  const more=document.createElement('button');
+  more.className='bd w-full px-8 py-4 text-[15px] tracking-[-0.3px] border-t ihover';
+  more.style.color='var(--ink-dim)';                       // adaptive: light on red
+  more.textContent='Load more';
+  more.addEventListener('mousedown',e=>e.preventDefault());
+  more.addEventListener('click',()=>{ pastDaysShown+=PAST_PAGE; render(); });
+  histBody.appendChild(more);
 }
-// FUTURE: tasks pushed forward (slept), grouped by the day they'll return.
-// Each can be deleted (×) so it WON'T come back.
+// FUTURE: a manual holding pen. Parked tasks DON'T auto-return — you pull each
+// into today with + (capped) or drop it with ×. Click the text to edit, exactly
+// like a live task (empty deletes it). Newest-parked on top; no date grouping.
 function renderFuture(){
-  if(!state.deferred || !state.deferred.length){ histBody.appendChild(histEmpty('Nothing pushed forward.')); return; }
-  const groups={};
-  state.deferred.forEach(d=>{ (groups[d.wake]||(groups[d.wake]=[])).push(d); });
-  const tmr=tomorrowDate();
-  Object.keys(groups).sort().forEach((date,di)=>{
-    const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
-    const h=document.createElement('div');
-    h.className='chrome text-[18px] font-medium tracking-[-0.36px] text-black mb-1';
-    h.textContent = date===tmr ? 'Tomorrow' : DOW[new Date(date+'T00:00:00').getDay()];
-    grp.appendChild(h);
-    groups[date].forEach(d=>{
-      const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5 pr-[72px]';
-      const t=document.createElement('div');
-      t.className='chrome text-[18px] tracking-[-0.36px] text-black/70 outline-none';
-      t.textContent=d.text; r.appendChild(t);
-      // Edit (left): inline-edit the future task's text.
-      const edit=document.createElement('button'); edit.title='Edit';
-      edit.className='chrome absolute right-9 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
-      edit.innerHTML=EDIT_SM; muteIconPointerEvents(edit);
-      edit.addEventListener('mousedown',e=>e.preventDefault());
-      edit.addEventListener('click',()=>{ t.contentEditable='true'; t.focus();
-        const sel=getSelection(); sel.selectAllChildren(t); sel.collapseToEnd(); });
-      t.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); t.blur(); } });
-      t.addEventListener('blur',()=>{ t.contentEditable='false'; const v=t.textContent.trim();
-        if(v){ d.text=v; } else { t.textContent=d.text; } save(); render(); });
-      r.appendChild(edit);
-      // Delete (right): drop it so it won't come back.
-      const del=document.createElement('button'); del.title='Delete — won’t come back';
-      del.className='chrome absolute right-0 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full text-black/40 ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
-      del.innerHTML=XICON; muteIconPointerEvents(del);
-      del.addEventListener('mousedown',e=>e.preventDefault());
-      del.addEventListener('click',()=>deleteDeferred(d.id));
-      r.appendChild(del);
-      grp.appendChild(r);
-    });
-    histBody.appendChild(grp);
+  if(!state.deferred || !state.deferred.length){ histBody.appendChild(histEmpty('Nothing in Future yet.')); return; }
+  const full = activeCount()>=HARD_CAP;            // today maxed → hide every +
+  const grp=document.createElement('div'); grp.className='bd px-8 py-5';
+  state.deferred.slice().reverse().forEach(d=>{
+    const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(full?' pr-[44px]':' pr-[72px]');
+    // Editable text — adaptive ink so it stays legible on the red (lvl2) background.
+    const t=document.createElement('div');
+    t.className='tracking-[-0.36px] flex-1 min-w-0 outline-none cursor-text leading-[1.3]';
+    t.style.cssText='font-size:18px;color:var(--ink)';
+    t.textContent=d.text; r.appendChild(t);
+    // Click the text to edit — like the list: editable on mousedown, Enter/blur ends,
+    // emptying it deletes the parked task.
+    t.addEventListener('mousedown',()=>{ t.contentEditable='true'; });
+    t.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); t.blur(); } });
+    t.addEventListener('blur',()=>{ t.contentEditable='false'; const v=t.textContent.trim();
+      if(v){ if(v!==d.text){ d.text=v; save(); } }
+      else { state.deferred=state.deferred.filter(x=>x.id!==d.id); save(); render(); } });
+    // + (left of ×): add to today. Hidden when today is full — same cap as everywhere.
+    if(!full){
+      const add=document.createElement('button'); add.title='Add to today';
+      add.className='absolute right-9 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
+      add.style.color='var(--ink-dim)'; add.innerHTML=PLUS; muteIconPointerEvents(add);
+      add.addEventListener('mousedown',e=>e.preventDefault());
+      add.addEventListener('click',()=>addDeferredToToday(d.id));
+      r.appendChild(add);
+    }
+    // × : remove for good.
+    const del=document.createElement('button'); del.title='Remove';
+    del.className='absolute right-0 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
+    del.style.color='var(--ink-dim)'; del.innerHTML=XICON; muteIconPointerEvents(del);
+    del.addEventListener('mousedown',e=>e.preventDefault());
+    del.addEventListener('click',()=>deleteDeferred(d.id));
+    r.appendChild(del);
+    grp.appendChild(r);
   });
+  histBody.appendChild(grp);
 }
-function deleteDeferred(id){ state.deferred=state.deferred.filter(d=>d.id!==id); render(); }
+function deleteDeferred(id){ state.deferred=state.deferred.filter(d=>d.id!==id); save(); render(); }
 
 // Sticky header of the OPEN history panel: a [ Future | Past ] segmented toggle.
 function renderHistHeader(){
@@ -1712,7 +1734,7 @@ function renderHistHeader(){
   const mkSeg=(tab,label)=>{
     const b=document.createElement('button');
     const active=state.histTab===tab;
-    b.className='px-5 grid place-items-center rounded-full text-[15px] tracking-[-0.3px] transition-colors '+
+    b.className='px-4 grid place-items-center rounded-full text-[15px] tracking-[-0.3px] transition-colors '+
       (active?'bg-white text-[#1a1a1a] shadow-sm':'');
     b.style.minHeight='38px';                        // generous tap target (was ~22px — fiddly to hit)
     if(!active) b.style.color='var(--chrome-ink)';
@@ -1720,7 +1742,7 @@ function renderHistHeader(){
     b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; pastDaysShown=PAST_PAGE; render(); } });
     return b;
   };
-  seg.append(mkSeg('future','Future'), mkSeg('past','Done'));
+  seg.append(mkSeg('future','Future'), mkSeg('past','Done'), mkSeg('skipped','Skipped'));
   // ✕ close — same affordance as Settings.
   const close=document.createElement('button'); close.title='Close';
   close.className='chrome-btn pressable size-[36px] grid place-items-center rounded-full';
@@ -2337,11 +2359,12 @@ window.__buddy = {
          !isTodayDowngrade(fullH, hydrate(migrate({version:1,savedAt:3000,erasedAt:2500,today:{date:'2026-06-19',morningDone:false,items:[]}}))));
 
       // Live midnight rollover (app left open across midnight — the NORMAL pinned case)
-      // must carry unfinished tasks forward AND wake deferred, exactly like boot. The
-      // live path used to drop them into history, leaving an empty morning.
+      // must carry unfinished tasks forward, exactly like boot. The live path used to
+      // drop them into history, leaving an empty morning. Future is a manual holding
+      // pen now — parked tasks must NOT auto-return on rollover.
       const yd2=yesterdayDate();
       state.tombstones={}; state.history=[]; restartStash=null;
-      state.deferred=[{id:'df1',text:'slept task',wake:localDate()}];
+      state.deferred=[{id:'df1',text:'parked task',wake:localDate()}];
       state.today={ date:yd2, morningDone:true, items:[
         {id:'lr1',text:'carry me',state:'neutral',v:1},
         {id:'lr2',text:'done one',state:'done',doneAt:Date.now(),v:1} ] };
@@ -2351,11 +2374,11 @@ window.__buddy = {
       ok('live rollover: carries UNFINISHED forward (not dropped) + drops done',
          state.today.date===localDate() && state.items.some(i=>i.text==='carry me') && !state.items.some(i=>i.text==='done one'),
          'items='+state.items.map(i=>i.text).join(','));
-      ok('live rollover: wakes tasks slept till today',
-         state.items.some(i=>i.text==='slept task') && state.deferred.length===0);
+      ok('Future holding pen: parked tasks do NOT auto-return on rollover',
+         !state.items.some(i=>i.text==='parked task') && state.deferred.length===1);
 
-      // Done tab: skipped/undone PAST tasks are shown (no Donezo) and restorable to today;
-      // the side drawer no longer shows a restore row (morning keeps it).
+      // Three tabs: Done = completed only; Skipped = undone past tasks with an Add +.
+      // The side drawer no longer shows a restore row (morning keeps it).
       const yd3=yesterdayDate();
       state.tombstones={}; state.deferred=[]; restartStash=null;
       state.history=[{date:yd3,weekday:DOW[new Date(yd3+'T00:00:00').getDay()],items:[
@@ -2364,22 +2387,37 @@ window.__buddy = {
       state.today={date:localDate(),morningDone:true,items:[]}; editingId=null;
       document.querySelector('#morning').classList.add('hidden'); state.histOpen=false; render();
       ok('done flow: side drawer shows NO restore row', !/Restore/.test(listEl.textContent));
-      // …Past tab shows the skipped task plain (no strike, no done-word) with a restore
-      // arrow, while the completed one is struck + carries a rotating done-word…
+      // …Done tab shows ONLY the completed task (struck + done-word), never the skipped one…
       state.histOpen=true; state.histTab='past'; render();
-      const pastRows=[...listEl.querySelectorAll('.hrow')];
-      const skipRow=pastRows.find(r=>r.textContent.includes('skipped one'));
+      let pastRows=[...listEl.querySelectorAll('.hrow')];
       const doneRow=pastRows.find(r=>r.textContent.includes('finished'));
-      ok('done flow: skipped past task is plain (no strike, no done-word)',
-         !!skipRow && !skipRow.querySelector('.line-through') && !skipRow.querySelector('.font-semibold'));
-      ok('done flow: completed past task is struck + carries a done-word ending in !',
+      ok('done tab: completed past task is struck + carries a done-word ending in !',
          !!doneRow && !!doneRow.querySelector('.line-through') && /!$/.test((doneRow.querySelector('.font-semibold')||{}).textContent||''));
-      ok('done flow: skipped past task has a restore arrow',
-         !!listEl.querySelector('button[title="Restore to today"]'));
-      // …and restoring brings it into today.
+      ok('done tab: skipped task is NOT shown (it lives in Skipped)',
+         !pastRows.some(r=>r.textContent.includes('skipped one')));
+      // …Skipped tab shows ONLY the skipped task (plain) with an Add-to-today + …
+      state.histTab='skipped'; render();
+      const skipRows=[...listEl.querySelectorAll('.hrow')];
+      const skipRow=skipRows.find(r=>r.textContent.includes('skipped one'));
+      ok('skipped tab: skipped task is plain (no strike, no done-word)',
+         !!skipRow && !skipRow.querySelector('.line-through') && !skipRow.querySelector('.font-semibold'));
+      ok('skipped tab: completed task is NOT shown (it lives in Done)',
+         !skipRows.some(r=>r.textContent.includes('finished')));
+      ok('skipped tab: skipped task has an Add-to-today +',
+         !!listEl.querySelector('button[title="Add to today"]'));
+      // …and + brings it into today.
       restoreHistoryTask('skipped one');
-      ok('done flow: restore brings the skipped task into today',
+      ok('skipped tab: + brings the skipped task into today',
          state.items.some(i=>i.text==='skipped one'));
+      // Future tab (holding pen): + moves a parked task into today and clears it.
+      state.today={date:localDate(),morningDone:true,items:[]};
+      state.deferred=[{id:'dfa',text:'parked A',wake:localDate()}];
+      state.histTab='future'; editingId=null; render();
+      ok('future tab: parked task shows an Add-to-today +',
+         !!listEl.querySelector('button[title="Add to today"]'));
+      addDeferredToToday('dfa');
+      ok('future tab: + moves the parked task into today and clears it from Future',
+         state.items.some(i=>i.text==='parked A') && state.deferred.length===0);
       // Done-word rotation: deterministic per id, all end in "!", and they vary.
       ok('done words: deterministic + end in "!"',
          doneWord('abc')===doneWord('abc') && /!$/.test(doneWord('abc')));
