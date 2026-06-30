@@ -44,6 +44,29 @@ fn toggle_drawer(app: &AppHandle) {
     let _ = app.emit("buddy://toggle", ());
 }
 
+/// macOS: allow this (alwaysOnTop) window to be shown in the SAME Space as an app
+/// that's in native full-screen mode. Without `FullScreenAuxiliary`, a floating
+/// window lives only on the desktop Space, so when the user is in a full-screen
+/// browser, Buddy's morning flashes on the desktop then "hides behind" it. Adding
+/// `CanJoinAllSpaces` keeps it present as the user switches Spaces too.
+#[cfg(target_os = "macos")]
+fn allow_over_fullscreen(win: &tauri::WebviewWindow) {
+    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
+    let Ok(ptr) = win.ns_window() else { return };
+    if ptr.is_null() {
+        return;
+    }
+    let ns = ptr as *const NSWindow;
+    unsafe {
+        let Some(ns) = ns.as_ref() else { return };
+        let behavior = ns.collectionBehavior()
+            | NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::FullScreenAuxiliary;
+        ns.setCollectionBehavior(behavior);
+        eprintln!("[buddy] over-fullscreen behaviour set: {:?}", ns.collectionBehavior());
+    }
+}
+
 /// Diagnostic: the webview console isn't forwarded to the terminal, so JS calls
 /// this to log into the same file we can read. (Temporary.)
 #[tauri::command]
@@ -574,6 +597,12 @@ pub fn run() {
             // Reveal on launch WITHOUT positioning — the web layer (nativeFit) owns
             // sizing/position so the full-screen morning isn't snapped back to the strip.
             if let Some(win) = handle.get_webview_window("main") {
+                // Let Buddy appear OVER apps in native full-screen mode. The window is
+                // already alwaysOnTop, but a floating window can't draw over a
+                // full-screen Space unless its collection behaviour opts in — without
+                // this, morning "flashes then hides behind" a full-screen browser.
+                #[cfg(target_os = "macos")]
+                allow_over_fullscreen(&win);
                 let _ = win.show();
                 let _ = win.set_focus();
             }

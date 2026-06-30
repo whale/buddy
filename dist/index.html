@@ -2017,7 +2017,9 @@ $('#quitBtn')?.addEventListener('click', e=>{ e.stopPropagation();
   if(!banner) return;
   const T=()=>window.__TAURI__;
   let installing=false;
+  let shown=false;
   function show(ver){
+    if(shown) return; shown=true;          // don't re-animate once the banner is up
     title.textContent='Buddy '+ver+' is ready';
     sub.textContent='A new version is available';
     banner.classList.remove('hidden');
@@ -2031,11 +2033,24 @@ $('#quitBtn')?.addEventListener('click', e=>{ e.stopPropagation();
     catch(e){ installing=false; install.textContent='Retry'; install.disabled=false; install.classList.remove('opacity-70');
       sub.textContent='Update failed — try again'; bar.style.width='0%'; }
   });
-  // Auto-check shortly after launch (native only; never blocks boot). Surfaces in
-  // BOTH the banner and the Settings row (green "Update available"), no click needed.
-  setTimeout(async ()=>{
-    try{ const t=T(); if(!t||!t.core) return; const ver=await t.core.invoke('check_for_update'); if(ver) show(ver); }catch(_){}
-  }, 2500);
+  // Update check. A SINGLE launch check that silently swallowed errors once left an
+  // installed app stranded a full version behind with no banner and no signal. So:
+  // check shortly after launch, AND on a long interval, AND whenever Buddy regains
+  // focus (throttled) — and LOG failures instead of hiding them, so a missed update
+  // shows up in the bug-report logs. Native-only; never blocks boot.
+  let lastCheck=0;
+  async function checkForUpdate(){
+    if(shown) return;                         // already found one — stop polling
+    const now=Date.now();
+    if(now-lastCheck < 60000) return;         // throttle: at most once a minute
+    lastCheck=now;
+    const t=T(); if(!t||!t.core) return;
+    try{ const ver=await t.core.invoke('check_for_update'); if(ver) show(ver); }
+    catch(e){ try{ t.core.invoke('trace',{msg:'update check failed: '+e}); }catch(_){} }
+  }
+  setTimeout(checkForUpdate, 2500);                 // shortly after launch
+  setInterval(checkForUpdate, 3*60*60*1000);        // and every 3 hours while running
+  window.addEventListener('focus', checkForUpdate); // and whenever Buddy regains focus
 })();
 // morning "Skip today"
 $('#skipToday')?.addEventListener('click', e=>{ e.stopPropagation(); skip(); });
@@ -2699,12 +2714,6 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
     if(mode==='full'){
       await win.setSize(new D.PhysicalSize(sz.width, h));
       await win.setPosition(new D.PhysicalPosition(p.x, p.y + top));
-      // Morning is a take-over screen — it must land in FRONT, not boot behind
-      // another app (menu-bar apps don't auto-raise on launch). Show + focus, and
-      // briefly pin on top to win the launch focus race, then release so the rest
-      // of the day behaves normally. backtick/tray re-raise it any time (Rust side).
-      try{ await win.show(); await win.setFocus(); await win.setAlwaysOnTop(true);
-           setTimeout(()=>{ try{ win.setAlwaysOnTop(false); }catch(_){} }, 600); }catch(_){}
       return;
     }
     const w=Math.round((mode==='drawer'?DRAWERW:SLIVER)*sf);
