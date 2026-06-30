@@ -1,9 +1,41 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-06-27. Current branch: `main`. Latest **released** version: **`0.2.45`** — the full batch (data-loss fix + UX overhaul + OKLCH token system) is now SHIPPED and live. `AUTO_RELEASE_MAC` is still **OFF** (manual `gh workflow run "Release Mac app"` cuts releases; flip the var to `true` to restore auto-release-on-merge). Only open work: the de-inline-styles follow-up (memory `buddy-token-system-todo`)._
+_Last updated: 2026-06-30. Current branch: `main`. Latest **released** version: **`0.2.47`** — adds the full-screen-Spaces fix + a reliable updater (signed/notarized, installed & verified on-device). `AUTO_RELEASE_MAC` is **OFF** (manual `gh workflow run "Release Mac app"`, or flip the var `true` to restore auto-release-on-merge). Open work: the de-inline-styles follow-up (memory `buddy-token-system-todo`)._
 
 Buddy is a shipped, public, self-updating macOS menu-bar focus app for ADHD.
 Repo: `github.com/whale/buddy`.
+
+## Session summary — 2026-06-30 — full-screen-Spaces fix + reliable updater (shipped 0.2.47, on-device verified)
+
+**The bug.** User was stranded on `0.2.39` (no update banner), and on launch Buddy would "flash up
+then hide behind other windows," with the tray "Show / Hide" doing nothing. They work with apps in
+**native full-screen**.
+
+**Two wrong guesses first (the lesson).** Assumed z-order / focus loss; shipped `set_focus` +
+`alwaysOnTop` juggling (released as 0.2.46) — wrong premise, didn't help. Turning point: *ran the real
+app and inspected the live window* (`CGWindowListCopyWindowInfo` via a throwaway Swift script) — the
+window was already at floating **layer 5**, so it could never be "behind" a normal window. **Inspect
+live runtime state before designing a fix.**
+
+**Real root cause + fix (0.2.47, PR #55).** The window is `alwaysOnTop:true` by config, but a floating
+window **can't draw over an app in native full-screen mode** unless its `NSWindow.collectionBehavior`
+opts in. Fix: `collectionBehavior |= CanJoinAllSpaces | FullScreenAuxiliary` at launch
+(`allow_over_fullscreen` in `src-tauri/src/lib.rs`, via new `objc2` / `objc2-app-kit` deps). Verified
+live: behaviour == **257**. Reverted the mis-aimed `nativeFit` always-on-top block from 0.2.46.
+
+**Second bug, exposed by the first — the updater stranding (same PR).** The in-app updater checked
+**once** ~2.5s after launch and **swallowed errors silently** → one miss = stuck a full version behind
+with no signal (how 0.2.39 missed 0.2.46). Now checks at launch, **every 3h, and on window focus**
+(throttled 1/min, stops once a banner shows), and `trace()`s failures into the bug-report logs.
+
+**Delivery gotcha.** The updater was itself the broken link, so it couldn't deliver its own fix — had
+to install the signed build **directly** (drag the DMG) once. After 0.2.47, normal in-app updates resume.
+
+**Verified:** full-screen behaviour confirmed by the user in their real setup; `over-fullscreen
+behaviour set: NSWindowCollectionBehavior(257)` in the launch log; browser `smokeTest` **35/35**;
+installed `0.2.47` is **signed + notarized** (`spctl` → "accepted, Notarized Developer ID") and running
+on-device. Full writeup in `JOURNAL.md` (PR #56, `[skip release]`). **Releases 0.2.46 & 0.2.47 both
+published; `AUTO_RELEASE_MAC` flipped back OFF.**
 
 ## Session summary — 2026-06-26 (evening) — data-loss fix shipped + Done-tab/UX overhaul (batched, unreleased) + token-system spec
 

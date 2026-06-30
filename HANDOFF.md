@@ -1,22 +1,35 @@
 # Buddy — Next Session Handoff
 
-_Last updated: 2026-06-27._
+_Last updated: 2026-06-30._
 
 ## Start here
 
 - Branch: `main`, clean, no open PRs.
-- **Released = `0.2.45`** (Latest). The whole batch shipped: data-loss fix (0.2.39) + UX overhaul (#45–#50) + OKLCH token system (#52).
-- `AUTO_RELEASE_MAC` is **OFF** — releases are manual: `gh workflow run "Release Mac app"` (it bumps + builds + publishes). Flip the var to `true` to restore auto-release-on-merge.
-- **Only open work:** the de-inline-styles follow-up (move render-time `style="color:…"` → utility classes). Spec in memory `buddy-token-system-todo`.
-- Also unmerged: `feat/styleguide-proposals` (the styleguide's Proposals/discrepancy spec) — merge or drop.
+- **Released = `0.2.47`** (Latest) — full-screen-Spaces fix + reliable updater. Signed/notarized, **installed & verified on-device**; the user is running it.
+- `AUTO_RELEASE_MAC` is **OFF** — releases are manual: flip the var `true`, then `gh workflow run "Release Mac app"` (bumps + builds + publishes), then flip it back off.
+- **Open work:** the de-inline-styles follow-up (move render-time `style="color:…"` → utility classes). Spec in memory `buddy-token-system-todo`.
+- Also unmerged: `feat/styleguide-proposals` (styleguide Proposals/discrepancy spec) — merge or drop.
 
 ## Next 3–5 tasks
 
 1. **Build the design-token system** as the next PR (branch off `main`). Spec: memory `buddy-token-system-todo` + the styleguide's "⚐ Proposals" section (on **unmerged** `feat/styleguide-proposals`). OKLCH hover (`--red-hover: oklch(from var(--red) calc(l-.05) calc(c+.05) h)`), type scale 16→15 / 13→14, icon weights ≤20→1.8 / weather 1.4, de-inline all `style="color:…"`. Verify all three colour states.
-2. **Decide on `feat/styleguide-proposals`** — merge it (keeps the Proposals/discrepancy spec in the styleguide) or fold its content into task 1's PR.
-3. **Cut the batched release** when the user has reviewed: flip `AUTO_RELEASE_MAC` on, dispatch the release workflow, verify it publishes (DMG + tarball + `latest.json`), and that the in-app updater offers it.
-4. **On-device check** of the new interaction (checkbox-complete, click-to-edit) and the post-0.2.39 UX in a real native build — so far only browser-verified.
-5. **Prune stale local branches** (`feat/sync-*`, `worktree-agent-*`, merged `feat/styleguide`, `docs/session-wrap-*`).
+2. **Decide on `feat/styleguide-proposals`** — merge it or fold its content into task 1's PR.
+3. **Optional: re-add a manual "Check for Updates"** row in Settings as a belt-and-suspenders fallback to the now-periodic auto-check (it was removed earlier as "redundant" — but the once-only check is exactly what stranded the user). Low effort.
+4. **On-device check** of the post-0.2.39 UX (checkbox-complete, click-to-edit) — much is still only browser-verified.
+5. **Prune stale local branches** (`feat/sync-*`, `worktree-agent-*`, `feat/styleguide`, `docs/session-wrap-*`).
+
+## What just happened (2026-06-30)
+
+Shipped **0.2.47** (PR #55): the **full-screen-Spaces fix** + a **reliable updater**. The user was
+stranded on 0.2.39 and saw morning "flash then hide behind other windows" with a dead tray Show/Hide.
+After **two wrong guesses** (z-order/focus, released as 0.2.46), inspecting the live window
+(`CGWindowList` → already floating layer 5) revealed the real cause: a floating window can't draw over a
+**native full-screen** app without `collectionBehavior |= CanJoinAllSpaces | FullScreenAuxiliary`
+(set at launch via `objc2-app-kit`; verified == 257). The reason fixes never *arrived*: the updater
+checked **once** and **failed silently** — now checks at launch + every 3h + on focus, and logs
+failures. Had to install the signed build **directly** once (the updater couldn't deliver its own fix).
+Verified on-device: `spctl` → notarized, running 0.2.47. Lesson (in `JOURNAL.md`): inspect live runtime
+state before theorizing a fix.
 
 ## What just happened (2026-06-26 evening)
 
