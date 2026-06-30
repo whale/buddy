@@ -29,10 +29,18 @@ use tauri::{
 };
 use tauri_plugin_updater::UpdaterExt;
 
-/// Tell the webview to toggle the drawer (from the tray icon or the global
-/// shortcut). The webview owns its own geometry via `nativeFit`, so the native
-/// side just emits an intent and lets JS open or tuck — no window juggling here.
+/// Summon Buddy from the tray icon or the global shortcut. ALWAYS raise the OS
+/// window first, THEN emit the drawer intent. The raise is the important half:
+/// without it, when the window is open-but-occluded — most painfully full-screen
+/// morning, where the JS intent below is a deliberate no-op (`if(morningUp())
+/// return`) — the user is stranded behind another app with no way back in. The
+/// webview still owns its geometry via `nativeFit`; we only guarantee it's
+/// visible and frontmost so the keypress can never leave Buddy hidden.
 fn toggle_drawer(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
     let _ = app.emit("buddy://toggle", ());
 }
 
