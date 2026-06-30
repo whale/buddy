@@ -2699,14 +2699,18 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
     if(mode==='full'){
       await win.setSize(new D.PhysicalSize(sz.width, h));
       await win.setPosition(new D.PhysicalPosition(p.x, p.y + top));
-      // Morning is a take-over screen — it must land in FRONT, not boot behind
-      // another app (menu-bar apps don't auto-raise on launch). Show + focus, and
-      // briefly pin on top to win the launch focus race, then release so the rest
-      // of the day behaves normally. backtick/tray re-raise it any time (Rust side).
-      try{ await win.show(); await win.setFocus(); await win.setAlwaysOnTop(true);
-           setTimeout(()=>{ try{ win.setAlwaysOnTop(false); }catch(_){} }, 600); }catch(_){}
+      // Morning is a full-screen takeover ritual. KEEP it pinned on top (not just
+      // for a moment) for as long as it's up — a menu-bar (accessory) app can't
+      // sustain "frontmost" with set_focus alone, so the window would otherwise
+      // slip behind whatever app had focus (the "flash then hide" bug). always-on-
+      // top is a hard OS guarantee, not a focus race. The pin is RELEASED below
+      // when morning leaves and we fit to the drawer/sliver.
+      try{ await win.setAlwaysOnTop(true); await win.show(); await win.setFocus(); }catch(_){}
       return;
     }
+    // Leaving the takeover (drawer / sliver) → back to normal day behaviour:
+    // drop the on-top pin so Buddy no longer floats over other apps.
+    try{ await win.setAlwaysOnTop(false); }catch(_){}
     const w=Math.round((mode==='drawer'?DRAWERW:SLIVER)*sf);
     await win.setSize(new D.PhysicalSize(w, h));
     await win.setPosition(new D.PhysicalPosition(p.x + sz.width - w, p.y + top));
