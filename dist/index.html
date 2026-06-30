@@ -2699,6 +2699,12 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
     if(mode==='full'){
       await win.setSize(new D.PhysicalSize(sz.width, h));
       await win.setPosition(new D.PhysicalPosition(p.x, p.y + top));
+      // Morning is a take-over screen — it must land in FRONT, not boot behind
+      // another app (menu-bar apps don't auto-raise on launch). Show + focus, and
+      // briefly pin on top to win the launch focus race, then release so the rest
+      // of the day behaves normally. backtick/tray re-raise it any time (Rust side).
+      try{ await win.show(); await win.setFocus(); await win.setAlwaysOnTop(true);
+           setTimeout(()=>{ try{ win.setAlwaysOnTop(false); }catch(_){} }, 600); }catch(_){}
       return;
     }
     const w=Math.round((mode==='drawer'?DRAWERW:SLIVER)*sf);
