@@ -35,6 +35,10 @@ mouse_position = "0.1"
 [target."cfg(target_os = \"macos\")".dependencies]
 core-foundation = "0.10"
 core-graphics = "0.24"
+# Set the window's NSWindow collection behaviour so it can appear OVER apps that
+# are in native full-screen mode (CanJoinAllSpaces + FullScreenAuxiliary).
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder"] }
 
 [profile.release]
 codegen-units = 1
