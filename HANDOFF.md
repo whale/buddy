@@ -1,22 +1,34 @@
 # Buddy — Next Session Handoff
 
-_Last updated: 2026-06-30._
+_Last updated: 2026-06-30 (later)._
 
 ## Start here
 
-- Branch: `main`, clean, no open PRs.
-- **Released = `0.2.47`** (Latest) — full-screen-Spaces fix + reliable updater. Signed/notarized, **installed & verified on-device**; the user is running it.
-- `AUTO_RELEASE_MAC` is **OFF** — releases are manual: flip the var `true`, then `gh workflow run "Release Mac app"` (bumps + builds + publishes), then flip it back off.
-- **Open work:** the de-inline-styles follow-up (move render-time `style="color:…"` → utility classes). Spec in memory `buddy-token-system-todo`.
+- Branch: `main`, clean.
+- **Released = `0.3.1`** (Latest) — Future/Done/Skipped tabs + Future manual holding pen. Signed/notarized, published via manual `Release Mac app` dispatch. **Not yet on-device-verified** — confirm via Settings → Check for Updates (the in-app updater should offer 0.3.1).
+- `AUTO_RELEASE_MAC` is **OFF** — but a manual `gh workflow run "Release Mac app"` publishes anyway (a `workflow_dispatch` bypasses the OFF gate and builds+publishes whatever version is on `main`). No need to flip the var. Note: the auto-bump bot **+1's the patch on every merge to `main`**, so set the version expecting the bump (or add `[skip release]` to freeze it).
+- **Open work:** the design-token / de-inline-styles follow-up (memory `buddy-token-system-todo`).
 - Also unmerged: `feat/styleguide-proposals` (styleguide Proposals/discrepancy spec) — merge or drop.
+- **First alpha tester:** onboarding is just "send the DMG link" — see the STATUS.md "Alpha-tester onboarding" note. No feedback tooling built yet (fine for n=1).
 
 ## Next 3–5 tasks
 
-1. **Build the design-token system** as the next PR (branch off `main`). Spec: memory `buddy-token-system-todo` + the styleguide's "⚐ Proposals" section (on **unmerged** `feat/styleguide-proposals`). OKLCH hover (`--red-hover: oklch(from var(--red) calc(l-.05) calc(c+.05) h)`), type scale 16→15 / 13→14, icon weights ≤20→1.8 / weather 1.4, de-inline all `style="color:…"`. Verify all three colour states.
-2. **Decide on `feat/styleguide-proposals`** — merge it or fold its content into task 1's PR.
-3. **Optional: re-add a manual "Check for Updates"** row in Settings as a belt-and-suspenders fallback to the now-periodic auto-check (it was removed earlier as "redundant" — but the once-only check is exactly what stranded the user). Low effort.
-4. **On-device check** of the post-0.2.39 UX (checkbox-complete, click-to-edit) — much is still only browser-verified.
-5. **Prune stale local branches** (`feat/sync-*`, `worktree-agent-*`, `feat/styleguide`, `docs/session-wrap-*`).
+1. **On-device verify 0.3.1** — Settings → Check for Updates → install → confirm the three tabs (Future/Done/Skipped) and the Future holding pen (+/×/click-edit) work in the real app. Much of this session was browser-verified only.
+2. **Send the first alpha tester the DMG link** (`…/releases/download/v0.3.1/Buddy_0.3.1_universal.dmg`) — see STATUS.md onboarding note. If it grows past one tester, add a lightweight feedback loop (GitHub issue template or a form).
+3. **Build the design-token system** as the next PR (branch off `main`). Spec: memory `buddy-token-system-todo` + the styleguide's "⚐ Proposals" section (on **unmerged** `feat/styleguide-proposals`). OKLCH hover (`--red-hover: oklch(from var(--red) calc(l-.05) calc(c+.05) h)`), type scale 16→15 / 13→14, icon weights ≤20→1.8 / weather 1.4, de-inline all `style="color:…"`. Verify all three colour states.
+4. **Decide on `feat/styleguide-proposals`** — merge it or fold its content into task 3's PR.
+5. **Prune stale local branches** (`feat/sync-*`, `worktree-agent-*`, `feat/styleguide`, `docs/session-wrap-*`, and this `docs/wrap-0.3.1-tabs` after merge).
+
+## What just happened (2026-06-30, later)
+
+Shipped **0.3.1** (PR #58): split the history drawer into **three tabs — Future · Done · Skipped**,
+and reshaped **Future into a manual holding pen**. The Done tab had been conflating completed *and*
+skipped past tasks; now Done = completed only, Skipped = past undone (each with a **+** to add back to
+today), Future = a backlog you pull from by hand (no auto-return; **+** add, **×** remove, click-to-edit).
+Every **+** respects `HARD_CAP` (hidden on full-red). Verified: `smokeTest` **39/39**, visual sweep at
+lvl0/1/2, click-to-edit. Released via manual `Release Mac app` dispatch (auto-bump made it 0.3.1, not
+0.3.0). Then answered "how do I get an alpha tester" — the answer is basically *send the DMG link*
+(signed+notarized+public repo+auto-updater = zero extra setup; needs macOS 13+).
 
 ## What just happened (2026-06-30)
 
