@@ -5,6 +5,39 @@ Newest first.
 
 ---
 
+## 2026-06-30 (later) — "Done" was conflating done + skipped; Future became a manual backlog
+
+**The design bug.** History stores each task as `{text, done}`, and the Done tab rendered
+*every* past task regardless of `done` — so tasks you **skipped** showed up in "Done" as
+plain (un-struck) rows. "Done" should mean *done*. Fix: split into three tabs — Done
+(`done:true` only) + a new Skipped tab (`done:false`), alongside the existing Future. The
+data already carried the distinction; only the *view* was over-showing. **Lesson: when a
+list looks "polluted," check whether the data is mixed or just the view — here the view was
+the bug, the data was fine.**
+
+**Future: auto-return was the wrong mental model.** Deferred ("Future") tasks auto-returned
+to today at the next rollover (`wakeDeferred`). The user's instinct: Future should be a
+*manual* backlog you pull from — auto-refilling the day with avoided tasks fights the whole
+calm-focus premise. Reshaped Future into a holding pen: no auto-return, **+** to add, **×**
+to remove, click-to-edit (mirrors the live list). Kept the cap guard (**+** hidden at
+`HARD_CAP`) so pulling from Future/Skipped still can't overflow the day. The `wake` date
+field is now vestigial (kept only for serialization shape).
+
+**Releasing a feature — two gotchas.** (1) The auto-bump bot **+1's the patch on every merge
+to `main`**, so a deliberate `0.3.0` in the PR shipped as **0.3.1** — set the version
+expecting the bump, or add `[skip release]` to freeze it. (2) A **manual**
+`gh workflow run "Release Mac app"` publishes even when `AUTO_RELEASE_MAC=false` — a
+`workflow_dispatch` bypasses the gate, so you don't need to flip the var for a one-off release.
+
+**Distribution is already solved (re: "how do I get an alpha tester?").** Because the app is
+signed + notarized and the repo is public with a working auto-updater, onboarding a tester is
+*just send the DMG link* — no TestFlight, no per-tester provisioning. Requirement: macOS 13+.
+The only real friction is telling them it's a menu-bar / right-edge app so they know where it
+went. First launch may show a one-time "downloaded from the Internet — Open?" dialog (normal;
+notarized, so no hard Gatekeeper block).
+
+---
+
 ## 2026-06-30 — "Flash then hide" was full-screen Spaces, not z-order (+ the updater stranding bug)
 
 **Symptom.** After a release, the installed app stayed a version behind (no update

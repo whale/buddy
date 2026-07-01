@@ -1,9 +1,23 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-06-30. Current branch: `main`. Latest **released** version: **`0.2.47`** — adds the full-screen-Spaces fix + a reliable updater (signed/notarized, installed & verified on-device). `AUTO_RELEASE_MAC` is **OFF** (manual `gh workflow run "Release Mac app"`, or flip the var `true` to restore auto-release-on-merge). Open work: the de-inline-styles follow-up (memory `buddy-token-system-todo`)._
+_Last updated: 2026-06-30 (later). Current branch: `main`. Latest **released** version: **`0.3.1`** — history split into three tabs (Future · Done · Skipped) + Future turned into a manual holding pen. Signed/notarized, published via a manual `Release Mac app` dispatch (the in-app updater delivers it). `AUTO_RELEASE_MAC` stays **OFF** — a manual `gh workflow run "Release Mac app"` publishes anyway (workflow_dispatch bypasses the gate); no need to flip the var. Open work: the de-inline-styles / token-system follow-up (memory `buddy-token-system-todo`)._
 
 Buddy is a shipped, public, self-updating macOS menu-bar focus app for ADHD.
 Repo: `github.com/whale/buddy`.
+
+## Session summary — 2026-06-30 (later) — Future/Done/Skipped tabs + Future holding pen (shipped 0.3.1)
+
+**The problem.** The **Done** tab showed both completed *and* skipped past tasks (each past day's `done:true` *and* `done:false` items), so skipped work polluted the "done" list — no clean view of what was actually finished.
+
+**The change (PR #58, released 0.3.1).**
+- **Three history tabs** — `Future · Done · Skipped` (was `Future · Done`). `renderPast` now filters to `done:true` only; new `renderSkipped` renders past `done:false` tasks; shared `histLoadMore()` helper. Third segment added to the tab pill (`px-5`→`px-4` so three fit).
+- **Future is now a manual holding pen.** Removed the `wakeDeferred()` auto-return path entirely (the call in `rolloverAndCarry` + the function). Parked tasks no longer come back on rollover — pulled in with **+**, removed with **×**, edited by clicking the text (mousedown→contenteditable, empty deletes), mirroring the live list. Flat list, newest-parked on top (dropped the now-meaningless "Tomorrow/Monday" wake-date grouping). Added `addDeferredToToday()`.
+- **Cap rule everywhere:** every **+** (Future *and* Skipped) hides at `HARD_CAP` (6 active / full red), so a day can't overflow.
+- Renamed the list-row **"Sleep till tomorrow" → "Move to Future"**; removed dead `EDIT_SM` icon; `deleteDeferred` now persists.
+
+**Verified.** Browser `smokeTest` **39/39** (updated for the new model — old "rollover wakes deferred" assertion became "holding pen: parked tasks do NOT auto-return"; added Done-vs-Skipped separation + Future-`+` assertions). Full visual sweep of all three tabs at **lvl0 / lvl1 / lvl2** — all adaptive-token legible, `+` correctly hidden on full-red. Click-to-edit on Future verified (editable-on-click, save-on-blur, empty-deletes). Release **v0.3.1** published with DMG + `Buddy.app.tar.gz` + `latest.json`; workflow succeeded. **Note:** the auto-bump bot ticked `0.3.0` → **0.3.1** on merge (it always +1's the patch), so the feature shipped as 0.3.1.
+
+**Alpha-tester onboarding (asked at end of session).** Buddy is already distributable to a tester with **zero extra setup** — signed + notarized (opens cleanly on other Macs, no Gatekeeper block) and the repo is public with a working auto-updater. To onboard one tester: (1) send the direct DMG link `https://github.com/whale/buddy/releases/download/v0.3.1/Buddy_0.3.1_universal.dmg`; (2) tell them it's a menu-bar + right-edge app (so they know where it went); (3) "just text me" is a fine feedback loop for n=1. Requirement: **macOS 13 (Ventura)+**. First run may show a one-time "downloaded from the Internet — Open?" dialog (normal; notarized, so no hard block).
 
 ## Session summary — 2026-06-30 — full-screen-Spaces fix + reliable updater (shipped 0.2.47, on-device verified)
 
