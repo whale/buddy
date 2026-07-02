@@ -94,15 +94,11 @@ struct EscalationTheme {
         }
     }
 
-    // The backdrop the floating cards sit on. lvl0/1 a light neutral so white cards
-    // read as elevated (the Mac's desktop); lvl2 the whole screen goes red so it reads
-    // as "the whole drawer turned red" (RULE 1) with the cards melting into it.
-    var screenBackground: Color {
-        switch level {
-        case .lvl0, .lvl1: return Color(hex: "#ececee")
-        case .lvl2:        return Color(hex: "#e5484d")
-        }
-    }
+    // The backdrop the floating cards sit on — ALWAYS the neutral "desktop", at every
+    // level. At lvl2 only the CARDS turn red (like the Mac, where red panels sit on the
+    // unchanged desktop); the backdrop staying neutral keeps the card edges + dividers
+    // reading. (Was red at lvl2, which merged everything into one field — wrong.)
+    var screenBackground: Color { Color(hex: "#ececee") }
 
     // macOS-style layered panel shadow (.bcard). Suppressed at lvl2 (red on red).
     var cardShadow: Color { level == .lvl2 ? .clear : Color.black.opacity(0.10) }

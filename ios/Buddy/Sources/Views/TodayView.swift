@@ -141,18 +141,18 @@ struct TodayView: View {
 
     private var listCard: some View {
         let rows = store.doneTasks + store.activeTasks   // Donezo first, then active
+        // Mac flex logic: done rows are compact (flex:0 0 auto); active rows + the Add row
+        // stretch to share the leftover height EQUALLY (flex:1 1 auto). So the whole list
+        // fills the viewport with no scroll and every undone row is the same height.
         return VStack(spacing: 0) {
-            VStack(spacing: 0) {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { i, task in
-                    if i > 0 { rowDivider }
-                    if task.isDone { doneRowView(task: task) } else { activeRowView(task: task) }
-                }
-                if !store.atHardCap {
-                    if !rows.isEmpty { rowDivider }
-                    addRow
-                }
+            ForEach(Array(rows.enumerated()), id: \.element.id) { i, task in
+                if i > 0 { rowDivider }
+                if task.isDone { doneRowView(task: task) } else { activeRowView(task: task) }
             }
-            Spacer(minLength: 0)   // rows sit at the top; the card fills the height (like the Mac drawer)
+            if !store.atHardCap {
+                if !rows.isEmpty { rowDivider }
+                addRow
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
@@ -187,8 +187,8 @@ struct TodayView: View {
             }
         }
         .padding(.horizontal, 24)
-        .padding(.vertical, 20)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)   // flex:1 1 auto — equal share of leftover height
         .contentShape(Rectangle())
         .onTapGesture { if editingId == nil { handleComplete(task: task) } }
         .contextMenu {
@@ -235,8 +235,8 @@ struct TodayView: View {
         .tracking(-0.48)
         .foregroundStyle(theme.addInk)
         .padding(.horizontal, 24)
-        .padding(.vertical, 20)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)   // flex:1 1 auto — matches the active rows
         .contentShape(Rectangle())
         .onTapGesture { addTask() }
     }
