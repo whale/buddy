@@ -57,6 +57,13 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         ITSAppUsesNonExemptEncryption: false
+        # Geist (SIL OFL) — the Mac app's typeface. Bundled as static OTFs so the
+        # iPhone shares Buddy's exact type language. PostScript names: Geist-<Weight>.
+        UIAppFonts:
+          - Geist-Regular.otf
+          - Geist-Medium.otf
+          - Geist-SemiBold.otf
+          - Geist-Bold.otf
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fyi.whale.buddy

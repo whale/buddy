@@ -24,6 +24,13 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Geist-Regular.otf</string>
+		<string>Geist-Medium.otf</string>
+		<string>Geist-SemiBold.otf</string>
+		<string>Geist-Bold.otf</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

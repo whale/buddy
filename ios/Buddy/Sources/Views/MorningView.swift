@@ -1,13 +1,10 @@
 import SwiftUI
 
 // MARK: - MorningView
-// The morning planner — mirrors the Mac's full-screen morning overlay. Shows on a
-// fresh/rolled day until the user presses Buddy! (or Skip). Yesterday's unfinished
-// tasks are already carried into today.items by the store's rollover, so they appear
-// here automatically — you trim down to your three, then start the day.
-//
-// Functionality-first (Phase 1): plan/add/edit tasks + Skip / Buddy! controls.
-// Visual polish to match `mac-morning.png` is Phase 2.
+// A faithful port of the Mac's full-screen morning planner: a centered column with
+// the big date header (numeral · weekday/month · weather), a bordered rounded list
+// card, and a Skip / Buddy! footer — all set in Geist. Yesterday's unfinished tasks
+// are pre-carried by the store's rollover, so they appear here to trim down.
 struct MorningView: View {
     @Bindable var store: BuddyStore
     var onDone: () -> Void
@@ -16,137 +13,129 @@ struct MorningView: View {
     @State private var editText: String = ""
     @FocusState private var focusedField: String?
 
+    private var theme: EscalationTheme { EscalationTheme.from(activeCount: store.activeCount) }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-                .padding(.horizontal, 20)
-                .padding(.top, 40)
-
-            ScrollView {
-                plannerCard.padding(.horizontal, 16)
+        ZStack {
+            theme.cardBackground.ignoresSafeArea()
+            VStack(spacing: 16) {
+                Spacer(minLength: 0)
+                dateHeader
+                    .padding(.leading, 28)
+                    .padding(.trailing, 24)
+                plannerCard
+                footer
+                Spacer(minLength: 0)
             }
-
-            controlBar
+            .padding(.horizontal, 14)
         }
-        .background(Color.white.ignoresSafeArea())
     }
 
-    // Mac-style header: weekday + month stacked, giant numeral on the right.
-    private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: -2) {
-                Text(weekday).font(.system(size: 28, weight: .bold)).foregroundStyle(.black)
-                Text(month).font(.system(size: 16)).foregroundStyle(.secondary)
+    // Big date block — numeral (left) · weekday/month · weather (right). Mirrors the drawer.
+    private var dateHeader: some View {
+        HStack(alignment: .bottom) {
+            HStack(alignment: .bottom, spacing: 12) {
+                Text(dayNumber).font(.geist(62, .medium)).tracking(-1.24).foregroundStyle(theme.escalationText)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(weekday).font(.geist(24, .medium)).tracking(-0.48).foregroundStyle(theme.escalationText)
+                    Text(month).font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.chromeMuted)
+                }
+                .padding(.bottom, 4)
             }
             Spacer()
-            Text(dayNumber).font(.system(size: 56, weight: .bold)).foregroundStyle(.black)
+            Image(systemName: "moon").font(.system(size: 24)).foregroundStyle(theme.escalationText).frame(width: 50, height: 50)
         }
     }
 
-    private let line = Color(hex: "#d9d9d9")
-
-    // The planner list in the same bordered card as the daily view.
+    // The planner list — a bordered rounded card (Mac uses a border here, not a shadow).
     private var plannerCard: some View {
         VStack(spacing: 0) {
             ForEach(Array(store.today.items.enumerated()), id: \.element.id) { i, task in
-                if i > 0 { Rectangle().fill(line).frame(height: 1) }
+                if i > 0 { Rectangle().fill(theme.line).frame(height: 1) }
                 plannerRow(task)
             }
             if !store.atHardCap {
-                if !store.today.items.isEmpty { Rectangle().fill(line).frame(height: 1) }
+                if !store.today.items.isEmpty { Rectangle().fill(theme.line).frame(height: 1) }
                 addRow
             }
         }
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(line, lineWidth: 1))
-        .shadow(color: Color.black.opacity(0.06), radius: 12, y: 6)
+        .background(theme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(theme.line, lineWidth: 1))
     }
 
-    // MARK: planner row — tap to edit, inline TextField while editing
     @ViewBuilder
     private func plannerRow(_ task: BuddyTask) -> some View {
-        if editingId == task.id {
-            TextField("", text: $editText)
-                .font(.system(size: 16))
-                .focused($focusedField, equals: task.id)
-                .submitLabel(.done)
-                .onSubmit { commit(task.id) }
-                .onChange(of: focusedField) { _, newVal in if newVal != task.id { commit(task.id) } }
-                .padding(.horizontal, 16).padding(.vertical, 12)
-        } else {
-            Text(task.text.isEmpty ? "Untitled" : task.text)
-                .font(.system(size: 16))
-                .foregroundStyle(task.text.isEmpty ? Color.secondary : Color.black)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .padding(.horizontal, 16).padding(.vertical, 12)
-                .onTapGesture { startEdit(task) }
+        Group {
+            if editingId == task.id {
+                TextField("", text: $editText, axis: .vertical)
+                    .font(.geist(20, .medium)).tracking(-0.48)
+                    .foregroundStyle(theme.escalationText)
+                    .focused($focusedField, equals: task.id)
+                    .submitLabel(.done)
+                    .onSubmit { commit(task.id) }
+                    .onChange(of: focusedField) { _, v in if v != task.id { commit(task.id) } }
+            } else {
+                Text(task.text.isEmpty ? "Untitled" : task.text)
+                    .font(.geist(20, .medium)).tracking(-0.48)
+                    .foregroundStyle(task.text.isEmpty ? theme.inkDim : theme.escalationText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { startEdit(task) }
+            }
         }
+        .padding(.horizontal, 28).padding(.vertical, 22)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var addRow: some View {
-        HStack(spacing: 8) {
-            Text("Add").font(.system(size: 16)).foregroundStyle(.secondary)
-            Image(systemName: "plus").font(.system(size: 14, weight: .medium)).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .padding(.horizontal, 16).padding(.vertical, 12)
-        .onTapGesture { addTask() }
+        HStack(spacing: 18) { Text("Add"); Text("+") }
+            .font(.geist(20, .medium)).tracking(-0.48)
+            .foregroundStyle(theme.addInk)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .padding(.horizontal, 28).padding(.vertical, 22)
+            .onTapGesture { addTask() }
     }
 
-    private var controlBar: some View {
+    private var footer: some View {
         HStack {
             Button { skip() } label: {
-                Text("Skip").font(.system(size: 15)).foregroundStyle(.secondary)
+                Text("Skip").font(.geist(15, .regular)).tracking(-0.32).foregroundStyle(theme.inkDim)
             }
             .buttonStyle(.plain)
             Spacer()
             Button { finish() } label: {
                 Text("Buddy!")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 28).padding(.vertical, 14)
-                    .background(Capsule().fill(Color.black))
+                    .font(.geist(18, .medium)).tracking(-0.36)
+                    .foregroundStyle(theme.level == .lvl2 ? Color(hex: "#e5484d") : .white)
+                    .padding(.horizontal, 28).padding(.vertical, 13)
+                    .background(Capsule().fill(theme.level == .lvl2 ? Color.white : Color.black))
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 24)
+        .padding(.horizontal, 12)
+        .padding(.top, 4)
     }
 
     // MARK: interactions
     private func startEdit(_ task: BuddyTask) { editText = task.text; editingId = task.id; focusedField = task.id }
     private func commit(_ id: String) {
         guard editingId == id else { return }
-        let text = editText
-        editingId = nil; focusedField = nil
+        let text = editText; editingId = nil; focusedField = nil
         store.commitEdit(id: id, text: text)
     }
     private func addTask() {
         if let id = store.addTask() {
-            // Set editingId SYNCHRONOUSLY so a Buddy!/Skip tap in the focus-delay window
-            // still commits (and an empty new task gets cleaned up). Focus is deferred a
-            // beat so the new row exists before we focus it.
-            editText = ""
-            editingId = id
+            editText = ""; editingId = id
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { focusedField = id }
         }
     }
-    private func finish() {           // Buddy!
-        if let id = editingId { commit(id) }
-        store.completeMorning()
-        onDone()
-    }
-    private func skip() {             // Skip — same effect today, distinct intent on the Mac
-        if let id = editingId { commit(id) }
-        store.skipMorning()
-        onDone()
-    }
+    private func finish() { if let id = editingId { commit(id) }; store.completeMorning(); onDone() }
+    private func skip()   { if let id = editingId { commit(id) }; store.skipMorning(); onDone() }
 
-    private var weekday: String { let f = DateFormatter(); f.dateFormat = "EEEE"; return f.string(from: Date()) }
-    private var month: String { let f = DateFormatter(); f.dateFormat = "MMMM"; return f.string(from: Date()) }
-    private var dayNumber: String { let f = DateFormatter(); f.dateFormat = "d"; return f.string(from: Date()) }
+    private var weekday: String   { Self.df("EEEE") }
+    private var month: String     { Self.df("MMMM") }
+    private var dayNumber: String { Self.df("d") }
+    private static func df(_ fmt: String) -> String { let f = DateFormatter(); f.dateFormat = fmt; return f.string(from: Date()) }
 }

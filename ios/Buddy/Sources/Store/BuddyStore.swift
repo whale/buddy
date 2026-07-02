@@ -133,6 +133,26 @@ final class BuddyStore {
         scheduleSave()
     }
 
+    /// Bring a PAST (skipped) task back into today by text — fresh id, capped, no dupes.
+    /// Mirrors Mac's `restoreHistoryTask(text)`.
+    func restoreHistoryTask(text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, activeCount < Self.hardCap else { return }
+        guard !today.items.contains(where: { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == t }) else { return }
+        today.items.append(BuddyTask(id: newId(), text: t, state: .neutral))
+        scheduleSave()
+    }
+
+    /// Pull a parked (Future) task into today's list, then drop it from deferred.
+    /// Mirrors Mac's Future-tab restore.
+    func wakeDeferredTask(id: String) {
+        guard let idx = deferred.firstIndex(where: { $0.id == id }) else { return }
+        guard activeCount < Self.hardCap else { return }
+        today.items.append(BuddyTask(id: newId(), text: deferred[idx].text, state: .neutral))
+        deferred.remove(at: idx)
+        scheduleSave()
+    }
+
     /// Push a task to tomorrow's deferred list. Mirrors Mac's `sleepItem(id)`.
     func deferToTomorrow(id: String) {
         guard let idx = today.items.firstIndex(where: { $0.id == id }) else { return }
@@ -156,6 +176,19 @@ final class BuddyStore {
     }
 
     #if DEBUG
+    // Screenshot/preview seed: replace state directly so a fixture renders exactly as
+    // given. Rollover already ran in init() but is a no-op for today's date, and this
+    // overwrites its result anyway. Not persisted — purely for deterministic captures.
+    func seedForScreenshot(tasks: [BuddyTask], history: [Day] = [], morningDone: Bool = true, settings: BuddySettings = .default) {
+        saveWorkItem?.cancel()
+        today = TodayState(date: Self.localDate(), items: tasks, morningDone: morningDone)
+        self.history = history
+        deferred = []
+        tombstones = [:]
+        erasedAt = nil
+        self.settings = settings
+    }
+
     // Dev-only: wipe to a clean first-run state so the morning planner shows again.
     func resetForDev() {
         today = TodayState(date: Self.localDate(), items: [], morningDone: false)

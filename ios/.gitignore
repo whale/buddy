@@ -11,3 +11,7 @@ DerivedData/
 
 # Fastlane build output
 fastlane/build/
+
+# Visual-parity review: keep the docs, ignore regenerable screenshots
+_review/ios/
+_review/mac/
