@@ -1,8 +1,28 @@
 # Buddy — Next Session Handoff
 
-_Last updated: 2026-06-30 (later)._
+_Last updated: 2026-07-02 (iOS visual-parity session)._
 
-## Start here
+## ⚠️ Active branch right now: `fix/ios-visual-parity` (iOS work, NOT the Mac app)
+
+This session rebuilt the **iPhone** UI to visually match the Mac drawer (it had drifted
+badly — system font, single card, native iOS chrome). Branch is **committed + pushed**,
+**no PR yet** (waiting on the user's review). All 37 iOS unit tests pass. The Mac app,
+PR #60, and `main` are untouched.
+
+- **Review it:** open `ios/_review/comparison.html` (Mac vs iPhone, every screen, side by side).
+- **What's done:** Geist font bundled; TodayView (two Geist cards, chrome row, numeral-left
+  date, clean rows, escalation lvl0/1/2); Settings + History rebuilt as custom Buddy sheets;
+  MorningView restyled. Details in `ios/_review/PROGRESS.md` + memory `buddy-ios-visual-parity`.
+- **Regenerate any shot:** build, install to sim, then
+  `xcrun simctl launch booted fyi.whale.buddy -uiFixture <lvl0|lvl1|lvl2|empty|morning|history|settings>`
+  → `xcrun simctl io booted screenshot out.png`.
+- **Next decision for the user:** eyeball comparison.html → if good, open the PR. Known
+  deltas (fixed "Donezo." vs rotating words; tap-to-complete vs swipe; static moon weather;
+  focused/"now" state still in the store) are listed at the bottom of comparison.html.
+
+---
+
+## Start here (Mac app — resumes when back on `main`)
 
 - Branch: `main`, clean.
 - **Released = `0.3.1`** (Latest) — Future/Done/Skipped tabs + Future manual holding pen. Signed/notarized, published via manual `Release Mac app` dispatch. **Not yet on-device-verified** — confirm via Settings → Check for Updates (the in-app updater should offer 0.3.1).

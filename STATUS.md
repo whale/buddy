@@ -5,6 +5,20 @@ _Last updated: 2026-06-30 (later). Current branch: `main`. Latest **released** v
 Buddy is a shipped, public, self-updating macOS menu-bar focus app for ADHD.
 Repo: `github.com/whale/buddy`.
 
+## Session summary — 2026-07-02 — iOS visual parity (branch `fix/ios-visual-parity`, pushed, no PR)
+
+Rebuilt the **iPhone** app UI to match the Mac drawer's design language (it had drifted:
+system font, one card, native iOS nav/list/form chrome). Bundled **Geist** (static OTFs) +
+a `Font.geist()` helper; rebuilt **TodayView** as two floating Geist cards (chrome row +
+numeral-left date block; Donezo-on-top / active / Add rows; clean text rows with
+tap=complete, long-press=edit/sleep/remove; escalation lvl0/1/2 via theme tokens); rebuilt
+**Settings** and **History** as custom Buddy sheets (no native Form/List — the 👍🏼…🦜 slider,
+the [Future|Done|Skipped] segmented history); restyled **MorningView**. Added store methods
+`restoreHistoryTask` / `wakeDeferredTask`. Added a DEBUG `-uiFixture` screenshot harness for
+deterministic captures. **All 37 iOS unit tests pass.** Review artifact:
+`ios/_review/comparison.html`. Latest commit on the branch: `62328c4`. **Not merged; no PR.**
+Known deltas + follow-ups are listed in comparison.html and `ios/_review/PROGRESS.md`.
+
 ## Session summary — 2026-06-30 (later) — Future/Done/Skipped tabs + Future holding pen (shipped 0.3.1)
 
 **The problem.** The **Done** tab showed both completed *and* skipped past tasks (each past day's `done:true` *and* `done:false` items), so skipped work polluted the "done" list — no clean view of what was actually finished.
