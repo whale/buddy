@@ -1,9 +1,11 @@
 # Buddy — Next Session Handoff
 
-_Last updated: 2026-06-30 (later)._
+_Last updated: 2026-07-01._
 
 ## Start here
 
+- Branch: `fix/done-word-shuffle` (clean, pushed). **PR #60 open** — done-word shuffle-bag fix (tester bug: celebration words were patterned, not random). Verified in browser, not on-device.
+- **Batching mode:** the user is gathering several small bug-fix PRs and will cut ONE release at the end. Merging fixes to `main` is safe — `AUTO_RELEASE_MAC` is OFF, so a merge only bumps the version, it does not publish. Don't release until the batch is done and the user says "let's release."
 - Branch: `main`, clean.
 - **Released = `0.3.1`** (Latest) — Future/Done/Skipped tabs + Future manual holding pen. Signed/notarized, published via manual `Release Mac app` dispatch. **Not yet on-device-verified** — confirm via Settings → Check for Updates (the in-app updater should offer 0.3.1).
 - `AUTO_RELEASE_MAC` is **OFF** — but a manual `gh workflow run "Release Mac app"` publishes anyway (a `workflow_dispatch` bypasses the OFF gate and builds+publishes whatever version is on `main`). No need to flip the var. Note: the auto-bump bot **+1's the patch on every merge to `main`**, so set the version expecting the bump (or add `[skip release]` to freeze it).
@@ -13,11 +15,11 @@ _Last updated: 2026-06-30 (later)._
 
 ## Next 3–5 tasks
 
-1. **On-device verify 0.3.1** — Settings → Check for Updates → install → confirm the three tabs (Future/Done/Skipped) and the Future holding pen (+/×/click-edit) work in the real app. Much of this session was browser-verified only.
-2. **Send the first alpha tester the DMG link** (`…/releases/download/v0.3.1/Buddy_0.3.1_universal.dmg`) — see STATUS.md onboarding note. If it grows past one tester, add a lightweight feedback loop (GitHub issue template or a form).
-3. **Build the design-token system** as the next PR (branch off `main`). Spec: memory `buddy-token-system-todo` + the styleguide's "⚐ Proposals" section (on **unmerged** `feat/styleguide-proposals`). OKLCH hover (`--red-hover: oklch(from var(--red) calc(l-.05) calc(c+.05) h)`), type scale 16→15 / 13→14, icon weights ≤20→1.8 / weather 1.4, de-inline all `style="color:…"`. Verify all three colour states.
-4. **Decide on `feat/styleguide-proposals`** — merge it or fold its content into task 3's PR.
-5. **Prune stale local branches** (`feat/sync-*`, `worktree-agent-*`, `feat/styleguide`, `docs/session-wrap-*`, and this `docs/wrap-0.3.1-tabs` after merge).
+1. **Keep batching fixes.** PR #60 (done-word shuffle bag) is open — merge it when ready (safe: auto-release OFF). Then tackle the next tester/bug item on its own branch off `main`. When the batch is complete, cut ONE release (version bump in lockstep + `gh workflow run "Release Mac app"`).
+2. **On-device verify 0.3.1** — Settings → Check for Updates → install → confirm the three tabs (Future/Done/Skipped) and the Future holding pen (+/×/click-edit) work in the real app. Much of the 0.3.1 work was browser-verified only.
+3. **Send the first alpha tester the DMG link** (`…/releases/download/v0.3.1/Buddy_0.3.1_universal.dmg`) — see STATUS.md onboarding note. If it grows past one tester, add a lightweight feedback loop (GitHub issue template or a form).
+4. **Build the design-token system** as a PR (branch off `main`). Spec: memory `buddy-token-system-todo` + the styleguide's "⚐ Proposals" section (on **unmerged** `feat/styleguide-proposals`). OKLCH hover (`--red-hover: oklch(from var(--red) calc(l-.05) calc(c+.05) h)`), type scale 16→15 / 13→14, icon weights ≤20→1.8 / weather 1.4, de-inline all `style="color:…"`. Verify all three colour states.
+5. **Decide on `feat/styleguide-proposals`** — merge it or fold its content into the token PR. **Prune stale local branches** (`feat/sync-*`, `worktree-agent-*`, `feat/styleguide`, `docs/session-wrap-*`, `docs/wrap-0.3.1-tabs`).
 
 ## What just happened (2026-06-30, later)
 
