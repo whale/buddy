@@ -1,9 +1,21 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-06-30 (later). Current branch: `main`. Latest **released** version: **`0.3.1`** — history split into three tabs (Future · Done · Skipped) + Future turned into a manual holding pen. Signed/notarized, published via a manual `Release Mac app` dispatch (the in-app updater delivers it). `AUTO_RELEASE_MAC` stays **OFF** — a manual `gh workflow run "Release Mac app"` publishes anyway (workflow_dispatch bypasses the gate); no need to flip the var. Open work: the de-inline-styles / token-system follow-up (memory `buddy-token-system-todo`)._
+_Last updated: 2026-07-01. Current branch: `fix/done-word-shuffle`. Latest **released** version: still **`0.3.1`** (no release this session — see below). Signed/notarized releases publish via a manual `Release Mac app` dispatch (the in-app updater delivers it). `AUTO_RELEASE_MAC` stays **OFF**. **Batching mode:** the user is accumulating several small bug-fix PRs and will cut ONE release at the end — so merging fixes to `main` is safe (auto-release is off; a merge only bumps the version number, it does not publish). Open work: this batch of fixes + the de-inline-styles / token-system follow-up (memory `buddy-token-system-todo`)._
 
 Buddy is a shipped, public, self-updating macOS menu-bar focus app for ADHD.
 Repo: `github.com/whale/buddy`.
+
+## Session summary — 2026-07-01 — done-word shuffle bag (PR #60, open, not released)
+
+**The bug (tester report).** A tester completed several tasks and the celebration labels (Donezo!, Ticked Off!, …) came out patterned, not random — Donezo / Ticked Off / Donezo / Ticked Off.
+
+**Root cause.** The done word was derived from a **hash of the task's `id`**. For sequential ids — history rows (`h-DATE-0, -1, -2`) and the `n1/n2` fallback — the hash marched straight down the 25-word list, so neighbouring completions got neighbouring words. (Random-UUID ids actually spread fine; the bug only bit when ids were sequential.)
+
+**The fix (PR #60, branch `fix/done-word-shuffle`).** Replaced id-hashing with a **shuffle bag**: every word is handed out once before any repeat, then the bag refills and reshuffles. The word is picked **once at completion** and stored on the item (`it.doneWord`) → genuinely spread out AND stable across re-renders. Persist the word per-item + the bag; survives sync (items pass through `mergeItems` whole). **Backfill at boot** heals already-completed tasks so an existing list re-shuffles immediately. Legacy hash kept only as a fallback for past-day history rows with no stored word. All in `dist/index.html`.
+
+**Verified (browser, port 8899).** `smokeTest` — all completion + done-word assertions pass; the lone failure ("hit targets") fails identically on the **unmodified baseline** (headless hover-button quirk, not this change — confirmed by stashing the edits and re-running). Shuffle bag: 55 consecutive completions → first 25 all distinct, next 25 all distinct, order scrambled. lvl2 red state screenshotted — 4 done rows, words varied and legible in light-on-red (no hardcoded-dark regression). **Not on-device-verified** (browser only).
+
+**Not released.** `AUTO_RELEASE_MAC` stays OFF; PR #60 is open, awaiting merge into the next batched release.
 
 ## Session summary — 2026-06-30 (later) — Future/Done/Skipped tabs + Future holding pen (shipped 0.3.1)
 
