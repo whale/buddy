@@ -57,6 +57,10 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         ITSAppUsesNonExemptEncryption: false
+        # Allow plain-HTTP loads to localhost/LAN so sync can reach a local Supabase
+        # (127.0.0.1:54321) in dev. Production hosted Supabase is HTTPS (ATS-clean).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         # Geist (SIL OFL) — the Mac app's typeface. Bundled as static OTFs so the
         # iPhone shares Buddy's exact type language. PostScript names: Geist-<Weight>.
         UIAppFonts:
