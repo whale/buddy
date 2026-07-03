@@ -80,7 +80,7 @@ extension EscalationTheme {
 // The Mac reveals row actions on hover; the iPhone has no hover, so we use swipe (the
 // user's pick). Native `.swipeActions` only works inside a List — which can't do the
 // equal-height flex rows — so this is a custom swipe that preserves the layout.
-//   swipe RIGHT → Complete (leading) · swipe LEFT → Sleep · Delete (trailing) · tap → onTap (edit)
+//   swipe LEFT → checkmark · calendar (sleep) · X (delete) · tap → onTap (edit)
 struct SwipeableRow<Content: View>: View {
     var cardFill: Color                 // opaque row bg so the actions hide when closed
     var onComplete: (() -> Void)? = nil
@@ -89,79 +89,85 @@ struct SwipeableRow<Content: View>: View {
     var onTap: (() -> Void)? = nil
     @ViewBuilder var content: () -> Content
 
-    @State private var offset: CGFloat = 0        // snapped rest offset
-    @GestureState private var drag: CGFloat = 0   // live drag delta
-    private let actionW: CGFloat = 76
-    // Match the Mac: no coloured fills — a single light-grey action strip with BLACK icons.
-    private let actionBG = Color(hex: "#ececec")
+    // Smooth swipe: track the live delta in @State (NOT @GestureState). @GestureState
+    // snaps back to 0 the instant the finger lifts — a frame BEFORE onEnded's animation
+    // sets the rest offset — which is the visible jitter. Owning `drag` ourselves lets us
+    // zero it INSIDE the settle animation, so there's no jump.
+    @State private var offset: CGFloat = 0     // committed rest offset (0 or -openWidth)
+    @State private var drag: CGFloat = 0       // live finger delta during a drag
+    @State private var locked = false          // gesture committed to horizontal
 
-    private var trailing: [(String, Color, () -> Void)] {
-        var a: [(String, Color, () -> Void)] = []
-        if let onSleep  { a.append(("sleep", actionBG, onSleep)) }   // Lucide calendar-arrow (Move to Future)
-        if let onDelete { a.append(("x",     actionBG, onDelete)) }  // Lucide X (remove)
+    private let actionW: CGFloat = 58          // ≥ 44pt (Apple's min tap target)
+    private let actionBG = Color(hex: "#ececec")
+    private let divider  = Color(hex: "#c9c9c9")
+    private let settle   = Animation.interactiveSpring(response: 0.34, dampingFraction: 0.86)
+
+    // Trailing actions, left→right: checkmark · calendar (move to Future) · X (remove).
+    private var actions: [(icon: String, run: () -> Void)] {
+        var a: [(String, () -> Void)] = []
+        if let onComplete { a.append(("check", onComplete)) }
+        if let onSleep    { a.append(("calendar", onSleep)) }
+        if let onDelete   { a.append(("x", onDelete)) }
         return a
     }
-    private var trailingW: CGFloat { CGFloat(trailing.count) * actionW }
-    private var leadingW: CGFloat { onComplete != nil ? actionW : 0 }
-    private var visual: CGFloat { min(leadingW, max(-trailingW, offset + drag)) }
+    private var openWidth: CGFloat { CGFloat(actions.count) * actionW }
+    private var x: CGFloat { min(0, max(-openWidth, offset + drag)) }   // left-only, clamped
 
     var body: some View {
-        ZStack {
-            // Action layer (behind the content)
+        ZStack(alignment: .trailing) {
+            // Revealed action strip on the right — each icon in a 44pt+ box, 1px grey dividers.
             HStack(spacing: 0) {
-                if let onComplete {
-                    actionButton("check", actionBG) { run(onComplete) }
-                        .frame(width: actionW)
-                }
-                Spacer(minLength: 0)
-                ForEach(Array(trailing.enumerated()), id: \.offset) { _, a in
-                    actionButton(a.0, a.1) { run(a.2) }.frame(width: actionW)
+                ForEach(Array(actions.enumerated()), id: \.offset) { i, act in
+                    if i > 0 { divider.frame(width: 1) }
+                    Button { run(act.run) } label: {
+                        LucideIcon(act.icon, size: 22)
+                            .foregroundStyle(.black)
+                            .frame(width: actionW)
+                            .frame(maxHeight: .infinity)
+                            .background(actionBG)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            // Content on top, offset by the swipe; opaque so it covers the actions at rest.
+            .frame(width: openWidth)
+
             content()
                 .background(cardFill)
-                .offset(x: visual)
-                // (leading complete uses Lucide "check" — see actionButton)
-                .highPriorityGesture(
-                    DragGesture(minimumDistance: 14)
-                        .updating($drag) { v, state, _ in
-                            // horizontal intent only — ignore mostly-vertical drags
-                            if abs(v.translation.width) > abs(v.translation.height) { state = v.translation.width }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .offset(x: x)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 8)
+                        .onChanged { v in
+                            if !locked && abs(v.translation.width) > abs(v.translation.height) { locked = true }
+                            if locked { drag = v.translation.width }   // 1:1 with the finger, no animation
                         }
                         .onEnded { v in
-                            let o = offset + v.translation.width
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                                if o < -trailingW * 0.5 { offset = -trailingW }
-                                else if leadingW > 0 && o > leadingW * 0.5 { offset = leadingW }
-                                else { offset = 0 }
+                            let projected = offset + v.translation.width
+                            withAnimation(settle) {
+                                offset = projected < -openWidth * 0.5 ? -openWidth : 0
+                                drag = 0                              // zeroed INSIDE the animation → no jump
                             }
+                            locked = false
                         }
                 )
                 .onTapGesture {
-                    if offset != 0 { withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { offset = 0 } }
+                    if offset != 0 { withAnimation(settle) { offset = 0 } }
                     else { onTap?() }
                 }
         }
         .clipped()
         #if DEBUG
-        .onAppear {   // screenshot harness: -uiSwipeOpen 1 reveals the trailing actions
-            if UserDefaults.standard.bool(forKey: "uiSwipeOpen") { offset = -trailingW }
+        .onAppear {   // screenshot harness: -uiSwipeOpen 1 reveals the actions
+            if UserDefaults.standard.bool(forKey: "uiSwipeOpen") { offset = -openWidth }
         }
         #endif
     }
 
-    private func actionButton(_ icon: String, _ bg: Color, _ act: @escaping () -> Void) -> some View {
-        Button(action: act) {
-            bg.overlay(LucideIcon(icon, size: 22).foregroundStyle(.black))   // black icons, Mac-style
-        }
-        .buttonStyle(.plain)
-        .frame(maxHeight: .infinity)
-    }
-
-    private func run(_ a: @escaping () -> Void) {
-        a()
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { offset = 0 }
+    private func run(_ action: @escaping () -> Void) {
+        action()
+        withAnimation(settle) { offset = 0 }
     }
 }
 
