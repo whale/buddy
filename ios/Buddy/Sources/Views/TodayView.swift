@@ -108,7 +108,7 @@ struct TodayView: View {
                              selected: showHistory, selBg: theme.selBg, selInk: theme.selInk) {
                     withAnimation(.easeOut(duration: 0.28)) { showHistory.toggle(); showSettings = false }
                 }
-                ChromeButton("gearshape", size: 17, ink: theme.chromeInk,
+                ChromeButton("settings", size: 17, ink: theme.chromeInk,
                              selected: showSettings, selBg: theme.selBg, selInk: theme.selInk) {
                     withAnimation(.easeOut(duration: 0.28)) { showSettings.toggle(); showHistory = false }
                 }
@@ -144,8 +144,7 @@ struct TodayView: View {
                     .padding(.bottom, 4)   // optical baseline nudge toward the numeral
                 }
                 Spacer()
-                Image(systemName: weatherSymbol)
-                    .font(.system(size: 40, weight: .ultraLight))   // fill the 50px box, thin like the Mac's Lucide 1.4 stroke
+                LucideIcon("moon", size: 34)   // real Lucide moon (weather); live fetch still TODO
                     .foregroundStyle(theme.escalationText)
                     .frame(width: 50, height: 50)
             }
@@ -305,9 +304,6 @@ struct TodayView: View {
         let f = DateFormatter(); f.dateFormat = fmt; return f.string(from: Date())
     }
 
-    // Placeholder glyph (a moon) matching the Mac's night state. Live weather is a
-    // separate feature (Open-Meteo fetch) not yet ported to iOS.
-    private var weatherSymbol: String { "moon" }
 }
 
 // Kept in this file so the app target sees it even in release (harness uses a DEBUG-gated variant).

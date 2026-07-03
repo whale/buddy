@@ -178,15 +178,13 @@ struct HistoryView: View {
             Spacer(minLength: 0)
             if canAdd {
                 Button(action: add) {
-                    Image(systemName: "plus").font(.system(size: 15)).foregroundStyle(theme.inkDim)
-                        .frame(width: 32, height: 32).contentShape(Circle())
+                    LucideIcon("plus", size: 17).foregroundStyle(theme.inkDim).frame(width: 32, height: 32).contentShape(Circle())
                 }
                 .buttonStyle(.plain)
             }
             if let remove {
                 Button(action: remove) {
-                    Image(systemName: "xmark").font(.system(size: 14)).foregroundStyle(theme.inkDim)
-                        .frame(width: 32, height: 32).contentShape(Circle())
+                    LucideIcon("x", size: 16).foregroundStyle(theme.inkDim).frame(width: 32, height: 32).contentShape(Circle())
                 }
                 .buttonStyle(.plain)
             }

@@ -1,5 +1,19 @@
 import SwiftUI
 
+// MARK: - Lucide glyph
+// The Mac uses Lucide icons (stroke 1.8), NOT SF Symbols. These are the real Lucide
+// SVGs converted to tintable vector PDFs (assets `lucide-<name>`), so the shapes match
+// exactly. Tint via `.foregroundStyle(...)` on the caller.
+struct LucideIcon: View {
+    let name: String
+    let size: CGFloat
+    init(_ name: String, size: CGFloat) { self.name = name; self.size = size }
+    var body: some View {
+        Image("lucide-\(name)").renderingMode(.template).resizable().scaledToFit()
+            .frame(width: size, height: size)
+    }
+}
+
 // MARK: - Buddy card
 // The Mac's `.bcard`: a rounded-24 panel with a layered macOS shadow (soft ramp,
 // no hairline border). Suppressed at lvl2 (red-on-red would just muddy).
@@ -40,8 +54,7 @@ struct BuddySheetHeader<Leading: View>: View {
                 leading
                 Spacer(minLength: 8)
                 Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .regular))
+                    LucideIcon("x", size: 16)
                         .foregroundStyle(theme.chromeInk)
                         .frame(width: 36, height: 36)
                         .contentShape(Circle())
@@ -82,8 +95,8 @@ struct SwipeableRow<Content: View>: View {
 
     private var trailing: [(String, Color, () -> Void)] {
         var a: [(String, Color, () -> Void)] = []
-        if let onSleep  { a.append(("moon.zzz.fill", Color(hex: "#6b6b6b"), onSleep)) }
-        if let onDelete { a.append(("trash.fill",     Color(hex: "#c62828"), onDelete)) }
+        if let onSleep  { a.append(("sleep", Color(hex: "#6b6b6b"), onSleep)) }   // Lucide calendar-arrow (Move to Future)
+        if let onDelete { a.append(("x",     Color(hex: "#c62828"), onDelete)) }  // Lucide X (remove)
         return a
     }
     private var trailingW: CGFloat { CGFloat(trailing.count) * actionW }
@@ -95,7 +108,7 @@ struct SwipeableRow<Content: View>: View {
             // Action layer (behind the content)
             HStack(spacing: 0) {
                 if let onComplete {
-                    actionButton("checkmark", Color(hex: "#30a46c")) { run(onComplete) }
+                    actionButton("check", Color(hex: "#30a46c")) { run(onComplete) }
                         .frame(width: actionW)
                 }
                 Spacer(minLength: 0)
@@ -107,6 +120,7 @@ struct SwipeableRow<Content: View>: View {
             content()
                 .background(cardFill)
                 .offset(x: visual)
+                // (leading complete uses Lucide "check" — see actionButton)
                 .highPriorityGesture(
                     DragGesture(minimumDistance: 14)
                         .updating($drag) { v, state, _ in
@@ -137,7 +151,7 @@ struct SwipeableRow<Content: View>: View {
 
     private func actionButton(_ icon: String, _ bg: Color, _ act: @escaping () -> Void) -> some View {
         Button(action: act) {
-            bg.overlay(Image(systemName: icon).font(.system(size: 18)).foregroundStyle(.white))
+            bg.overlay(LucideIcon(icon, size: 22).foregroundStyle(.white))
         }
         .buttonStyle(.plain)
         .frame(maxHeight: .infinity)
@@ -175,8 +189,7 @@ struct ChromeButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: size, weight: .light))   // ≈ the Mac's Lucide 1.8 stroke (SF .regular reads heavier)
+            LucideIcon(systemName, size: size)   // real Lucide glyph, not an SF Symbol
                 .foregroundStyle(selected ? selInk : ink)
                 .frame(width: 39, height: 39)
                 .background(selected ? selBg : .clear, in: Circle())   // filled circle when active (Mac chrome-btn.sel)

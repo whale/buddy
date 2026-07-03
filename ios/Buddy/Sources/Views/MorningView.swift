@@ -44,7 +44,7 @@ struct MorningView: View {
                 .padding(.bottom, 4)
             }
             Spacer()
-            Image(systemName: "moon").font(.system(size: 40, weight: .ultraLight)).foregroundStyle(theme.escalationText).frame(width: 50, height: 50)
+            LucideIcon("moon", size: 34).foregroundStyle(theme.escalationText).frame(width: 50, height: 50)
         }
     }
 
