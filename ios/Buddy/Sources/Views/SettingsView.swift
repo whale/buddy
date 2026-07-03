@@ -11,8 +11,6 @@ struct SettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var reducedMotion
 
     @State private var celebrate: Double = 100
-    @State private var historyDays: Double = 7
-    @State private var showEraseConfirm = false
 
     private var theme: EscalationTheme { EscalationTheme.from(activeCount: store.activeCount) }
 
@@ -45,17 +43,6 @@ struct SettingsView: View {
                         }
                     }
 
-                    // History days
-                    section {
-                        Text(historyDaysLabel)
-                            .font(.geist(18, .regular)).tracking(-0.36)
-                            .foregroundStyle(theme.sheetLabel)
-                            .padding(.bottom, 14)
-                        Slider(value: $historyDays, in: 0...14, step: 1)
-                            .tint(theme.level == .lvl2 ? .white : .black)
-                            .onChange(of: historyDays) { _, v in store.settings.historyDays = Int(v) }
-                    }
-
                     // Export my done tasks (Mac parity) — share sheet with a live done-count
                     ShareLink(item: store.doneExport.joined(separator: "\n")) {
                         HStack(spacing: 0) {
@@ -82,16 +69,6 @@ struct SettingsView: View {
                         Image(systemName: "ladybug").font(.system(size: 15)).foregroundStyle(theme.sheetFaint)
                     }
 
-                    // Erase all data
-                    rowButton { showEraseConfirm = true } label: {
-                        Text("Erase all data")
-                            .font(.geist(18, .regular)).tracking(-0.36)
-                            .foregroundStyle(theme.level == .lvl2 ? .white : Color(hex: "#e5484d"))
-                        Spacer()
-                        Image(systemName: "trash").font(.system(size: 15))
-                            .foregroundStyle(theme.level == .lvl2 ? .white : Color(hex: "#e5484d"))
-                    }
-
                     #if DEBUG
                     HStack(spacing: 12) {
                         pill("Reset data") { store.resetForDev(); onClose() }
@@ -112,16 +89,7 @@ struct SettingsView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .alert("Erase all data?", isPresented: $showEraseConfirm) {
-            Button("Erase", role: .destructive) { store.eraseAll(); onClose() }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This removes every task and all history on this device. This can't be undone.")
-        }
-        .onAppear {
-            celebrate = Double(store.settings.celebrate)
-            historyDays = Double(store.settings.historyDays)
-        }
+        .onAppear { celebrate = Double(store.settings.celebrate) }
     }
 
     // MARK: row helpers
@@ -168,11 +136,6 @@ struct SettingsView: View {
         return c.url
     }
 
-    private var historyDaysLabel: String {
-        let n = Int(historyDays)
-        if n <= 0 { return "No history" }
-        return "\(n) day\(n == 1 ? "" : "s") of history"
-    }
 }
 
 #Preview {
