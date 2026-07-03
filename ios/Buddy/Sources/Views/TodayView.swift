@@ -18,6 +18,9 @@ struct TodayView: View {
     @State private var showHistory  = false
     @State private var showSettings = false
 
+    // Swipe: which row's actions are currently open (only one at a time)
+    @State private var openRowID: String? = nil
+
     // Inline editing
     @State private var editingId: String? = nil
     @State private var editText: String   = ""
@@ -237,6 +240,8 @@ struct TodayView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         } else {
             SwipeableRow(
+                rowID: task.id,
+                openRowID: $openRowID,
                 cardFill: theme.cardBackground,
                 onComplete: { handleComplete(task: task) },
                 onSleep:    { withAnimation { store.deferToTomorrow(id: task.id) } },

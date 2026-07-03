@@ -82,6 +82,8 @@ extension EscalationTheme {
 // equal-height flex rows — so this is a custom swipe that preserves the layout.
 //   swipe LEFT → checkmark · calendar (sleep) · X (delete) · tap → onTap (edit)
 struct SwipeableRow<Content: View>: View {
+    var rowID: String                   // identity, so only one row stays open at a time
+    @Binding var openRowID: String?     // shared: which row is currently open
     var cardFill: Color                 // opaque row bg so the actions hide when closed
     var onComplete: (() -> Void)? = nil
     var onSleep: (() -> Void)? = nil
@@ -89,18 +91,16 @@ struct SwipeableRow<Content: View>: View {
     var onTap: (() -> Void)? = nil
     @ViewBuilder var content: () -> Content
 
-    // Smooth swipe: track the live delta in @State (NOT @GestureState). @GestureState
-    // snaps back to 0 the instant the finger lifts — a frame BEFORE onEnded's animation
-    // sets the rest offset — which is the visible jitter. Owning `drag` ourselves lets us
-    // zero it INSIDE the settle animation, so there's no jump.
+    // Smooth swipe: track the live delta in @State (NOT @GestureState). @GestureState snaps
+    // to 0 the instant the finger lifts — a frame before onEnded's settle — which is the jitter.
     @State private var offset: CGFloat = 0     // committed rest offset (0 or -openWidth)
     @State private var drag: CGFloat = 0       // live finger delta during a drag
     @State private var locked = false          // gesture committed to horizontal
 
     private let actionW: CGFloat = 58          // ≥ 44pt (Apple's min tap target)
     private let actionBG = Color(hex: "#ececec")
-    private let divider  = Color(hex: "#c9c9c9")
-    private let settle   = Animation.interactiveSpring(response: 0.34, dampingFraction: 0.86)
+    private let dividerC = Color(hex: "#c9c9c9")
+    private let settle   = Animation.easeOut(duration: 0.2)   // fast, no spring bounce (shadcn-ish)
 
     // Trailing actions, left→right: checkmark · calendar (move to Future) · X (remove).
     private var actions: [(icon: String, run: () -> Void)] {
@@ -110,54 +110,55 @@ struct SwipeableRow<Content: View>: View {
         if let onDelete   { a.append(("x", onDelete)) }
         return a
     }
-    private var openWidth: CGFloat { CGFloat(actions.count) * actionW }
+    private var openWidth: CGFloat { CGFloat(actions.count) * actionW + CGFloat(max(0, actions.count - 1)) }
     private var x: CGFloat { min(0, max(-openWidth, offset + drag)) }   // left-only, clamped
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            // Revealed action strip on the right — each icon in a 44pt+ box, 1px grey dividers.
+        ZStack {
+            // Actions behind, pushed to the trailing edge (revealed as the content slides left).
             HStack(spacing: 0) {
+                Spacer(minLength: 0)
                 ForEach(Array(actions.enumerated()), id: \.offset) { i, act in
-                    if i > 0 { divider.frame(width: 1) }
-                    Button { run(act.run) } label: {
+                    if i > 0 { dividerC.frame(width: 1).frame(maxHeight: .infinity) }
+                    Button { fire(act.run) } label: {
                         LucideIcon(act.icon, size: 22)
                             .foregroundStyle(.black)
-                            .frame(width: actionW)
-                            .frame(maxHeight: .infinity)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .background(actionBG)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .frame(width: actionW)
                 }
             }
-            .frame(width: openWidth)
 
+            // Content on top — opaque, so it hides the actions at rest; offset reveals them.
             content()
                 .background(cardFill)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .offset(x: x)
-                .contentShape(Rectangle())
-                .gesture(
+                .highPriorityGesture(
                     DragGesture(minimumDistance: 8)
                         .onChanged { v in
                             if !locked && abs(v.translation.width) > abs(v.translation.height) { locked = true }
                             if locked { drag = v.translation.width }   // 1:1 with the finger, no animation
                         }
                         .onEnded { v in
-                            let projected = offset + v.translation.width
-                            withAnimation(settle) {
-                                offset = projected < -openWidth * 0.5 ? -openWidth : 0
-                                drag = 0                              // zeroed INSIDE the animation → no jump
-                            }
+                            let willOpen = (offset + v.translation.width) < -openWidth * 0.5
+                            withAnimation(settle) { offset = willOpen ? -openWidth : 0; drag = 0 }
+                            if willOpen { openRowID = rowID }
+                            else if openRowID == rowID { openRowID = nil }
                             locked = false
                         }
                 )
                 .onTapGesture {
-                    if offset != 0 { withAnimation(settle) { offset = 0 } }
-                    else { onTap?() }
+                    if offset != 0 { close() } else { onTap?() }
                 }
         }
         .clipped()
+        // Another row opened → close this one.
+        .onChange(of: openRowID) { _, newVal in
+            if newVal != rowID && offset != 0 { withAnimation(settle) { offset = 0 } }
+        }
         #if DEBUG
         .onAppear {   // screenshot harness: -uiSwipeOpen 1 reveals the actions
             if UserDefaults.standard.bool(forKey: "uiSwipeOpen") { offset = -openWidth }
@@ -165,9 +166,13 @@ struct SwipeableRow<Content: View>: View {
         #endif
     }
 
-    private func run(_ action: @escaping () -> Void) {
-        action()
+    private func close() {
         withAnimation(settle) { offset = 0 }
+        if openRowID == rowID { openRowID = nil }
+    }
+    private func fire(_ action: @escaping () -> Void) {
+        action()
+        close()
     }
 }
 
