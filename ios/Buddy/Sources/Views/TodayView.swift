@@ -10,6 +10,10 @@ struct TodayView: View {
 
     @State private var store: BuddyStore
 
+    // Sync (P2/P3): created once on appear; drives pull-on-foreground + debounced push.
+    @State private var sync: SyncEngine?
+    @Environment(\.scenePhase) private var scenePhase
+
     // Sheets
     @State private var showHistory  = false
     @State private var showSettings = false
@@ -73,7 +77,7 @@ struct TodayView: View {
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                     if showSettings {
-                        SettingsView(store: store, onClose: { withAnimation(.easeOut(duration: 0.28)) { showSettings = false } })
+                        SettingsView(store: store, sync: sync, onClose: { withAnimation(.easeOut(duration: 0.28)) { showSettings = false } })
                             .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
@@ -101,6 +105,12 @@ struct TodayView: View {
             #else
             weather.refresh()
             #endif
+            // Bring up the sync engine (inert until the user pairs) and pull once on launch.
+            if sync == nil { sync = SyncEngine(store: store) }
+            sync?.syncOnForeground()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { sync?.syncOnForeground() }   // pull the other device's edits on foreground
         }
     }
 

@@ -61,6 +61,8 @@ targets:
         # (127.0.0.1:54321) in dev. Production hosted Supabase is HTTPS (ATS-clean).
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # Camera is used ONLY to scan the pairing QR code shown on the Mac.
+        NSCameraUsageDescription: Buddy uses the camera to scan the pairing QR code from your Mac to set up sync.
         # Geist (SIL OFL) — the Mac app's typeface. Bundled as static OTFs so the
         # iPhone shares Buddy's exact type language. PostScript names: Geist-<Weight>.
         UIAppFonts:

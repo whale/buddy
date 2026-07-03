@@ -25,14 +25,17 @@ final class SyncIdentityTests: XCTestCase {
 
     func testPairingPayloadRoundTrips() {
         let key = SyncIdentity.generateKey()
-        let parsed = SyncIdentity.parse(SyncIdentity.payload(backendUrl: "https://x.supabase.co", syncKey: key))
+        let parsed = SyncIdentity.parse(SyncIdentity.payload(
+            backendUrl: "https://x.supabase.co", anonKey: "anon-abc", syncKey: key))
         XCTAssertEqual(parsed?.syncKey, key)
         XCTAssertEqual(parsed?.backendUrl, "https://x.supabase.co")
+        XCTAssertEqual(parsed?.anonKey, "anon-abc")
     }
 
     func testPairingPayloadRejectsGarbage() {
         XCTAssertNil(SyncIdentity.parse("not json"))
         XCTAssertNil(SyncIdentity.parse("{}"))
-        XCTAssertNil(SyncIdentity.parse(#"{"backendUrl":"x"}"#))      // missing syncKey
+        XCTAssertNil(SyncIdentity.parse(#"{"backendUrl":"x","syncKey":"y"}"#))   // missing anonKey
+        XCTAssertNil(SyncIdentity.parse(#"{"backendUrl":"x","anonKey":"a"}"#))   // missing syncKey
     }
 }

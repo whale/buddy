@@ -33,6 +33,13 @@ final class BuddyStore {
     // MARK: - Save debounce
     private var saveWorkItem: DispatchWorkItem?
 
+    // MARK: - Sync hooks (P1.5/P2)
+    // The sync engine sets onLocalChange to schedule a debounced push. While `applyingRemote`
+    // is true (inside adopt), local mutations are the RESULT of a pull — they must NOT re-trigger
+    // a push (that ping-pongs versions). adopt() persists directly and never fires onLocalChange.
+    var onLocalChange: (() -> Void)?
+    private var applyingRemote = false
+
     // MARK: - Init
     init() {
         loadFromDisk()
@@ -241,6 +248,30 @@ final class BuddyStore {
     }
     #endif
 
+    // MARK: - Sync bridge (P1.5)
+
+    /// Build the mergeable snapshot the sync loop pushes. savedAt is stamped NOW (mirrors the
+    /// Mac's serialize()), so a genuine local change wins scalar (settings / today.date) conflicts.
+    func snapshot() -> SyncSnapshot {
+        SyncSnapshot(today: today, history: history, deferred: deferred, settings: settings,
+                     tombstones: tombstones, erasedAt: erasedAt, savedAt: Date().timeIntervalSince1970)
+    }
+
+    /// Replace local state from a merged snapshot (the result of a pull+merge). Persists directly
+    /// and NEVER fires onLocalChange — adopting remote truth must not schedule another push. Must
+    /// be called on the main actor (mutates @Observable state the UI reads). Fires no celebration.
+    func adopt(_ merged: SyncSnapshot) {
+        applyingRemote = true
+        defer { applyingRemote = false }
+        if let t = merged.today { today = t }
+        history    = merged.history
+        deferred   = merged.deferred
+        if let s = merged.settings { settings = s }
+        tombstones = merged.tombstones
+        erasedAt   = merged.erasedAt
+        saveToDisk()                         // persist without going through scheduleSave/dirty
+    }
+
     // MARK: - Morning planner
     // Mirrors the Mac: on a fresh/rolled day the morning planner shows until the user
     // presses Buddy! (or Skip) — both just mark the day planned. Yesterday's unfinished
@@ -330,6 +361,9 @@ final class BuddyStore {
     }
 
     private func scheduleSave(immediate: Bool = false) {
+        // A local mutation → signal the sync engine to schedule a debounced push. Suppressed
+        // while adopting a remote snapshot (that write is the RESULT of a pull, not a new edit).
+        if !applyingRemote { onLocalChange?() }
         saveWorkItem?.cancel()
         if immediate {
             saveToDisk()
