@@ -33,6 +33,12 @@ struct HistoryView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        #if DEBUG
+        .onAppear {   // screenshot harness: -uiTab Future|Done|Skipped
+            if let raw = UserDefaults.standard.string(forKey: "uiTab"),
+               let t = Tab(rawValue: raw) { tab = t }
+        }
+        #endif
     }
 
     // MARK: Segmented control ([Future | Done | Skipped])
@@ -140,7 +146,8 @@ struct HistoryView: View {
 
     private func doneRow(_ text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("Donezo.").font(.geist(18, .semibold)).tracking(-0.30).foregroundStyle(theme.ink)
+            Text(DoneWords.word(for: text)).font(.geist(18, .semibold)).tracking(-0.30)
+                .foregroundStyle(theme.ink).fixedSize(horizontal: true, vertical: false)
             Text(text).font(.geist(18, .regular)).tracking(-0.36)
                 .strikethrough(true, color: theme.inkDim).foregroundStyle(theme.inkDim).lineLimit(1)
             Spacer(minLength: 0)

@@ -220,10 +220,11 @@ struct TodayView: View {
     @ViewBuilder
     private func doneRowView(task: BuddyTask) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("Donezo.")
+            Text(DoneWords.word(for: task.id))
                 .font(.geist(15, .semibold))
                 .tracking(-0.30)
                 .foregroundStyle(theme.ink)
+                .fixedSize(horizontal: true, vertical: false)
             Text(task.text)
                 .font(.geist(15, .regular))
                 .tracking(-0.30)
