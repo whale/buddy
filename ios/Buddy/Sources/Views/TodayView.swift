@@ -82,10 +82,11 @@ struct TodayView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)   // fills the gap between header + bottom bar
-                bottomBar                 // chrome icons + "Buddy"
+                bottomBar                 // chrome icons + "Buddy" — bleeds off the bottom edge
             }
-            .padding(.horizontal, 8)     // even gutter all around
-            .padding(.vertical, 8)
+            .padding(.horizontal, 8)     // even side gutter
+            .padding(.top, 8)            // small gutter below the status-bar safe area (no more)
+            .ignoresSafeArea(.container, edges: .bottom)   // bottom bar runs off the bottom edge
             .animation(.easeInOut(duration: 0.2), value: activeCount)
 
             if showCelebration {
@@ -123,14 +124,13 @@ struct TodayView: View {
     // MARK: - Card 1 — date block (numeral · weekday/month · weather)
 
     private var headerCard: some View {
-        HStack(alignment: .bottom) {
-            // numeral + weekday/month, baseline-aligned like the Mac (items-end, leading-none)
+        HStack(alignment: .center) {   // Figma 41:286: fixed 114h, items-center
             HStack(alignment: .lastTextBaseline, spacing: 12) {
                 Text(dayNumber)
                     .font(.geist(62, .medium)).tracking(-1.24)
                     .foregroundStyle(theme.escalationText)
                     .fixedSize()
-                VStack(alignment: .leading, spacing: 12) {   // gap-3 like the Mac (was 4)
+                VStack(alignment: .leading, spacing: 12) {   // gap-3 (Figma)
                     Text(weekday)
                         .font(.geist(24, .medium)).tracking(-0.48)
                         .foregroundStyle(theme.escalationText)
@@ -141,32 +141,53 @@ struct TodayView: View {
                 .fixedSize()
             }
             Spacer()
-            WeatherIcon(key: weather.iconKey, size: 50)   // fills the 50px box (was 40)
+            WeatherIcon(key: weather.iconKey, size: 50)
                 .foregroundStyle(theme.escalationText)
                 .frame(width: 50, height: 50)
         }
-        .padding(.leading, 32).padding(.trailing, 26).padding(.vertical, 30)
+        .padding(.horizontal, 32)
+        .frame(height: 114)          // Figma fixed header height
         .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
     }
 
-    // MARK: - Bottom bar — chrome icons + "Buddy" (moved out of the header)
+    // MARK: - Bottom bar (Figma 41:306) — pin/calendar/gear + "Buddy".
+    // Top corners rounded only; runs off the bottom edge (bleeds past the home indicator).
     private var bottomBar: some View {
-        HStack(spacing: 10) {
-            ChromeButton("calendar", size: 18, ink: theme.chromeInk,
-                         selected: showHistory, selBg: theme.selBg, selInk: theme.selInk) {
-                withAnimation(.easeOut(duration: 0.28)) { showHistory.toggle(); showSettings = false }
-            }
-            ChromeButton("settings", size: 19, ink: theme.chromeInk,
-                         selected: showSettings, selBg: theme.selBg, selInk: theme.selInk) {
-                withAnimation(.easeOut(duration: 0.28)) { showSettings.toggle(); showHistory = false }
+        HStack(alignment: .center) {
+            HStack(spacing: 30) {    // Figma gap-35 between the 20px icons
+                // (Figma shows a pin here too, but it has no iPhone function — omitted for now.)
+                bottomChrome("calendar", selected: showHistory) {
+                    withAnimation(.easeOut(duration: 0.28)) { showHistory.toggle(); showSettings = false }
+                }
+                bottomChrome("settings", selected: showSettings) {
+                    withAnimation(.easeOut(duration: 0.28)) { showSettings.toggle(); showHistory = false }
+                }
             }
             Spacer()
             Text("Buddy")
                 .font(.geist(18, .regular)).tracking(-0.36)
                 .foregroundStyle(theme.chromeMuted)
         }
-        .padding(.leading, 22).padding(.trailing, 28).padding(.vertical, 14)
-        .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
+        .padding(.horizontal, 32)
+        .padding(.top, 26)
+        .padding(.bottom, 44)        // extends into/past the home-indicator area → bleed
+        .frame(maxWidth: .infinity)
+        .background(
+            theme.cardBackground,
+            in: UnevenRoundedRectangle(topLeadingRadius: 24, bottomLeadingRadius: 0,
+                                       bottomTrailingRadius: 0, topTrailingRadius: 24, style: .continuous)
+        )
+        .shadow(color: theme.level != .lvl2 ? .black.opacity(0.06) : .clear, radius: 8, y: -2)
+    }
+
+    private func bottomChrome(_ icon: String, selected: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            LucideIcon(icon, size: 20)
+                .foregroundStyle(selected ? theme.escalationText : theme.chromeInk)
+                .frame(width: 32, height: 32, alignment: .center)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Card 2 — task list
@@ -204,7 +225,7 @@ struct TodayView: View {
     private func activeRowView(task: BuddyTask) -> some View {
         if editingId == task.id {
             TextField("", text: $editText, axis: .vertical)
-                .font(.geist(22, .medium)).tracking(-0.48)
+                .font(.geist(24, .medium)).tracking(-0.48)
                 .foregroundStyle(theme.escalationText)
                 .submitLabel(.done)
                 .focused($focusedField, equals: task.id)
@@ -223,7 +244,7 @@ struct TodayView: View {
                 onTap:      { startEdit(task: task) }
             ) {
                 Text(task.text.isEmpty ? "Untitled" : task.text)
-                    .font(.geist(22, .medium)).tracking(-0.48).lineSpacing(2)
+                    .font(.geist(24, .medium)).tracking(-0.48).lineSpacing(2)
                     .foregroundStyle(task.text.isEmpty ? theme.inkDim : theme.escalationText)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .padding(.horizontal, 32).padding(.vertical, 16)
@@ -266,7 +287,7 @@ struct TodayView: View {
             Text("Add")
             Text("+")
         }
-        .font(.geist(22, .medium))
+        .font(.geist(24, .medium))
         .tracking(-0.48)
         .foregroundStyle(theme.addInk)
         .padding(.horizontal, 32)
