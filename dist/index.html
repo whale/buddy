@@ -3019,6 +3019,9 @@ initSyncUI();
 initSync().then(()=>{ if(syncStore) syncNow('boot'); });
 window.addEventListener('focus', ()=>{ if(syncStore) syncNow('focus'); });
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && syncStore) syncNow('focus'); });
+// LIVE sync: poll every 1.5s while visible so the OTHER device's edits show up within ~1.5s
+// (syncNow no-ops when nothing changed, so this is cheap and never flickers the UI).
+setInterval(()=>{ if(syncStore && document.visibilityState==='visible') syncNow('poll'); }, 1500);
 </script>
 </body>
 </html>

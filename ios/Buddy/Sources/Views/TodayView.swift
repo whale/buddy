@@ -110,7 +110,8 @@ struct TodayView: View {
             sync?.syncOnForeground()
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { sync?.syncOnForeground() }   // pull the other device's edits on foreground
+            if phase == .active { sync?.syncOnForeground() }   // pull + go live on foreground
+            else { sync?.pauseSync() }                          // stop polling in the background
         }
     }
 

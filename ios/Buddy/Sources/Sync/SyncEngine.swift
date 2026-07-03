@@ -27,8 +27,10 @@ final class SyncEngine {
     private var config: SyncConfig
     private var pending = false
     private var debounce: Task<Void, Never>?
+    private var pollTimer: Timer?
 
-    static let debounceSeconds: UInt64 = 2_500_000_000   // 2.5s
+    static let debounceSeconds: UInt64 = 800_000_000   // 0.8s — snappy local→remote push
+    static let pollSeconds: TimeInterval = 1.5         // remote→local: poll while foreground
 
     init(store: BuddyStore, config: SyncConfig = SyncConfigStore.load()) {
         self.store = store
@@ -39,13 +41,24 @@ final class SyncEngine {
     // MARK: - Config
     func updateConfig(_ cfg: SyncConfig) {
         config = cfg
-        if cfg.isSyncable { requestSync() }        // newly paired → pull immediately
+        if cfg.isSyncable { requestSync(); startPolling() }   // newly paired → pull + go live
+        else { stopPolling() }
     }
     var currentConfig: SyncConfig { config }
 
     // MARK: - Triggers
-    /// Launch + every foreground: pull now (picks up the other device's edits).
-    func syncOnForeground() { requestSync() }
+    /// Launch + every foreground: pull now + poll live so the other device's edits show up ~1.5s.
+    func syncOnForeground() { requestSync(); startPolling() }
+    /// Background: stop polling (no point, and saves battery/quota).
+    func pauseSync() { stopPolling() }
+
+    private func startPolling() {
+        guard config.isSyncable, pollTimer == nil else { return }
+        pollTimer = Timer.scheduledTimer(withTimeInterval: Self.pollSeconds, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.requestSync() }
+        }
+    }
+    private func stopPolling() { pollTimer?.invalidate(); pollTimer = nil }
 
     private func localChanged() {
         guard config.isSyncable else { return }

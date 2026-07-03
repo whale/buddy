@@ -92,11 +92,13 @@ struct SwipeableRow<Content: View>: View {
     @State private var offset: CGFloat = 0        // snapped rest offset
     @GestureState private var drag: CGFloat = 0   // live drag delta
     private let actionW: CGFloat = 76
+    // Match the Mac: no coloured fills — a single light-grey action strip with BLACK icons.
+    private let actionBG = Color(hex: "#ececec")
 
     private var trailing: [(String, Color, () -> Void)] {
         var a: [(String, Color, () -> Void)] = []
-        if let onSleep  { a.append(("sleep", Color(hex: "#6b6b6b"), onSleep)) }   // Lucide calendar-arrow (Move to Future)
-        if let onDelete { a.append(("x",     Color(hex: "#c62828"), onDelete)) }  // Lucide X (remove)
+        if let onSleep  { a.append(("sleep", actionBG, onSleep)) }   // Lucide calendar-arrow (Move to Future)
+        if let onDelete { a.append(("x",     actionBG, onDelete)) }  // Lucide X (remove)
         return a
     }
     private var trailingW: CGFloat { CGFloat(trailing.count) * actionW }
@@ -108,7 +110,7 @@ struct SwipeableRow<Content: View>: View {
             // Action layer (behind the content)
             HStack(spacing: 0) {
                 if let onComplete {
-                    actionButton("check", Color(hex: "#30a46c")) { run(onComplete) }
+                    actionButton("check", actionBG) { run(onComplete) }
                         .frame(width: actionW)
                 }
                 Spacer(minLength: 0)
@@ -151,7 +153,7 @@ struct SwipeableRow<Content: View>: View {
 
     private func actionButton(_ icon: String, _ bg: Color, _ act: @escaping () -> Void) -> some View {
         Button(action: act) {
-            bg.overlay(LucideIcon(icon, size: 22).foregroundStyle(.white))
+            bg.overlay(LucideIcon(icon, size: 22).foregroundStyle(.black))   // black icons, Mac-style
         }
         .buttonStyle(.plain)
         .frame(maxHeight: .infinity)
