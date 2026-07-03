@@ -166,7 +166,10 @@ struct TodayView: View {
         return VStack(spacing: 0) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { i, task in
                 if i > 0 { rowDivider }
-                if task.isDone { doneRowView(task: task) } else { activeRowView(task: task) }
+                Group {
+                    if task.isDone { doneRowView(task: task) } else { activeRowView(task: task) }
+                }
+                .transition(.opacity)   // rows fade in/out; the reorder to Donezo glides (below)
             }
             if !store.atHardCap {
                 if !rows.isEmpty { rowDivider }
@@ -175,45 +178,44 @@ struct TodayView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
+        // Item changes (complete→glide to Donezo, add, delete) animate; done→Donezo morph.
+        .animation(.easeOut(duration: 0.3), value: store.today.items)
     }
 
     private var rowDivider: some View {
         Rectangle().fill(theme.line).frame(height: 1)
     }
 
-    // MARK: - Active row — clean text at rest (Mac idiom). Tap completes; long-press edits.
+    // MARK: - Active row — tap the text to edit (Mac idiom); swipe for Complete / Sleep / Delete.
     @ViewBuilder
     private func activeRowView(task: BuddyTask) -> some View {
-        Group {
-            if editingId == task.id {
-                TextField("", text: $editText, axis: .vertical)
-                    .font(.geist(22, .medium))
-                    .tracking(-0.48)
-                    .foregroundStyle(theme.escalationText)
-                    .submitLabel(.done)
-                    .focused($focusedField, equals: task.id)
-                    .onSubmit { commitEdit(id: task.id) }
-                    .onChange(of: focusedField) { _, v in
-                        if v != task.id && editingId == task.id { commitEdit(id: task.id) }
-                    }
-            } else {
+        if editingId == task.id {
+            TextField("", text: $editText, axis: .vertical)
+                .font(.geist(22, .medium)).tracking(-0.48)
+                .foregroundStyle(theme.escalationText)
+                .submitLabel(.done)
+                .focused($focusedField, equals: task.id)
+                .onSubmit { commitEdit(id: task.id) }
+                .onChange(of: focusedField) { _, v in
+                    if v != task.id && editingId == task.id { commitEdit(id: task.id) }
+                }
+                .padding(.horizontal, 32).padding(.vertical, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        } else {
+            SwipeableRow(
+                cardFill: theme.cardBackground,
+                onComplete: { handleComplete(task: task) },
+                onSleep:    { withAnimation { store.deferToTomorrow(id: task.id) } },
+                onDelete:   { withAnimation { store.deleteTask(id: task.id) } },
+                onTap:      { startEdit(task: task) }
+            ) {
                 Text(task.text.isEmpty ? "Untitled" : task.text)
-                    .font(.geist(22, .medium))
-                    .tracking(-0.48)
-                    .lineSpacing(2)
+                    .font(.geist(22, .medium)).tracking(-0.48).lineSpacing(2)
                     .foregroundStyle(task.text.isEmpty ? theme.inkDim : theme.escalationText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .padding(.horizontal, 32).padding(.vertical, 16)
             }
-        }
-        .padding(.horizontal, 32)
-        .padding(.vertical, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)   // flex:1 1 auto — equal share of leftover height
-        .contentShape(Rectangle())
-        .onTapGesture { if editingId == nil { handleComplete(task: task) } }
-        .contextMenu {
-            Button { startEdit(task: task) } label: { Label("Edit", systemImage: "pencil") }
-            Button { store.deferToTomorrow(id: task.id) } label: { Label("Move to Future", systemImage: "moon.zzz") }
-            Button(role: .destructive) { store.deleteTask(id: task.id) } label: { Label("Remove", systemImage: "trash") }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)   // flex:1 1 auto — equal share of leftover height
         }
     }
 
@@ -264,14 +266,15 @@ struct TodayView: View {
     // MARK: - Interactions
 
     private func handleComplete(task: BuddyTask) {
-        let didComplete = store.complete(task)
+        let didComplete = withAnimation(.easeOut(duration: 0.3)) { store.complete(task) }
         if didComplete && store.settings.celebrate > 0 {
             withAnimation { showCelebration = true }
         }
     }
 
     private func addTask() {
-        if let newId = store.addTask() {
+        let newId = withAnimation(.easeOut(duration: 0.28)) { store.addTask() }
+        if let newId {
             editText = ""
             editingId = newId
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { focusedField = newId }
