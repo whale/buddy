@@ -13,10 +13,11 @@ enum DoneWords {
         "Ta-Da!", "Voilà!", "Finito!", "Fin!", "Shipped!"
     ]
 
-    /// Stable djb2 hash → word index. Same key ⇒ same word across launches.
+    /// Stable hash → word index, matching the Mac (h*31 + charCode, seed 0, over UTF-16).
+    /// Key off the task id everywhere so the drawer and History show the SAME word.
     static func word(for key: String) -> String {
-        var h: UInt64 = 5381
-        for b in key.utf8 { h = (h &* 33) &+ UInt64(b) }
-        return all[Int(h % UInt64(all.count))]
+        var h = 0
+        for c in key.utf16 { h = (h &* 31) &+ Int(c) }
+        return all[((h % all.count) + all.count) % all.count]
     }
 }

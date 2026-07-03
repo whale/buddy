@@ -153,6 +153,20 @@ final class BuddyStore {
         scheduleSave()
     }
 
+    /// Remove a parked (Future) task for good. Mirrors the Mac Future-tab × button.
+    func deleteDeferred(id: String) {
+        deferred.removeAll { $0.id == id }
+        scheduleSave()
+    }
+
+    /// Every completed task text (today + history), newest first — for the Settings export.
+    var doneExport: [String] {
+        var out = store_todayDone()
+        for d in history { out += d.items.filter { $0.done }.map { $0.text } }
+        return out
+    }
+    private func store_todayDone() -> [String] { doneTasks.map { $0.text } }
+
     /// Push a task to tomorrow's deferred list. Mirrors Mac's `sleepItem(id)`.
     func deferToTomorrow(id: String) {
         guard let idx = today.items.firstIndex(where: { $0.id == id }) else { return }

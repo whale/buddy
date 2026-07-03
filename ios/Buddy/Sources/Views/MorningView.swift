@@ -18,14 +18,15 @@ struct MorningView: View {
     var body: some View {
         ZStack {
             theme.cardBackground.ignoresSafeArea()
+            // Header pinned top, planner scrolls in the middle (Mac caps the list at 70vh),
+            // footer pinned bottom — so a full planner never shoves the date or Buddy! offscreen.
             VStack(spacing: 16) {
-                Spacer(minLength: 0)
                 dateHeader
                     .padding(.leading, 28)
                     .padding(.trailing, 24)
-                plannerCard
+                    .padding(.top, 16)
+                ScrollView { plannerCard }
                 footer
-                Spacer(minLength: 0)
             }
             .padding(.horizontal, 14)
         }
@@ -38,24 +39,27 @@ struct MorningView: View {
                 Text(dayNumber).font(.geist(62, .medium)).tracking(-1.24).foregroundStyle(theme.escalationText)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(weekday).font(.geist(24, .medium)).tracking(-0.48).foregroundStyle(theme.escalationText)
-                    Text(month).font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.chromeMuted)
+                    Text(month).font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.inkDim)
                 }
                 .padding(.bottom, 4)
             }
             Spacer()
-            Image(systemName: "moon").font(.system(size: 24)).foregroundStyle(theme.escalationText).frame(width: 50, height: 50)
+            Image(systemName: "moon").font(.system(size: 40, weight: .ultraLight)).foregroundStyle(theme.escalationText).frame(width: 50, height: 50)
         }
     }
 
     // The planner list — a bordered rounded card (Mac uses a border here, not a shadow).
     private var plannerCard: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(store.today.items.enumerated()), id: \.element.id) { i, task in
+        // Mirror the Mac: completed tasks sort to the TOP as compact Donezo rows, active
+        // tasks below as tall editable rows (the Mac morning uses the same renderToday).
+        let rows = store.doneTasks + store.activeTasks
+        return VStack(spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { i, task in
                 if i > 0 { Rectangle().fill(theme.line).frame(height: 1) }
-                plannerRow(task)
+                if task.isDone { doneRow(task) } else { plannerRow(task) }
             }
             if !store.atHardCap {
-                if !store.today.items.isEmpty { Rectangle().fill(theme.line).frame(height: 1) }
+                if !rows.isEmpty { Rectangle().fill(theme.line).frame(height: 1) }
                 addRow
             }
         }
@@ -64,12 +68,27 @@ struct MorningView: View {
         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(theme.line, lineWidth: 1))
     }
 
+    // Compact Donezo row (done-word + struck title), like the Mac's buildDonezoRow(morning).
+    private func doneRow(_ task: BuddyTask) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(DoneWords.word(for: task.id)).font(.geist(15, .semibold)).tracking(-0.30)
+                .foregroundStyle(theme.ink).fixedSize(horizontal: true, vertical: false)
+            Text(task.text).font(.geist(15, .regular)).tracking(-0.30)
+                .strikethrough(true, color: theme.inkDim).foregroundStyle(theme.inkDim).lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 32).padding(.vertical, 18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture { store.restoreTask(id: task.id) }
+    }
+
     @ViewBuilder
     private func plannerRow(_ task: BuddyTask) -> some View {
         Group {
             if editingId == task.id {
                 TextField("", text: $editText, axis: .vertical)
-                    .font(.geist(20, .medium)).tracking(-0.48)
+                    .font(.geist(22, .medium)).tracking(-0.48)
                     .foregroundStyle(theme.escalationText)
                     .focused($focusedField, equals: task.id)
                     .submitLabel(.done)
@@ -77,24 +96,24 @@ struct MorningView: View {
                     .onChange(of: focusedField) { _, v in if v != task.id { commit(task.id) } }
             } else {
                 Text(task.text.isEmpty ? "Untitled" : task.text)
-                    .font(.geist(20, .medium)).tracking(-0.48)
+                    .font(.geist(22, .medium)).tracking(-0.48)
                     .foregroundStyle(task.text.isEmpty ? theme.inkDim : theme.escalationText)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                     .onTapGesture { startEdit(task) }
             }
         }
-        .padding(.horizontal, 28).padding(.vertical, 22)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 32).padding(.vertical, 30)
+        .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)   // Mac morning min-height:120
     }
 
     private var addRow: some View {
         HStack(spacing: 18) { Text("Add"); Text("+") }
-            .font(.geist(20, .medium)).tracking(-0.48)
+            .font(.geist(22, .medium)).tracking(-0.48)
             .foregroundStyle(theme.addInk)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
             .contentShape(Rectangle())
-            .padding(.horizontal, 28).padding(.vertical, 22)
+            .padding(.horizontal, 32).padding(.vertical, 30)
             .onTapGesture { addTask() }
     }
 

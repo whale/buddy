@@ -32,7 +32,7 @@ enum ScreenshotHarness {
             store.seedForScreenshot(tasks: [])
             return (store, .none, false, false)
         case "morning":
-            store.seedForScreenshot(tasks: MockData.normalTasks.filter { $0.isActive }, morningDone: false)
+            store.seedForScreenshot(tasks: MockData.normalTasks, morningDone: false)   // includes 2 done → Donezo rows on top
             return (store, .none, true, false)
         case "history":
             store.seedForScreenshot(tasks: MockData.normalTasks, history: recentHistory())

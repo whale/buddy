@@ -76,7 +76,7 @@ struct TodayView: View {
                     }
                 }
             }
-            .padding(.horizontal, 10)     // ≈ the Mac drawer's p-2 gutter
+            .padding(.horizontal, 8)     // ≈ the Mac drawer's p-2 gutter
             .padding(.top, 8)
             .padding(.bottom, 10)
             .animation(.easeInOut(duration: 0.2), value: activeCount)
@@ -117,9 +117,9 @@ struct TodayView: View {
                     .tracking(-0.36)
                     .foregroundStyle(theme.chromeMuted)
             }
-            .padding(.leading, 18)
-            .padding(.trailing, 24)
-            .padding(.vertical, 12)
+            .padding(.leading, 32)   // Mac chrome row px-8 / py-6
+            .padding(.trailing, 28)
+            .padding(.vertical, 24)
 
             Rectangle().fill(theme.line).frame(height: 1)
 
@@ -144,13 +144,13 @@ struct TodayView: View {
                 }
                 Spacer()
                 Image(systemName: weatherSymbol)
-                    .font(.system(size: 24, weight: .regular))
+                    .font(.system(size: 40, weight: .ultraLight))   // fill the 50px box, thin like the Mac's Lucide 1.4 stroke
                     .foregroundStyle(theme.escalationText)
                     .frame(width: 50, height: 50)
             }
-            .padding(.leading, 28)
-            .padding(.trailing, 24)
-            .padding(.vertical, 24)
+            .padding(.leading, 32)   // Mac date block pl-8 pr-[26px] py-8
+            .padding(.trailing, 26)
+            .padding(.vertical, 32)
         }
         .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
     }
@@ -186,7 +186,7 @@ struct TodayView: View {
         Group {
             if editingId == task.id {
                 TextField("", text: $editText, axis: .vertical)
-                    .font(.geist(19, .medium))
+                    .font(.geist(22, .medium))
                     .tracking(-0.48)
                     .foregroundStyle(theme.escalationText)
                     .submitLabel(.done)
@@ -197,14 +197,14 @@ struct TodayView: View {
                     }
             } else {
                 Text(task.text.isEmpty ? "Untitled" : task.text)
-                    .font(.geist(19, .medium))
+                    .font(.geist(22, .medium))
                     .tracking(-0.48)
                     .lineSpacing(2)
                     .foregroundStyle(task.text.isEmpty ? theme.inkDim : theme.escalationText)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 32)
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)   // flex:1 1 auto — equal share of leftover height
         .contentShape(Rectangle())
@@ -233,7 +233,7 @@ struct TodayView: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 32)
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -250,10 +250,10 @@ struct TodayView: View {
             Text("Add")
             Text("+")
         }
-        .font(.geist(19, .medium))
+        .font(.geist(22, .medium))
         .tracking(-0.48)
         .foregroundStyle(theme.addInk)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 32)
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)   // flex:1 1 auto — matches the active rows
         .contentShape(Rectangle())

@@ -12,7 +12,7 @@ struct HistoryView: View {
     var onClose: () -> Void = {}
 
     enum Tab: String, CaseIterable { case future = "Future", done = "Done", skipped = "Skipped" }
-    @State private var tab: Tab = .done
+    @State private var tab: Tab = .future
 
     private var theme: EscalationTheme { EscalationTheme.from(activeCount: store.activeCount) }
 
@@ -48,8 +48,8 @@ struct HistoryView: View {
                 let active = tab == t
                 Text(t.rawValue)
                     .font(.geist(15, .regular)).tracking(-0.30)
-                    .foregroundStyle(active ? (theme.level == .lvl2 ? Color(hex: "#e5484d") : Color(hex: "#1a1a1a")) : theme.chromeInk)
-                    .padding(.horizontal, 14).frame(height: 34)
+                    .foregroundStyle(active ? Color(hex: "#1a1a1a") : theme.chromeInk)
+                    .padding(.horizontal, 16).frame(height: 38)
                     .background(
                         Capsule().fill(active ? (theme.level == .lvl2 ? Color.white : Color.white) : .clear)
                             .shadow(color: active && theme.level != .lvl2 ? .black.opacity(0.08) : .clear, radius: 2, y: 1)
@@ -64,14 +64,15 @@ struct HistoryView: View {
 
     // A rendered group: a header + its lines. Precomputed so the view body stays
     // simple enough for the Swift type-checker (nested filter/tuple/ForEach times out).
-    private struct HistGroup: Identifiable { let id: String; let header: String; let lines: [String] }
+    private struct HistLine: Identifiable { let id: String; let text: String }
+    private struct HistGroup: Identifiable { let id: String; let header: String; let lines: [HistLine] }
 
     private var doneGroups: [HistGroup] {
         var out: [HistGroup] = []
-        let today = store.doneTasks.map { $0.text }
+        let today = store.doneTasks.map { HistLine(id: $0.id, text: $0.text) }
         if !today.isEmpty { out.append(HistGroup(id: "today", header: "Today", lines: today)) }
         for d in pastDays {
-            let lines = d.items.filter { $0.done }.map { $0.text }
+            let lines = d.items.filter { $0.done }.map { HistLine(id: $0.id, text: $0.text) }
             if !lines.isEmpty { out.append(HistGroup(id: d.date, header: d.weekday.isEmpty ? d.date : d.weekday, lines: lines)) }
         }
         return out
@@ -80,7 +81,7 @@ struct HistoryView: View {
     private var skippedGroups: [HistGroup] {
         var out: [HistGroup] = []
         for d in pastDays {
-            let lines = d.items.filter { !$0.done }.map { $0.text }
+            let lines = d.items.filter { !$0.done }.map { HistLine(id: $0.id, text: $0.text) }
             if !lines.isEmpty { out.append(HistGroup(id: d.date, header: d.weekday.isEmpty ? d.date : d.weekday, lines: lines)) }
         }
         return out
@@ -94,7 +95,7 @@ struct HistoryView: View {
         } else {
             ForEach(groups) { g in
                 group(header: g.header) {
-                    ForEach(g.lines, id: \.self) { line in doneRow(line) }
+                    ForEach(g.lines) { line in doneRow(id: line.id, text: line.text) }
                 }
             }
         }
@@ -108,22 +109,24 @@ struct HistoryView: View {
         } else {
             ForEach(groups) { g in
                 group(header: g.header) {
-                    ForEach(g.lines, id: \.self) { line in
-                        plainRow(line, canAdd: !store.atHardCap) { store.restoreHistoryTask(text: line) }
+                    ForEach(g.lines) { line in
+                        plainRow(line.text, canAdd: !store.atHardCap, add: { store.restoreHistoryTask(text: line.text) })
                     }
                 }
             }
         }
     }
 
-    // MARK: Future — parked tasks, restorable
+    // MARK: Future — parked tasks, restorable (+ add to today, × remove for good — Mac parity)
     @ViewBuilder private var futureBody: some View {
         if store.deferred.isEmpty {
             emptyState("Nothing in Future yet.")
         } else {
             group(header: "Future") {
                 ForEach(store.deferred) { d in
-                    plainRow(d.text, canAdd: !store.atHardCap) { store.wakeDeferredTask(id: d.id) }
+                    plainRow(d.text, canAdd: !store.atHardCap,
+                             add: { store.wakeDeferredTask(id: d.id) },
+                             remove: { store.deleteDeferred(id: d.id) })
                 }
             }
         }
@@ -140,13 +143,13 @@ struct HistoryView: View {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 28).padding(.vertical, 20)
+        .padding(.horizontal, 32).padding(.vertical, 20)
         Rectangle().fill(theme.line).frame(height: 1)
     }
 
-    private func doneRow(_ text: String) -> some View {
+    private func doneRow(id: String, text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(DoneWords.word(for: text)).font(.geist(18, .semibold)).tracking(-0.30)
+            Text(DoneWords.word(for: id)).font(.geist(18, .semibold)).tracking(-0.30)
                 .foregroundStyle(theme.ink).fixedSize(horizontal: true, vertical: false)
             Text(text).font(.geist(18, .regular)).tracking(-0.36)
                 .strikethrough(true, color: theme.inkDim).foregroundStyle(theme.inkDim).lineLimit(1)
@@ -155,13 +158,20 @@ struct HistoryView: View {
         .padding(.vertical, 5)
     }
 
-    private func plainRow(_ text: String, canAdd: Bool, add: @escaping () -> Void) -> some View {
-        HStack(spacing: 8) {
+    private func plainRow(_ text: String, canAdd: Bool, add: @escaping () -> Void, remove: (() -> Void)? = nil) -> some View {
+        HStack(spacing: 4) {
             Text(text).font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.ink).lineLimit(1)
             Spacer(minLength: 0)
             if canAdd {
                 Button(action: add) {
                     Image(systemName: "plus").font(.system(size: 15)).foregroundStyle(theme.inkDim)
+                        .frame(width: 32, height: 32).contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
+            if let remove {
+                Button(action: remove) {
+                    Image(systemName: "xmark").font(.system(size: 14)).foregroundStyle(theme.inkDim)
                         .frame(width: 32, height: 32).contentShape(Circle())
                 }
                 .buttonStyle(.plain)

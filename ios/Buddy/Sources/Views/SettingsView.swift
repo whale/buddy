@@ -56,6 +56,22 @@ struct SettingsView: View {
                             .onChange(of: historyDays) { _, v in store.settings.historyDays = Int(v) }
                     }
 
+                    // Export my done tasks (Mac parity) — share sheet with a live done-count
+                    ShareLink(item: store.doneExport.joined(separator: "\n")) {
+                        HStack(spacing: 0) {
+                            Text("Export my done tasks")
+                                .font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.sheetLabel)
+                            Spacer()
+                            Text("\(store.doneExport.count)")
+                                .font(.geist(15, .regular)).foregroundStyle(theme.sheetFaint)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 32).padding(.vertical, 20)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    Rectangle().fill(theme.line).frame(height: 1)
+
                     // Report a bug
                     rowButton {
                         if let url = bugReportURL { UIApplication.shared.open(url) }
@@ -81,7 +97,7 @@ struct SettingsView: View {
                         pill("Reset data") { store.resetForDev(); onClose() }
                         pill("Restart") { exit(0) }
                     }
-                    .padding(.horizontal, 28).padding(.vertical, 20)
+                    .padding(.horizontal, 32).padding(.vertical, 20)
                     Rectangle().fill(theme.line).frame(height: 1)
                     #endif
 
@@ -113,7 +129,7 @@ struct SettingsView: View {
     @ViewBuilder private func section<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 0) { content() }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 28).padding(.vertical, 20)
+            .padding(.horizontal, 32).padding(.vertical, 20)
         Rectangle().fill(theme.line).frame(height: 1)
     }
 
@@ -121,7 +137,7 @@ struct SettingsView: View {
         Button(action: action) {
             HStack(spacing: 0) { label() }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 28).padding(.vertical, 20)
+                .padding(.horizontal, 32).padding(.vertical, 20)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

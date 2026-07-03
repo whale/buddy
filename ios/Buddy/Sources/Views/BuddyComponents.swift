@@ -50,7 +50,7 @@ struct BuddySheetHeader<Leading: View>: View {
             }
             .padding(.leading, 28)
             .padding(.trailing, 16)
-            .frame(height: 60)
+            .frame(height: 68)   // matches the Mac sheet header h-[68px]
             Rectangle().fill(theme.line).frame(height: 1)
         }
     }
@@ -90,7 +90,7 @@ struct ChromeButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: size, weight: .regular))
+                .font(.system(size: size, weight: .light))   // ≈ the Mac's Lucide 1.8 stroke (SF .regular reads heavier)
                 .foregroundStyle(selected ? selInk : ink)
                 .frame(width: 39, height: 39)
                 .background(selected ? selBg : .clear, in: Circle())   // filled circle when active (Mac chrome-btn.sel)
