@@ -12,6 +12,7 @@ struct MorningView: View {
     @State private var editingId: String? = nil
     @State private var editText: String = ""
     @FocusState private var focusedField: String?
+    @State private var weather = WeatherService()
 
     private var theme: EscalationTheme { EscalationTheme.from(activeCount: store.activeCount) }
 
@@ -30,6 +31,13 @@ struct MorningView: View {
             }
             .padding(.horizontal, 14)
         }
+        .task {
+            #if DEBUG
+            if ScreenshotHarness.activeFixture == nil { weather.refresh() }
+            #else
+            weather.refresh()
+            #endif
+        }
     }
 
     // Big date block — numeral (left) · weekday/month · weather (right). Mirrors the drawer.
@@ -44,7 +52,7 @@ struct MorningView: View {
                 .padding(.bottom, 4)
             }
             Spacer()
-            LucideIcon("moon", size: 34).foregroundStyle(theme.escalationText).frame(width: 50, height: 50)
+            WeatherIcon(key: weather.iconKey, size: 34).foregroundStyle(theme.escalationText).frame(width: 50, height: 50)
         }
     }
 

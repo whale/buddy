@@ -22,6 +22,9 @@ struct TodayView: View {
     // Celebration overlay
     @State private var showCelebration = false
 
+    // Live weather ornament
+    @State private var weather = WeatherService()
+
     // Morning planner (shown on a fresh/rolled day until Buddy!/Skip)
     @State private var showMorning = false
 
@@ -93,6 +96,11 @@ struct TodayView: View {
         .task {
             showMorning = forceMorning || store.needsMorning
             if forceCelebration { showCelebration = true }
+            #if DEBUG
+            if ScreenshotHarness.activeFixture == nil { weather.refresh() }   // no network under a fixture (deterministic shots)
+            #else
+            weather.refresh()
+            #endif
         }
     }
 
@@ -144,7 +152,7 @@ struct TodayView: View {
                     .padding(.bottom, 4)   // optical baseline nudge toward the numeral
                 }
                 Spacer()
-                LucideIcon("moon", size: 34)   // real Lucide moon (weather); live fetch still TODO
+                WeatherIcon(key: weather.iconKey, size: 40)   // live weather (IP + Open-Meteo)
                     .foregroundStyle(theme.escalationText)
                     .frame(width: 50, height: 50)
             }
