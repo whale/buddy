@@ -85,6 +85,9 @@ struct TodayView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)   // fills the gap between header + bottom bar
+                // Drive the sheet transitions on open AND close (slide up / slide down).
+                .animation(.easeOut(duration: 0.3), value: showSettings)
+                .animation(.easeOut(duration: 0.3), value: showHistory)
                 bottomBar                 // chrome icons + "Buddy" — bleeds off the bottom edge
             }
             .padding(.horizontal, 8)     // even side gutter
@@ -133,6 +136,10 @@ struct TodayView: View {
                     .font(.geist(62, .medium)).tracking(-1.24)
                     .foregroundStyle(theme.escalationText)
                     .fixedSize()
+                    // The 62pt numeral's font descent drops its baseline ~12pt below the month's,
+                    // so it hangs low. Nudge its reported baseline down → SwiftUI lifts the glyph
+                    // up, bottom-aligning it with the month like the Figma.
+                    .alignmentGuide(.lastTextBaseline) { $0[.lastTextBaseline] + 12 }
                 VStack(alignment: .leading, spacing: 12) {   // gap-3 (Figma)
                     Text(weekday)
                         .font(.geist(24, .medium)).tracking(-0.48)
@@ -173,7 +180,7 @@ struct TodayView: View {
         }
         .padding(.horizontal, 32)
         .padding(.top, 26)
-        .padding(.bottom, 44)        // extends into/past the home-indicator area → bleed
+        .padding(.bottom, 36)        // extends past the home-indicator area → bleed (−8pt shorter)
         .frame(maxWidth: .infinity)
         .background(
             theme.cardBackground,
@@ -186,8 +193,9 @@ struct TodayView: View {
     private func bottomChrome(_ icon: String, selected: Bool, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             LucideIcon(icon, size: 20)
-                .foregroundStyle(selected ? theme.escalationText : theme.chromeInk)
-                .frame(width: 32, height: 32, alignment: .center)
+                .foregroundStyle(selected ? theme.selInk : theme.chromeInk)
+                .frame(width: 34, height: 34, alignment: .center)
+                .background(selected ? theme.selBg : .clear, in: Circle())   // filled circle when active
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -261,28 +269,31 @@ struct TodayView: View {
     // MARK: - Done (Donezo) row — neutral + adaptive (ink / inkDim, never escalation red).
     @ViewBuilder
     private func doneRowView(task: BuddyTask) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(DoneWords.word(for: task.id))
-                .font(.geist(15, .semibold))
-                .tracking(-0.30)
-                .foregroundStyle(theme.ink)
-                .fixedSize(horizontal: true, vertical: false)
-            Text(task.text)
-                .font(.geist(15, .regular))
-                .tracking(-0.30)
-                .strikethrough(true, color: theme.inkDim)
-                .foregroundStyle(theme.inkDim)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 32)
-        .padding(.vertical, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .onTapGesture { store.restoreTask(id: task.id) }
-        .contextMenu {
-            Button { store.restoreTask(id: task.id) } label: { Label("Restore", systemImage: "arrow.uturn.backward") }
-            Button(role: .destructive) { store.deleteTask(id: task.id) } label: { Label("Remove", systemImage: "trash") }
+        SwipeableRow(
+            rowID: task.id,
+            openRowID: $openRowID,
+            cardFill: theme.cardBackground,
+            onRestore: { withAnimation(.easeOut(duration: 0.3)) { store.restoreTask(id: task.id) } },
+            onTap: { store.restoreTask(id: task.id) }   // tap also restores
+        ) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(DoneWords.word(for: task.id))
+                    .font(.geist(15, .semibold))
+                    .tracking(-0.30)
+                    .foregroundStyle(theme.ink)
+                    .fixedSize(horizontal: true, vertical: false)
+                Text(task.text)
+                    .font(.geist(15, .regular))
+                    .tracking(-0.30)
+                    .strikethrough(true, color: theme.inkDim)
+                    .foregroundStyle(theme.inkDim)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 32)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
     }
 

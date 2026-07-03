@@ -88,6 +88,7 @@ struct SwipeableRow<Content: View>: View {
     var onComplete: (() -> Void)? = nil
     var onSleep: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
+    var onRestore: (() -> Void)? = nil  // done rows: swipe → undo (back to to-do)
     var onTap: (() -> Void)? = nil
     @ViewBuilder var content: () -> Content
 
@@ -105,6 +106,7 @@ struct SwipeableRow<Content: View>: View {
     // Trailing actions, left→right: checkmark · calendar (move to Future) · X (remove).
     private var actions: [(icon: String, run: () -> Void)] {
         var a: [(String, () -> Void)] = []
+        if let onRestore  { a.append(("undo", onRestore)) }   // done rows: rewind to to-do
         if let onComplete { a.append(("check", onComplete)) }
         if let onSleep    { a.append(("calendar", onSleep)) }
         if let onDelete   { a.append(("x", onDelete)) }
