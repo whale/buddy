@@ -1,4 +1,10 @@
-# iOS parity — round 1 feedback (2026-07-02) — TODO
+# iOS parity — round 1 feedback (2026-07-02) — ✅ ALL ADDRESSED
+
+Status: #1–#7 fixed & verified in the sim; #8 core issue (selected icon) fixed via #6.
+Commits on `fix/ios-visual-parity` / PR #61. 37 tests pass. Remaining minor deltas at bottom.
+
+---
+
 
 From the user reviewing comparison.html. Fix these on `fix/ios-visual-parity`.
 **Rule: the Mac already has all this logic — port it, don't reinvent.**
