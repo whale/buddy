@@ -60,7 +60,21 @@ struct TodayView: View {
 
             VStack(spacing: 8) {          // gap-2 between the two cards
                 headerCard
-                listCard
+                // Settings/History slide up over the LIST card only — the header card (with
+                // the now-selected chrome icon) stays visible, exactly like the Mac.
+                ZStack {
+                    listCard
+                    if showHistory {
+                        HistoryView(store: store, onClose: { withAnimation(.easeOut(duration: 0.28)) { showHistory = false } })
+                            .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    if showSettings {
+                        SettingsView(store: store, onClose: { withAnimation(.easeOut(duration: 0.28)) { showSettings = false } })
+                            .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
             }
             .padding(.horizontal, 10)     // ≈ the Mac drawer's p-2 gutter
             .padding(.top, 8)
@@ -73,8 +87,6 @@ struct TodayView: View {
                     .transition(.opacity)
             }
         }
-        .sheet(isPresented: $showHistory)  { HistoryView(store: store) }
-        .sheet(isPresented: $showSettings) { SettingsView(store: store) }
         .fullScreenCover(isPresented: $showMorning) {
             MorningView(store: store, onDone: { showMorning = false })
         }
@@ -91,8 +103,14 @@ struct TodayView: View {
             // chrome row: pin / history / gear on the left, "Buddy" on the right
             HStack(spacing: 2) {
                 ChromeButton("pin", size: 15, ink: theme.chromeInk) {}
-                ChromeButton("calendar", size: 16, ink: theme.chromeInk) { showHistory = true }
-                ChromeButton("gearshape", size: 17, ink: theme.chromeInk) { showSettings = true }
+                ChromeButton("calendar", size: 16, ink: theme.chromeInk,
+                             selected: showHistory, selBg: theme.selBg, selInk: theme.selInk) {
+                    withAnimation(.easeOut(duration: 0.28)) { showHistory.toggle(); showSettings = false }
+                }
+                ChromeButton("gearshape", size: 17, ink: theme.chromeInk,
+                             selected: showSettings, selBg: theme.selBg, selInk: theme.selInk) {
+                    withAnimation(.easeOut(duration: 0.28)) { showSettings.toggle(); showHistory = false }
+                }
                 Spacer()
                 Text("Buddy")
                     .font(.geist(18, .regular))

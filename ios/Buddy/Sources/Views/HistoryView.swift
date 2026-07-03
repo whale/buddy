@@ -9,7 +9,7 @@ import SwiftUI
 //   Skipped — past undone tasks, each restorable with +
 struct HistoryView: View {
     @Bindable var store: BuddyStore
-    @Environment(\.dismiss) private var dismiss
+    var onClose: () -> Void = {}
 
     enum Tab: String, CaseIterable { case future = "Future", done = "Done", skipped = "Skipped" }
     @State private var tab: Tab = .done
@@ -18,7 +18,7 @@ struct HistoryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            BuddySheetHeader(theme: theme, onClose: { dismiss() }) {
+            BuddySheetHeader(theme: theme, onClose: { onClose() }) {
                 segmented
             }
             ScrollView {
@@ -30,9 +30,9 @@ struct HistoryView: View {
                     }
                 }
             }
+            Spacer(minLength: 0)
         }
-        .background(theme.cardBackground.ignoresSafeArea())
-        .presentationDragIndicator(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     // MARK: Segmented control ([Future | Done | Skipped])

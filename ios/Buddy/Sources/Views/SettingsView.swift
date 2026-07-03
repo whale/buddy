@@ -7,7 +7,7 @@ import UIKit
 // slider bracketed by 👍🏼 … 🦜. Adopts the escalation theme (red bg + light text at lvl2).
 struct SettingsView: View {
     @Bindable var store: BuddyStore
-    @Environment(\.dismiss) private var dismiss
+    var onClose: () -> Void = {}
     @Environment(\.accessibilityReduceMotion) private var reducedMotion
 
     @State private var celebrate: Double = 100
@@ -18,7 +18,7 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            BuddySheetHeader(theme: theme, onClose: { dismiss() }) {
+            BuddySheetHeader(theme: theme, onClose: { onClose() }) {
                 Text("Settings").font(.geist(18, .medium)).tracking(-0.36).foregroundStyle(theme.sheetTitle)
             }
 
@@ -78,7 +78,7 @@ struct SettingsView: View {
 
                     #if DEBUG
                     HStack(spacing: 12) {
-                        pill("Reset data") { store.resetForDev(); dismiss() }
+                        pill("Reset data") { store.resetForDev(); onClose() }
                         pill("Restart") { exit(0) }
                     }
                     .padding(.horizontal, 28).padding(.vertical, 20)
@@ -95,10 +95,9 @@ struct SettingsView: View {
                 }
             }
         }
-        .background(theme.cardBackground.ignoresSafeArea())
-        .presentationDragIndicator(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .alert("Erase all data?", isPresented: $showEraseConfirm) {
-            Button("Erase", role: .destructive) { store.eraseAll(); dismiss() }
+            Button("Erase", role: .destructive) { store.eraseAll(); onClose() }
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("This removes every task and all history on this device. This can't be undone.")

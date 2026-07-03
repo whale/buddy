@@ -103,6 +103,17 @@ struct EscalationTheme {
     // macOS-style layered panel shadow (.bcard). Suppressed at lvl2 (red on red).
     var cardShadow: Color { level == .lvl2 ? .clear : Color.black.opacity(0.10) }
 
+    // Selected chrome glyph (the filled circle behind the active header icon). Mac --sel-bg
+    // / --sel-ink: lvl0 black-on-white · lvl1 red-on-white · lvl2 white-on-red.
+    var selBg: Color {
+        switch level {
+        case .lvl0: return .black
+        case .lvl1: return Color(hex: "#e5484d")
+        case .lvl2: return .white
+        }
+    }
+    var selInk: Color { level == .lvl2 ? Color(hex: "#e5484d") : .white }
+
     // Focused ("now") row fill. Mirrors the Mac:
     //   .row-focused { background:#f4f4f4 }  (lvl0/1)
     //   .lvl2 .row-focused { red + 15% black overlay } → ≈ #c33d41

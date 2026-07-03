@@ -70,12 +70,20 @@ struct ChromeButton: View {
     let systemName: String
     let size: CGFloat
     let ink: Color
+    var selected: Bool = false
+    var selBg: Color = .black
+    var selInk: Color = .white
     let action: () -> Void
 
-    init(_ systemName: String, size: CGFloat = 17, ink: Color, action: @escaping () -> Void) {
+    init(_ systemName: String, size: CGFloat = 17, ink: Color,
+         selected: Bool = false, selBg: Color = .black, selInk: Color = .white,
+         action: @escaping () -> Void) {
         self.systemName = systemName
         self.size = size
         self.ink = ink
+        self.selected = selected
+        self.selBg = selBg
+        self.selInk = selInk
         self.action = action
     }
 
@@ -83,8 +91,9 @@ struct ChromeButton: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: size, weight: .regular))
-                .foregroundStyle(ink)
+                .foregroundStyle(selected ? selInk : ink)
                 .frame(width: 39, height: 39)
+                .background(selected ? selBg : .clear, in: Circle())   // filled circle when active (Mac chrome-btn.sel)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
