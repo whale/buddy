@@ -377,9 +377,11 @@
           <div id="syncQR" class="hidden my-3 flex justify-center"></div>
           <div class="flex flex-col gap-2">
             <input id="syncUrl" placeholder="Backend URL (e.g. https://xxxx.supabase.co)" spellcheck="false" autocapitalize="off"
-              class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] text-black/80 bg-white outline-none focus:border-black/40">
+              style="color:#000;-webkit-text-fill-color:#000;color-scheme:light"
+              class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] bg-white outline-none focus:border-black/40">
             <input id="syncAnon" placeholder="Anon (publishable) key" spellcheck="false" autocapitalize="off"
-              class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] text-black/80 bg-white outline-none focus:border-black/40">
+              style="color:#000;-webkit-text-fill-color:#000;color-scheme:light"
+              class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] bg-white outline-none focus:border-black/40">
             <div class="flex items-center gap-2">
               <button id="syncConnectBtn" class="pressable tap-target inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] ihover">Connect &amp; show QR</button>
               <button id="syncDisconnectBtn" class="pressable tap-target hidden inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] ihover">Disconnect</button>
@@ -657,7 +659,9 @@ function writeNow(){
   fileSave(blob);                // durable record regardless of localStorage state
 }
 function save(){ if(saveSuppressed) return; clearTimeout(saveTimer); saveTimer=setTimeout(writeNow,250);
-  if(typeof scheduleSync==='function') scheduleSync(); }   // opt-in: debounced push to other devices
+  // opt-in: debounced push to other devices — but NOT while adopting a pulled snapshot
+  // (that write is the RESULT of a sync, not a new local edit → would loop).
+  if(!applyingRemote && typeof scheduleSync==='function') scheduleSync(); }
 
 /* Force-flush synchronously when the tab is hidden / closing — a trailing
    debounce gets killed by tab close, so cancel the timer and write inline. */
@@ -948,10 +952,13 @@ function applyWire(blob){
   const keepPinned = state.pinned;               // pinned is device-local — never adopt the remote's
   const h = hydrate(migrate(blob));
   if(!h) return;
-  applyHydrated(h);
-  state.pinned = keepPinned;                      // restore local pin after adopting merged state
-  if(!h.hadToday) state.today = { date:localDate(), items:[], morningDone:false };
-  render(); writeNow();
+  applyingRemote = true;                          // suppress scheduleSync from the render() below
+  try{
+    applyHydrated(h);
+    state.pinned = keepPinned;                    // restore local pin after adopting merged state
+    if(!h.hadToday) state.today = { date:localDate(), items:[], morningDone:false };
+    render(); writeNow();
+  } finally { applyingRemote = false; }
 }
 
 // One sync pass against a CAS store. Pure w.r.t. the store contract; mutates local
@@ -1041,6 +1048,10 @@ const SYNC_CFG_KEY = 'buddy.sync.v1';
 const SYNC_DEBOUNCE_MS = 3000;
 let syncStore=null, syncOwnerId=null, syncing=false, syncPending=false,
     syncLastAt=0, syncLastError=null, syncDebounce=null;
+// True while applyWire is adopting a pulled snapshot. render() ends with save(), and a
+// sync adoption calls render() — without this guard that save() re-arms scheduleSync,
+// which re-syncs, re-adopts, re-renders… an infinite push loop. Mirrors iOS applyingRemote.
+let applyingRemote=false;
 
 function isValidSyncKey(k){ return typeof k==='string' && k.length===43 && /^[A-Za-z0-9_-]+$/.test(k); }
 function readSyncCfg(){
@@ -1078,7 +1089,7 @@ async function syncNow(reason){
   finally{ syncing = false; if(typeof renderSyncStatus==='function') renderSyncStatus(); }
 }
 function scheduleSync(){                             // debounced push after a local change
-  if(!syncStore) return;
+  if(!syncStore || applyingRemote) return;           // never from a sync's own adopt-render
   if(syncing){ syncPending = true; return; }         // re-arm: change landed mid-flight
   clearTimeout(syncDebounce);
   syncDebounce = setTimeout(()=>syncNow('change'), SYNC_DEBOUNCE_MS);

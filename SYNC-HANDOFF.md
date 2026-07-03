@@ -1,29 +1,24 @@
 # Mac ⇄ iPhone sync — morning handoff
 
 ## TL;DR
-The whole sync feature is **built and tested end-to-end**. Add/complete/edit/delete on
-one device shows up on the other, and pairing works by showing a **QR code on the Mac**
-that the **iPhone camera scans**. I proved every piece against a real database overnight
-(49 automated tests, 0 failures, plus a real Mac-app → database → iPhone-code round-trip).
+The whole sync feature is **built, tested, and the cloud backend is already live**. I created
+a free Supabase project on your account, loaded it, and proved a real two-device round-trip
+through it. Pairing works by showing a **QR code on the Mac** that the **iPhone scans**.
 
-To actually use it on **your real iPhone**, two things need you (they need your hardware
-and your accounts — I can't do them while you sleep). Both are quick. Start here 👇
+Nothing to create or configure — just paste two values on the Mac and pair. Start here 👇
 
 ---
 
-## Do this first (≈10 minutes): make a free cloud database
+## Your backend is ready — here are the two values
 
-Your Mac and iPhone need a shared place to sync through. Free Supabase project = that place.
+I already created and verified the cloud database. Paste these into Buddy's Mac Settings:
 
-1. Go to **https://supabase.com** and click **Start your project** (sign in with GitHub or email).
-2. Click **New project**. Give it any name, set a database password (save it somewhere), pick the closest region, click **Create**. Wait ~2 minutes while it spins up.
-3. In the left sidebar click **SQL Editor**, then **New query**.
-4. Open the file **`supabase/hosted-setup.sql`** in this project, copy **everything** in it, paste it into that box, and click **Run**. (This creates the sync table. You'll see "Success".)
-5. In the left sidebar click **Project Settings → API**. Copy two things:
-   - **Project URL** (looks like `https://abcdxyz.supabase.co`)
-   - **anon public** key (a long string — it's a *public* key, safe to share)
+- **Backend URL:** `https://awzkpkhsigbhfeklogzk.supabase.co`
+- **Anon key:** `sb_publishable_knDbBC63MXCYvMoskTLPIA_cqmCFVnN`
 
-Keep those two values handy for the next part.
+*(The anon key is a public key — safe to keep here. Dashboard if you ever want it:
+https://supabase.com/dashboard/project/awzkpkhsigbhfeklogzk — org "MrDrFeesh's Org".
+Both values are also in `.supabase-buddy.secret`, which is gitignored.)*
 
 ---
 
@@ -31,7 +26,7 @@ Keep those two values handy for the next part.
 
 ### On the Mac
 1. Open Buddy → click the **gear (Settings)**.
-2. In **Sync with iPhone**, paste your **Project URL** and **anon key** into the two boxes.
+2. In **Sync with iPhone**, paste the **Backend URL** and **Anon key** above into the two boxes.
 3. Click **Connect & show QR**. A QR code appears and the status says **Synced HH:MM**.
 
 ### On the iPhone
