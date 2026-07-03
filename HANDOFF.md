@@ -2,7 +2,19 @@
 
 _Last updated: 2026-07-02 (iOS visual-parity session)._
 
-## ⚠️ Active branch right now: `fix/ios-visual-parity` (iOS work, NOT the Mac app)
+## ⚠️ Active branch right now: `feat/ios-sync-live` (Mac⇄iOS sync — in progress)
+
+Off `fix/ios-visual-parity`. Building live sync. **P0 (backend + CAS SQL 7/7) and P1
+(iOS live adapter, 3 live tests ran & passed) are DONE & verified.** Full plan + progress
++ resume commands: `ios/_review/SYNC-PLAN.md` (read the "PROGRESS — resume here" block first).
+Next: P2 wire auto-sync into BuddyStore → P3 Settings opt-in → P4 Mac side → P5 round-trip.
+Needs local Supabase running (`orb start && supabase start`). A **hosted** Supabase is only
+needed later (P7) to sync a *physical* iPhone; everything through P5 verifies on localhost.
+The visual-parity work (below) is its own branch/PR #61 — sync stacks on it, rebase if #61 changes.
+
+---
+
+## `fix/ios-visual-parity` (iOS visual work, PR #61 — draft)
 
 This session rebuilt the **iPhone** UI to visually match the Mac drawer (it had drifted
 badly — system font, single card, native iOS chrome). Branch is **committed + pushed**,

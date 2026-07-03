@@ -1,5 +1,26 @@
 # Buddy sync — Mac ⇄ iOS — execution plan (2026-07-02)
 
+## ⏱ PROGRESS — resume here (updated 2026-07-03)
+Branch: **`feat/ios-sync-live`** (off `fix/ios-visual-parity`, pushed). Latest: `380ff78`.
+- ✅ **P0 — backend up + CAS SQL 7/7.** Local Supabase running. Migrations applied.
+- ✅ **P1 — iOS live adapter, VERIFIED LIVE.** Salvaged `SupabaseCASStore.swift` +
+  `SupabaseSyncLiveTests.swift` from feat/sync-live; ATS `NSAllowsLocalNetworking` added.
+  All 3 live tests **actually ran** (not skipped) & passed against the live server.
+- ⏭ **NEXT = P2** (wire auto-sync into `BuddyStore`), then P3 (Settings opt-in UI),
+  P4 (Mac `dist` supabase-js adapter — re-integration, re-run smokeTest+red sweep),
+  P5 (Mac-app ↔ iOS-sim round-trip), P6 (QR), P7 (hosted Supabase — user step).
+- ⚠️ **Remember P2/P3 must-fixes from the review:** validate sync key is full 43-char
+  base64url (blank key = shared bucket); add `scenePhase==.active` pull; surface sync
+  failure (don't stamp a false "synced at"); dirty-flag re-arm during in-flight sync.
+
+**To resume the backend** (if OrbStack/Supabase was stopped):
+    orb start && cd ~/Projects/buddy && supabase start
+    # local publishable key: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH  · API: http://127.0.0.1:54321
+    # re-run live tests: cd ios && xcodebuild ... test -only-testing:BuddyTests/SupabaseSyncLiveTests
+
+---
+
+
 ## Goal
 Live sync between the Mac app and the iPhone app: add/complete/edit/delete on one shows up
 on the other. Opt-in, local-first by default (per IOS-COMPANION-PLAN.md, locked design).
