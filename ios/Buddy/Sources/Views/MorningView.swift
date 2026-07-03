@@ -53,13 +53,15 @@ struct MorningView: View {
         // Mirror the Mac: completed tasks sort to the TOP as compact Donezo rows, active
         // tasks below as tall editable rows (the Mac morning uses the same renderToday).
         let rows = store.doneTasks + store.activeTasks
+        let showRestore = rows.isEmpty && !store.lastListForRestore().isEmpty
         return VStack(spacing: 0) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { i, task in
                 if i > 0 { Rectangle().fill(theme.line).frame(height: 1) }
                 if task.isDone { doneRow(task) } else { plannerRow(task) }
             }
+            if showRestore { restoreRow }
             if !store.atHardCap {
-                if !rows.isEmpty { Rectangle().fill(theme.line).frame(height: 1) }
+                if !rows.isEmpty || showRestore { Rectangle().fill(theme.line).frame(height: 1) }
                 addRow
             }
         }
@@ -105,6 +107,22 @@ struct MorningView: View {
         }
         .padding(.horizontal, 32).padding(.vertical, 30)
         .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)   // Mac morning min-height:120
+    }
+
+    // Empty-morning "Restore your last list" (Mac buildRestoreRowEl) — pulls the most
+    // recent archived day's unfinished tasks back into today.
+    private var restoreRow: some View {
+        let texts = store.lastListForRestore()
+        return HStack(spacing: 8) {
+            Text("Restore your last list").font(.geist(22, .medium)).tracking(-0.48).foregroundStyle(theme.ink)
+            Spacer(minLength: 8)
+            Text("\(texts.count) task\(texts.count == 1 ? "" : "s")")
+                .font(.geist(15, .regular)).tracking(-0.28).foregroundStyle(theme.inkDim)
+        }
+        .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
+        .contentShape(Rectangle())
+        .padding(.horizontal, 32).padding(.vertical, 30)
+        .onTapGesture { withAnimation { store.restoreLastList() } }
     }
 
     private var addRow: some View {

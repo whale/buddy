@@ -34,6 +34,9 @@ enum ScreenshotHarness {
         case "morning":
             store.seedForScreenshot(tasks: MockData.normalTasks, morningDone: false)   // includes 2 done → Donezo rows on top
             return (store, .none, true, false)
+        case "morning-restore":
+            store.seedForScreenshot(tasks: [], history: recentHistory(), morningDone: false)   // empty → "Restore your last list"
+            return (store, .none, true, false)
         case "history":
             store.seedForScreenshot(tasks: MockData.normalTasks, history: recentHistory())
             store.deferred = [DeferredTask(id: "f1", text: "Renew the domain", wake: "2026-07-05"),
@@ -65,6 +68,7 @@ enum ScreenshotHarness {
             day(1, [("Ship the done-word shuffle", true), ("Review the sync branch", true), ("Call the framer back", false)]),
             day(2, [("Fix the localStorage wipe", true), ("Write the data-safety plan", true)]),
             day(3, [("Morning run", true), ("Read the Sensei Fastfile", false)]),
+            day(9, [("Draft the launch page", true), ("Email the printer", false)]),   // > a week back → "Load more"
         ]
     }
 }

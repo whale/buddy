@@ -153,6 +153,33 @@ final class BuddyStore {
         scheduleSave()
     }
 
+    /// Most recent archived day's unfinished tasks — for the morning "Restore your last list".
+    /// Mirrors the Mac's mostRecentRestorableRecord + restorableTexts.
+    func lastListForRestore() -> [String] {
+        for d in history.sorted(by: { $0.date > $1.date }) {
+            let texts = d.items.filter { !$0.done }.map { $0.text }.filter { !$0.isEmpty }
+            if !texts.isEmpty { return Array(texts.prefix(Self.hardCap)) }
+        }
+        return []
+    }
+
+    /// Pull that list into today (capped, no dupes). Mirrors the Mac's restoreLastList().
+    func restoreLastList() {
+        for t in lastListForRestore() where activeCount < Self.hardCap {
+            if !today.items.contains(where: { $0.text == t }) {
+                today.items.append(BuddyTask(id: newId(), text: t, state: .neutral))
+            }
+        }
+        scheduleSave()
+    }
+
+    /// True if any archived day is older than `days` back — drives History "Load more".
+    func hasHistoryBefore(days: Int) -> Bool {
+        guard let boundary = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else { return false }
+        let ds = Self.localDate(boundary)
+        return history.contains { $0.date < ds }
+    }
+
     /// Remove a parked (Future) task for good. Mirrors the Mac Future-tab × button.
     func deleteDeferred(id: String) {
         deferred.removeAll { $0.id == id }

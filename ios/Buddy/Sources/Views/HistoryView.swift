@@ -13,6 +13,7 @@ struct HistoryView: View {
 
     enum Tab: String, CaseIterable { case future = "Future", done = "Done", skipped = "Skipped" }
     @State private var tab: Tab = .future
+    @State private var pastDaysShown = 7   // Mac PAST_PAGE — "Load more" pages a week at a time
 
     private var theme: EscalationTheme { EscalationTheme.from(activeCount: store.activeCount) }
 
@@ -98,6 +99,7 @@ struct HistoryView: View {
                     ForEach(g.lines) { line in doneRow(id: line.id, text: line.text) }
                 }
             }
+            if store.hasHistoryBefore(days: pastDaysShown) { loadMoreButton }
         }
     }
 
@@ -114,7 +116,19 @@ struct HistoryView: View {
                     }
                 }
             }
+            if store.hasHistoryBefore(days: pastDaysShown) { loadMoreButton }
         }
+    }
+
+    private var loadMoreButton: some View {
+        Button { withAnimation { pastDaysShown += 7 } } label: {
+            Text("Load more")
+                .font(.geist(15, .regular)).tracking(-0.30).foregroundStyle(theme.inkDim)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 32).padding(.vertical, 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Future — parked tasks, restorable (+ add to today, × remove for good — Mac parity)
@@ -190,7 +204,7 @@ struct HistoryView: View {
 
     // Last N days from history that fall within the configured window, most-recent first.
     private var pastDays: [Day] {
-        let n = store.settings.historyDays
+        let n = pastDaysShown
         guard n > 0 else { return [] }
         let base = Date()
         return (1...n).compactMap { i -> Day? in

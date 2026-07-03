@@ -12,7 +12,8 @@ struct CelebrationView: View {
     @State private var particles: [Particle] = []
     @State private var visible = true
 
-    private let emojis = ["👍🏼", "🦜", "✨", "🎉", "⭐️"]
+    // Party parrots only — matches the Mac's confetti (100 party-parrots, §3.3).
+    private let emojis = ["🦜"]
 
     var body: some View {
         ZStack {
@@ -33,7 +34,7 @@ struct CelebrationView: View {
     private func launch() {
         guard intensity > 0 else { onFinish(); return }
 
-        let count = max(1, Int(Double(intensity) / 100.0 * 40))
+        let count = max(1, Int(Double(intensity) / 100.0 * 90))   // ~100 parrots at full, like the Mac
         let screenWidth  = UIScreen.main.bounds.width
         let screenHeight = UIScreen.main.bounds.height
         let origin = CGPoint(x: screenWidth * 0.85, y: screenHeight * 0.85)

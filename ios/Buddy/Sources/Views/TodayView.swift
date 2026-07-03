@@ -102,7 +102,8 @@ struct TodayView: View {
         VStack(spacing: 0) {
             // chrome row: pin / history / gear on the left, "Buddy" on the right
             HStack(spacing: 2) {
-                ChromeButton("pin", size: 15, ink: theme.chromeInk) {}
+                // No pin: "Pin open" + reserve-space is a desktop-window concept with no
+                // iPhone equivalent (it was dead chrome). History + Settings only.
                 ChromeButton("calendar", size: 16, ink: theme.chromeInk,
                              selected: showHistory, selBg: theme.selBg, selInk: theme.selInk) {
                     withAnimation(.easeOut(duration: 0.28)) { showHistory.toggle(); showSettings = false }
