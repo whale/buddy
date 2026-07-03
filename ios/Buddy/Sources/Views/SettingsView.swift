@@ -30,8 +30,9 @@ struct SettingsView: View {
                             .padding(.bottom, 14)
                         HStack(spacing: 12) {
                             Text("👍🏼").font(.system(size: 20))
-                            Slider(value: $celebrate, in: 0...100, step: 1)
-                                .tint(theme.level == .lvl2 ? .white : .black)
+                            BuddySlider(value: $celebrate,
+                                        track: theme.level == .lvl2 ? Color.white.opacity(0.30) : Color.black.opacity(0.15),
+                                        thumb: theme.level == .lvl2 ? .white : .black)
                                 .disabled(reducedMotion)
                                 .onChange(of: celebrate) { _, v in store.settings.celebrate = Int(v) }
                             Text("🦜").font(.system(size: 20))

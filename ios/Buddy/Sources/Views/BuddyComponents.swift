@@ -163,6 +163,41 @@ struct SwipeableRow<Content: View>: View {
     }
 }
 
+// MARK: - Buddy slider
+// The Mac's `.buddy-range`: a thin 6px grey track + an 18px solid thumb, with NO filled
+// progress bar (the native SwiftUI Slider draws a heavy tinted fill). Grey track + solid
+// thumb, adapting to the level.
+struct BuddySlider: View {
+    @Binding var value: Double
+    var range: ClosedRange<Double> = 0...100
+    var track: Color
+    var thumb: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let span = range.upperBound - range.lowerBound
+            let frac = span == 0 ? 0 : (value - range.lowerBound) / span
+            ZStack(alignment: .leading) {
+                Capsule().fill(track).frame(height: 6)
+                Circle().fill(thumb).frame(width: 18, height: 18)
+                    .shadow(color: .black.opacity(0.12), radius: 1, y: 1)
+                    .offset(x: CGFloat(frac) * max(0, w - 18))
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0).onChanged { g in
+                    let x = min(max(0, g.location.x - 9), w - 18)
+                    let f = (w - 18) <= 0 ? 0 : x / (w - 18)
+                    value = range.lowerBound + Double(f) * span
+                }
+            )
+        }
+        .frame(height: 18)
+    }
+}
+
 // MARK: - Chrome button
 // A header glyph (pin / calendar / gear). 39pt round tap target, icon tinted by the
 // escalation chrome-ink. SF Symbols stand in for the Mac's Lucide strokes.
