@@ -24,7 +24,7 @@ private struct BuddyCard: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(fill)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))   // iOS-native rounding
             // Three stacked shadows mirror the Mac's layered ramp:
             //   0 1 4 /.04 · 0 6 16 /.06 · 0 14 34 /.09  (blur ≈ 2·radius)
             .shadow(color: shadow ? .black.opacity(0.04) : .clear, radius: 2,  y: 1)

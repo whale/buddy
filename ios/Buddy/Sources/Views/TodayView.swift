@@ -65,27 +65,27 @@ struct TodayView: View {
                 .ignoresSafeArea()
                 .animation(.easeInOut(duration: 0.2), value: activeCount)
 
-            VStack(spacing: 8) {          // gap-2 between the two cards
-                headerCard
-                // Settings/History slide up over the LIST card only — the header card (with
-                // the now-selected chrome icon) stays visible, exactly like the Mac.
+            VStack(spacing: 8) {          // gap-2 between the cards
+                headerCard                // date only
+                // Settings/History slide up over the LIST card; the header + bottom bar stay put.
                 ZStack {
                     listCard
                     if showHistory {
                         HistoryView(store: store, onClose: { withAnimation(.easeOut(duration: 0.28)) { showHistory = false } })
                             .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .transition(sheetTransition)
                     }
                     if showSettings {
                         SettingsView(store: store, sync: sync, onClose: { withAnimation(.easeOut(duration: 0.28)) { showSettings = false } })
                             .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .transition(sheetTransition)
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)   // fills the gap between header + bottom bar
+                bottomBar                 // chrome icons + "Buddy"
             }
-            .padding(.horizontal, 8)     // ≈ the Mac drawer's p-2 gutter
-            .padding(.top, 8)
-            .padding(.bottom, 10)
+            .padding(.horizontal, 8)     // even gutter all around
+            .padding(.vertical, 8)
             .animation(.easeInOut(duration: 0.2), value: activeCount)
 
             if showCelebration {
@@ -115,62 +115,57 @@ struct TodayView: View {
         }
     }
 
-    // MARK: - Card 1 — chrome row + date block
+    // Sheet in/out: slide UP from below on open, slide DOWN on close (symmetric).
+    private var sheetTransition: AnyTransition {
+        .move(edge: .bottom).combined(with: .opacity)
+    }
+
+    // MARK: - Card 1 — date block (numeral · weekday/month · weather)
 
     private var headerCard: some View {
-        VStack(spacing: 0) {
-            // chrome row: pin / history / gear on the left, "Buddy" on the right
-            HStack(spacing: 2) {
-                // No pin: "Pin open" + reserve-space is a desktop-window concept with no
-                // iPhone equivalent (it was dead chrome). History + Settings only.
-                ChromeButton("calendar", size: 16, ink: theme.chromeInk,
-                             selected: showHistory, selBg: theme.selBg, selInk: theme.selInk) {
-                    withAnimation(.easeOut(duration: 0.28)) { showHistory.toggle(); showSettings = false }
-                }
-                ChromeButton("settings", size: 17, ink: theme.chromeInk,
-                             selected: showSettings, selBg: theme.selBg, selInk: theme.selInk) {
-                    withAnimation(.easeOut(duration: 0.28)) { showSettings.toggle(); showHistory = false }
-                }
-                Spacer()
-                Text("Buddy")
-                    .font(.geist(18, .regular))
-                    .tracking(-0.36)
-                    .foregroundStyle(theme.chromeMuted)
-            }
-            .padding(.leading, 32)   // Mac chrome row px-8 / py-6
-            .padding(.trailing, 28)
-            .padding(.vertical, 24)
-
-            Rectangle().fill(theme.line).frame(height: 1)
-
-            // date block: numeral (left) · weekday/month · weather (right)
-            HStack(alignment: .bottom) {
-                HStack(alignment: .bottom, spacing: 12) {
-                    Text(dayNumber)
-                        .font(.geist(62, .medium))
-                        .tracking(-1.24)
-                        .foregroundStyle(theme.escalationText)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(weekday)
-                            .font(.geist(24, .medium))
-                            .tracking(-0.48)
-                            .foregroundStyle(theme.escalationText)
-                        Text(month)
-                            .font(.geist(18, .regular))
-                            .tracking(-0.36)
-                            .foregroundStyle(theme.chromeMuted)
-                    }
-                    .padding(.bottom, 4)   // optical baseline nudge toward the numeral
-                }
-                Spacer()
-                WeatherIcon(key: weather.iconKey, size: 40)   // live weather (IP + Open-Meteo)
+        HStack(alignment: .bottom) {
+            // numeral + weekday/month, baseline-aligned like the Mac (items-end, leading-none)
+            HStack(alignment: .lastTextBaseline, spacing: 12) {
+                Text(dayNumber)
+                    .font(.geist(62, .medium)).tracking(-1.24)
                     .foregroundStyle(theme.escalationText)
-                    .frame(width: 50, height: 50)
+                    .fixedSize()
+                VStack(alignment: .leading, spacing: 12) {   // gap-3 like the Mac (was 4)
+                    Text(weekday)
+                        .font(.geist(24, .medium)).tracking(-0.48)
+                        .foregroundStyle(theme.escalationText)
+                    Text(month)
+                        .font(.geist(18, .regular)).tracking(-0.36)
+                        .foregroundStyle(theme.chromeMuted)
+                }
+                .fixedSize()
             }
-            .padding(.leading, 32)   // Mac date block pl-8 pr-[26px] py-8
-            .padding(.trailing, 26)
-            .padding(.vertical, 32)
+            Spacer()
+            WeatherIcon(key: weather.iconKey, size: 50)   // fills the 50px box (was 40)
+                .foregroundStyle(theme.escalationText)
+                .frame(width: 50, height: 50)
         }
+        .padding(.leading, 32).padding(.trailing, 26).padding(.vertical, 30)
+        .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
+    }
+
+    // MARK: - Bottom bar — chrome icons + "Buddy" (moved out of the header)
+    private var bottomBar: some View {
+        HStack(spacing: 10) {
+            ChromeButton("calendar", size: 18, ink: theme.chromeInk,
+                         selected: showHistory, selBg: theme.selBg, selInk: theme.selInk) {
+                withAnimation(.easeOut(duration: 0.28)) { showHistory.toggle(); showSettings = false }
+            }
+            ChromeButton("settings", size: 19, ink: theme.chromeInk,
+                         selected: showSettings, selBg: theme.selBg, selInk: theme.selInk) {
+                withAnimation(.easeOut(duration: 0.28)) { showSettings.toggle(); showHistory = false }
+            }
+            Spacer()
+            Text("Buddy")
+                .font(.geist(18, .regular)).tracking(-0.36)
+                .foregroundStyle(theme.chromeMuted)
+        }
+        .padding(.leading, 22).padding(.trailing, 28).padding(.vertical, 14)
         .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
     }
 
