@@ -1136,6 +1136,8 @@ function initSyncUI(){
   const conn=$('#syncConnectBtn'), disc=$('#syncDisconnectBtn');
   conn && conn.addEventListener('click', syncConnectFromUI);
   disc && disc.addEventListener('click', syncDisconnectFromUI);
+  // Already paired? Draw the QR so the phone can (re)scan any time Settings is open.
+  if(readSyncCfg() && isValidSyncKey(raw.syncKey)) renderSyncQR(pairingPayload(raw.url, raw.key, raw.syncKey));
   renderSyncStatus();
 }
 
