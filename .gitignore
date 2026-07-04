@@ -25,3 +25,4 @@ src-tauri/icons/android/
 
 # Playwright run artifacts
 test-results/
+.supabase-buddy.secret
