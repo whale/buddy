@@ -122,9 +122,9 @@ struct TodayView: View {
         }
     }
 
-    // Sheet in/out: slide UP from below on open, slide DOWN on close (symmetric).
+    // Sheet in/out: just present (a quick fade), no slide.
     private var sheetTransition: AnyTransition {
-        .move(edge: .bottom).combined(with: .opacity)
+        .opacity
     }
 
     // MARK: - Card 1 — date block (numeral · weekday/month · weather)

@@ -187,10 +187,9 @@
   /* Settings / history sheets: Fade+Drift up (fade + small rise + slight scale). */
   .sheet{ transition: transform var(--t-drift) var(--ease-out), opacity var(--t-drift) var(--ease-out); will-change:transform,opacity; }
   .sheet.closing{ transition: transform .34s var(--ease-out), opacity .34s var(--ease-out); }
-  .sheet[data-open="false"]{ transform: translateY(22px) scale(.99); opacity:0; pointer-events:none; }
-  .sheet[data-open="true"]{ transform: translateY(0) scale(1); opacity:1; }
-  /* Closing slides fully DOWN and out of the card (open stays the subtle 22px lift). */
-  .sheet.closing[data-open="false"]{ transform: translateY(100%) scale(1); opacity:0; }
+  /* Just present — a quick fade, no slide. */
+  .sheet[data-open="false"]{ transform: none; opacity:0; pointer-events:none; }
+  .sheet[data-open="true"]{ transform: none; opacity:1; }
 
   /* Last-7-days crossfade — blur-masked so it reads as ONE motion (§3.4).
      blur ≤ 4px (Safari cost). Crossfade, no bar-travel tween. */
