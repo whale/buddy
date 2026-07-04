@@ -328,9 +328,13 @@ struct TodayView: View {
     }
 
     private func startEdit(task: BuddyTask) {
-        editText = task.text
+        editText = task.text            // keep the existing text (don't blank the row)
         editingId = task.id
-        focusedField = task.id
+        // Focus AFTER the TextField exists in the hierarchy. Setting @FocusState synchronously
+        // (before the row swaps from label → field) silently fails to attach — the field shows
+        // but the keyboard/cursor never lands, and the empty focus binding can bounce editingId
+        // back, blanking the row. The add-task path uses the same deferred-focus trick.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { focusedField = task.id }
     }
 
     private func commitEdit(id: String) {
