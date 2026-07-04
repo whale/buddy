@@ -980,9 +980,11 @@ async function syncOnce(store, key){
 
   let mergedBlob = mergeWire(localBlob, remote.blob);
 
-  // Nothing new vs remote → adopt remote, don't churn the version.
+  // Nothing new vs remote → adopt remote, don't churn the version. Only re-apply (and
+  // re-render) when our LOCAL copy is actually behind remote — otherwise the 1.5s poll
+  // would applyWire→render on every tick and visibly jitter the UI (esp. the Done page).
   if(blobContentKey(mergedBlob) === blobContentKey(remote.blob)){
-    if(remote.blob) applyWire(remote.blob);
+    if(remote.blob && blobContentKey(localBlob) !== blobContentKey(remote.blob)) applyWire(remote.blob);
     return { ok:true, pushed:false, noop:true, version:remote.version };
   }
 
@@ -1778,7 +1780,7 @@ function renderPast(){
   groups.forEach((day,di)=>{
     const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
     const h=document.createElement('div');
-    h.className='chrome text-[18px] font-medium tracking-[-0.36px] mb-1'; h.style.color='var(--ink)';  // adaptive: light on red
+    h.className='text-[18px] font-medium tracking-[-0.36px] mb-1'; h.style.color='var(--ink-dim)';  // grey day headers (NOT chrome → no red at lvl1); adapts dim-on-red
     h.textContent=day.name; grp.appendChild(h);
     day.items.forEach(it=>{
       // Today's completions get an ↩ undo (back to active); past completions are history.
@@ -1813,7 +1815,7 @@ function renderSkipped(){
   past.forEach((day,di)=>{
     const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
     const h=document.createElement('div');
-    h.className='chrome text-[18px] font-medium tracking-[-0.36px] mb-1'; h.style.color='var(--ink)';  // adaptive: light on red
+    h.className='text-[18px] font-medium tracking-[-0.36px] mb-1'; h.style.color='var(--ink-dim)';  // grey day headers (NOT chrome → no red at lvl1); adapts dim-on-red
     h.textContent=day.name; grp.appendChild(h);
     day.items.forEach(it=>{
       const tx=String(it.text||'').trim();
