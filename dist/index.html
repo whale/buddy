@@ -1746,8 +1746,8 @@ function buildDonezoRow(it, idx, morning){
 function renderHist(){
   histBody.innerHTML='';
   histBody.className='stagger';     // day-groups stagger in on open (§3.4)
+  if(state.histTab==='skipped') state.histTab='past';   // Skipped tab removed → fall back to Done
   if(state.histTab==='future') renderFuture();
-  else if(state.histTab==='skipped') renderSkipped();
   else renderPast();
 }
 function histEmpty(msg){
@@ -1913,7 +1913,7 @@ function renderHistHeader(){
     b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; pastDaysShown=PAST_PAGE; render(); } });
     return b;
   };
-  seg.append(mkSeg('future','Future'), mkSeg('past','Done'), mkSeg('skipped','Skipped'));
+  seg.append(mkSeg('future','Future'), mkSeg('past','Done'));
   // ✕ close — same affordance as Settings.
   const close=document.createElement('button'); close.title='Close';
   close.className='chrome-btn pressable size-[36px] grid place-items-center rounded-full';
@@ -2137,6 +2137,11 @@ function openSettings(){
   settingsSheet.setAttribute('data-open','true');
   settingsSheet.setAttribute('aria-hidden','false');
   syncCelebrate(); syncReserve(); syncExportCount(); syncChrome();
+  // Redraw the pairing QR every open (it was only drawn once at boot — so pairing after
+  // boot, or anything that cleared the node, left it blank).
+  try{ const raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}');
+       if(readSyncCfg() && isValidSyncKey(raw.syncKey)) renderSyncQR(pairingPayload(raw.url, raw.key, raw.syncKey)); }catch{}
+  renderSyncStatus();
 }
 function closeSettings(){
   settingsOpen=false;
