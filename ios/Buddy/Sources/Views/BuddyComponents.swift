@@ -56,13 +56,12 @@ struct BuddySheetHeader<Leading: View>: View {
                 Button(action: onClose) {
                     LucideIcon("x", size: 16)
                         .foregroundStyle(theme.chromeInk)
-                        .frame(width: 36, height: 36)
-                        .contentShape(Circle())
+                        .frame(width: 36, height: 36, alignment: .trailing)   // glyph hugs the 32pt gutter
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.leading, 28)
-            .padding(.trailing, 16)
+            .padding(.horizontal, 32)   // match the rows' 32pt gutter on both sides
             .frame(height: 68)   // matches the Mac sheet header h-[68px]
             Rectangle().fill(theme.line).frame(height: 1)
         }

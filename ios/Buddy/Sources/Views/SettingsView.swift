@@ -130,7 +130,7 @@ struct SettingsView: View {
                             .foregroundStyle(theme.level == .lvl2 ? Color.white.opacity(0.4) : Color.black.opacity(0.3))
                         Spacer()
                     }
-                    .padding(.horizontal, 28).padding(.top, 20).padding(.bottom, 28)
+                    .padding(.horizontal, 32).padding(.top, 20).padding(.bottom, 28)
                 }
             }
         }
