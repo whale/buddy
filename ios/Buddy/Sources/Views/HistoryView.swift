@@ -111,7 +111,7 @@ struct HistoryView: View {
         } else {
             group(header: "Future") {
                 ForEach(store.deferred) { d in
-                    plainRow(d.text, canAdd: !store.atHardCap,
+                    plainRow(d.text,
                              add: { store.wakeDeferredTask(id: d.id) },
                              remove: { store.deleteDeferred(id: d.id) })
                 }
@@ -134,35 +134,41 @@ struct HistoryView: View {
         Rectangle().fill(theme.line).frame(height: 1)
     }
 
+    // Done tab row — struck done word + a stable revert icon (rewind to to-do), like the main view.
     private func doneRow(id: String, text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(DoneWords.word(for: id)).font(.geist(18, .semibold)).tracking(-0.30)
                 .foregroundStyle(theme.ink).fixedSize(horizontal: true, vertical: false)
             Text(text).font(.geist(18, .regular)).tracking(-0.36)
                 .strikethrough(true, color: theme.inkDim).foregroundStyle(theme.inkDim).lineLimit(1)
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            rowIcon("undo") { store.restoreHistoryTask(text: text) }
         }
         .padding(.vertical, 5)
     }
 
-    private func plainRow(_ text: String, canAdd: Bool, add: @escaping () -> Void, remove: (() -> Void)? = nil) -> some View {
-        HStack(spacing: 4) {
+    // Future tab row — + (bring to today) and × (remove for good).
+    private func plainRow(_ text: String, add: @escaping () -> Void, remove: @escaping () -> Void) -> some View {
+        HStack(spacing: 6) {
             Text(text).font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.ink).lineLimit(1)
-            Spacer(minLength: 0)
-            if canAdd {
-                Button(action: add) {
-                    LucideIcon("plus", size: 17).foregroundStyle(theme.inkDim).frame(width: 32, height: 32).contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-            }
-            if let remove {
-                Button(action: remove) {
-                    LucideIcon("x", size: 16).foregroundStyle(theme.inkDim).frame(width: 32, height: 32).contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-            }
+            Spacer(minLength: 8)
+            Button(action: add) {
+                LucideIcon("plus", size: 18).foregroundStyle(theme.inkDim)
+                    .frame(width: 30, height: 26).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+            rowIcon("x", size: 18, action: remove)
         }
         .padding(.vertical, 5)
+    }
+
+    // Rightmost row icon: glyph hugs the row's trailing edge so every surface's icons line up
+    // at the same 32pt gutter (the group's horizontal padding).
+    private func rowIcon(_ name: String, size: CGFloat = 18, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            LucideIcon(name, size: size).foregroundStyle(theme.inkDim)
+                .frame(width: 22, height: 26, alignment: .trailing).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func emptyState(_ msg: String) -> some View {
