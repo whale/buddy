@@ -136,10 +136,6 @@ struct TodayView: View {
                     .font(.geist(62, .medium)).tracking(-1.24)
                     .foregroundStyle(theme.escalationText)
                     .fixedSize()
-                    // The 62pt numeral's font descent drops its baseline ~12pt below the month's,
-                    // so it hangs low. Nudge its reported baseline down → SwiftUI lifts the glyph
-                    // up, bottom-aligning it with the month like the Figma.
-                    .alignmentGuide(.lastTextBaseline) { $0[.lastTextBaseline] + 12 }
                 VStack(alignment: .leading, spacing: 12) {   // gap-3 (Figma)
                     Text(weekday)
                         .font(.geist(24, .medium)).tracking(-0.48)

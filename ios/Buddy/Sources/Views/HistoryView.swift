@@ -125,7 +125,7 @@ struct HistoryView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(header)
                 .font(.geist(18, .medium)).tracking(-0.36)
-                .foregroundStyle(theme.ink)
+                .foregroundStyle(theme.inkDim)   // grey day headers, distinct from the (darker) done word
                 .padding(.bottom, 2)
             content()
         }
