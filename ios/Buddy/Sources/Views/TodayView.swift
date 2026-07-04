@@ -269,32 +269,32 @@ struct TodayView: View {
     // MARK: - Done (Donezo) row — neutral + adaptive (ink / inkDim, never escalation red).
     @ViewBuilder
     private func doneRowView(task: BuddyTask) -> some View {
-        SwipeableRow(
-            rowID: task.id,
-            openRowID: $openRowID,
-            cardFill: theme.cardBackground,
-            onRestore: { withAnimation(.easeOut(duration: 0.3)) { store.restoreTask(id: task.id) } },
-            onTap: { store.restoreTask(id: task.id) }   // tap also restores
-        ) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(DoneWords.word(for: task.id))
-                    .font(.geist(15, .semibold))
-                    .tracking(-0.30)
-                    .foregroundStyle(theme.ink)
-                    .fixedSize(horizontal: true, vertical: false)
-                Text(task.text)
-                    .font(.geist(15, .regular))
-                    .tracking(-0.30)
-                    .strikethrough(true, color: theme.inkDim)
+        // Compact done row with a STABLE revert icon on the right (no swipe). Its right edge
+        // sits at the row's 32pt trailing gutter — same as the weather icon's right edge.
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(DoneWords.word(for: task.id))
+                .font(.geist(15, .semibold))
+                .tracking(-0.30)
+                .foregroundStyle(theme.ink)
+                .fixedSize(horizontal: true, vertical: false)
+            Text(task.text)
+                .font(.geist(15, .regular))
+                .tracking(-0.30)
+                .strikethrough(true, color: theme.inkDim)
+                .foregroundStyle(theme.inkDim)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Button { withAnimation(.easeOut(duration: 0.3)) { store.restoreTask(id: task.id) } } label: {
+                LucideIcon("undo", size: 18)
                     .foregroundStyle(theme.inkDim)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
+                    .frame(width: 22, height: 22, alignment: .trailing)
+                    .contentShape(Rectangle())
             }
-            .padding(.horizontal, 32)
-            .padding(.vertical, 16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
         }
+        .padding(.horizontal, 32)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Add row

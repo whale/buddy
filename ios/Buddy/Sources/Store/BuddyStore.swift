@@ -314,9 +314,8 @@ final class BuddyStore {
             )
             history.insert(record, at: 0)
 
-            // Hybrid carry-over: pre-fill today with yesterday's unfinished tasks (up to softCap).
-            // Mirrors Mac's bootFinish carry-over block.
-            let unfinished = record.items.filter { !$0.done }.prefix(Self.softCap)
+            // Carry ALL unfinished tasks forward (up to the hard cap of 6, the full list).
+            let unfinished = record.items.filter { !$0.done }.prefix(Self.hardCap)
             var carryItems: [BuddyTask] = []
             for item in unfinished where carryItems.count < Self.hardCap {
                 carryItems.append(BuddyTask(id: newId(), text: item.text, state: .neutral))

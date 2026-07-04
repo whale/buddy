@@ -11,7 +11,7 @@ struct HistoryView: View {
     @Bindable var store: BuddyStore
     var onClose: () -> Void = {}
 
-    enum Tab: String, CaseIterable { case future = "Future", done = "Done", skipped = "Skipped" }
+    enum Tab: String, CaseIterable { case future = "Future", done = "Done" }
     @State private var tab: Tab = .future
     @State private var pastDaysShown = 7   // Mac PAST_PAGE — "Load more" pages a week at a time
 
@@ -27,7 +27,6 @@ struct HistoryView: View {
                     switch tab {
                     case .future:  futureBody
                     case .done:    doneBody
-                    case .skipped: skippedBody
                     }
                 }
             }
@@ -79,15 +78,6 @@ struct HistoryView: View {
         return out
     }
 
-    private var skippedGroups: [HistGroup] {
-        var out: [HistGroup] = []
-        for d in pastDays {
-            let lines = d.items.filter { !$0.done }.map { HistLine(id: $0.id, text: $0.text) }
-            if !lines.isEmpty { out.append(HistGroup(id: d.date, header: d.weekday.isEmpty ? d.date : d.weekday, lines: lines)) }
-        }
-        return out
-    }
-
     // MARK: Done — today's completions + past done, struck with a done word
     @ViewBuilder private var doneBody: some View {
         let groups = doneGroups
@@ -97,23 +87,6 @@ struct HistoryView: View {
             ForEach(groups) { g in
                 group(header: g.header) {
                     ForEach(g.lines) { line in doneRow(id: line.id, text: line.text) }
-                }
-            }
-            if store.hasHistoryBefore(days: pastDaysShown) { loadMoreButton }
-        }
-    }
-
-    // MARK: Skipped — past undone, restorable
-    @ViewBuilder private var skippedBody: some View {
-        let groups = skippedGroups
-        if groups.isEmpty {
-            emptyState("Nothing skipped yet.")
-        } else {
-            ForEach(groups) { g in
-                group(header: g.header) {
-                    ForEach(g.lines) { line in
-                        plainRow(line.text, canAdd: !store.atHardCap, add: { store.restoreHistoryTask(text: line.text) })
-                    }
                 }
             }
             if store.hasHistoryBefore(days: pastDaysShown) { loadMoreButton }

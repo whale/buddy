@@ -52,14 +52,14 @@ final class MorningStoreTests: XCTestCase {
         XCTAssertEqual(s.history.first?.items.first?.id, "h-2020-01-01-0")
     }
 
-    func testRolloverCapsCarryAtSoftCap() {
+    func testRolloverCarriesAllUnfinishedUpToHardCap() {
         let s = BuddyStore()
         s.history = []
         s.today = TodayState(date: "2020-01-01",
                              items: (0..<7).map { task("t\($0)", "task \($0)") },  // 7 unfinished
                              morningDone: true)
         _ = s.performRolloverIfNeeded()
-        XCTAssertEqual(s.today.items.count, BuddyStore.softCap)  // carry capped at 5, never overwhelms
+        XCTAssertEqual(s.today.items.count, BuddyStore.hardCap)  // carry the full list (6), not 5
     }
 
     func testRolloverIsIdempotentAcrossDuplicateDates() {
