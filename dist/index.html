@@ -369,30 +369,43 @@
           </button>
           <p class="mt-2 text-[14px] text-black/35 tracking-[-0.26px] leading-snug">Pushes other windows out of Buddy's column. Asks for Accessibility permission the first time.</p>
         </div>
-        <!-- Sync with iPhone — generate a key, show a QR the phone scans -->
+        <!-- Sync with iPhone — three states: setup → pairing (QR) → linked -->
         <div class="border-b border-[#d9d9d9] px-8 py-5">
           <div class="flex items-center justify-between mb-3">
             <span class="text-[18px] text-black/60 tracking-[-0.36px]">Sync with iPhone</span>
             <span id="syncStatus" class="text-[15px] text-black/35">Off</span>
           </div>
-          <!-- QR on the left, backend fields stacked on the right -->
-          <div class="flex items-center gap-3 my-3">
-            <div id="syncQR" class="hidden shrink-0 leading-none rounded-[8px] overflow-hidden"></div>
-            <div class="flex-1 min-w-0 flex flex-col gap-2">
-              <input id="syncUrl" placeholder="Backend URL" spellcheck="false" autocapitalize="off"
-                style="color:#000;-webkit-text-fill-color:#000;color-scheme:light"
-                class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] bg-white outline-none focus:border-black/40">
-              <input id="syncAnon" placeholder="Anon (publishable) key" spellcheck="false" autocapitalize="off"
-                style="color:#000;-webkit-text-fill-color:#000;color-scheme:light"
-                class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] bg-white outline-none focus:border-black/40">
-              <div class="flex items-center gap-2">
-                <button id="syncConnectBtn" class="pressable tap-target inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Connect &amp; show QR</button>
-                <button id="syncDisconnectBtn" class="pressable tap-target hidden inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Disconnect</button>
-              </div>
+
+          <!-- STATE 1: not paired — backend fields + Connect -->
+          <div id="syncSetup" class="hidden flex flex-col gap-2 my-3">
+            <input id="syncUrl" placeholder="Backend URL" spellcheck="false" autocapitalize="off"
+              style="color:#000;-webkit-text-fill-color:#000;color-scheme:light"
+              class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] bg-white outline-none focus:border-black/40">
+            <input id="syncAnon" placeholder="Anon (publishable) key" spellcheck="false" autocapitalize="off"
+              style="color:#000;-webkit-text-fill-color:#000;color-scheme:light"
+              class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] bg-white outline-none focus:border-black/40">
+            <button id="syncConnectBtn" class="pressable tap-target self-start inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Connect &amp; show QR</button>
+          </div>
+
+          <!-- STATE 2: pairing — QR the phone scans -->
+          <div id="syncPairing" class="hidden flex items-center gap-4 my-3">
+            <div id="syncQR" class="shrink-0 leading-none rounded-[8px] overflow-hidden"></div>
+            <div class="flex-1 min-w-0">
+              <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Scan this in Buddy on your iPhone: Settings → “Scan QR to pair”.</p>
+              <button id="syncUnlinkBtnP" class="pressable tap-target inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Unlink iPhone</button>
             </div>
           </div>
+
+          <!-- STATE 3: linked — synced; unlink or resync -->
+          <div id="syncLinked" class="hidden my-3">
+            <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Your iPhone is linked — changes sync automatically.</p>
+            <div class="flex items-center gap-2">
+              <button id="syncUnlinkBtn" class="pressable tap-target inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Unlink iPhone</button>
+              <button id="syncResyncBtn" class="pressable tap-target inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Resync</button>
+            </div>
+          </div>
+
           <p id="syncError" class="hidden text-[13px] leading-snug mb-1" style="color:var(--red)"></p>
-          <p class="text-[13px] text-black/35 tracking-[-0.26px] leading-snug">On your iPhone: open Buddy → Settings → “Scan QR to pair”, then point it at the code.</p>
         </div>
         <button id="exportBtn" class="pressable w-full px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] ihover flex items-center justify-between gap-3 text-left">
           <span>Export my done tasks</span>
@@ -1101,21 +1114,40 @@ function scheduleSync(){                             // debounced push after a l
   syncDebounce = setTimeout(()=>syncNow('change'), SYNC_DEBOUNCE_MS);
 }
 
-/* ---- Settings sync UI: generate a key, connect, show the pairing QR ---- */
-function renderSyncStatus(){
-  const el=$('#syncStatus'); if(!el) return;
-  const cfg=readSyncCfg(), conn=$('#syncConnectBtn'), disc=$('#syncDisconnectBtn');
-  if(!cfg){ el.textContent='Off'; conn&&conn.classList.remove('hidden'); disc&&disc.classList.add('hidden'); return; }
-  if(syncLastError) el.textContent='Error';
-  else if(syncLastAt){ const d=new Date(syncLastAt); el.textContent='Synced '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
-  else el.textContent='Connected';
-  conn&&conn.classList.add('hidden'); disc&&disc.classList.remove('hidden');
+/* ---- Settings sync UI: three states — setup → pairing (QR) → linked ----
+   syncShowQR is transient (in-memory): true right after Connect/Resync so the QR shows
+   for scanning, cleared when Settings closes (by then you've paired) or on Unlink. So the
+   QR is present only while pairing; once linked, the area offers Unlink / Resync. */
+let syncShowQR = false;
+function renderSyncUI(){
+  const st=$('#syncStatus'); if(!st) return;
+  let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
+  const cfg=readSyncCfg();
+  // status pill
+  if(!cfg) st.textContent='Off';
+  else if(syncLastError) st.textContent='Error';
+  else if(syncLastAt){ const d=new Date(syncLastAt); st.textContent='Synced '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+  else st.textContent='Connected';
+  // which of the three blocks is visible
+  const inPairing = !!cfg && syncShowQR && isValidSyncKey(raw.syncKey);
+  const inSetup   = !cfg;
+  const inLinked  = !!cfg && !inPairing;
+  const setup=$('#syncSetup'), pairing=$('#syncPairing'), linked=$('#syncLinked');
+  setup   && setup.classList.toggle('hidden', !inSetup);
+  pairing && pairing.classList.toggle('hidden', !inPairing);
+  linked  && linked.classList.toggle('hidden', !inLinked);
+  if(inSetup){ if($('#syncUrl')) $('#syncUrl').value=raw.url||''; if($('#syncAnon')) $('#syncAnon').value=raw.key||''; }
+  // draw the QR once on entering pairing (don't redraw every sync tick → no flicker)
+  const qr=$('#syncQR');
+  if(inPairing){ if(qr && qr.children.length===0) renderSyncQR(pairingPayload(raw.url, raw.key, raw.syncKey)); }
+  else if(qr) qr.innerHTML='';
 }
+function renderSyncStatus(){ renderSyncUI(); }   // back-compat: sync engine calls this on each pass
 function renderSyncQR(payload){
   const el=$('#syncQR'); if(!el) return;
-  el.innerHTML=''; el.classList.remove('hidden');
+  el.innerHTML='';
   try{ new QRCode(el, { text:payload, width:150, height:150, colorDark:'#000000', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M }); }
-  catch(e){ el.classList.add('hidden'); const err=$('#syncError'); if(err){ err.textContent='Could not render QR: '+(e&&e.message); err.classList.remove('hidden'); } }
+  catch(e){ const err=$('#syncError'); if(err){ err.textContent='Could not render QR: '+(e&&e.message); err.classList.remove('hidden'); } }
 }
 async function syncConnectFromUI(){
   const err=$('#syncError'); if(err){ err.classList.add('hidden'); err.textContent=''; }
@@ -1125,26 +1157,31 @@ async function syncConnectFromUI(){
   if(!url || !anon){ if(err){ err.textContent='Enter the backend URL and anon key.'; err.classList.remove('hidden'); } return; }
   const ok=await setSync({ enabled:true, url, key:anon, syncKey });
   if(!ok){ if(err){ err.textContent='Could not connect — check the URL and anon key.'; err.classList.remove('hidden'); } return; }
-  renderSyncQR(pairingPayload(url, anon, syncKey));
-  renderSyncStatus();
+  syncShowQR=true; renderSyncUI();
 }
-function syncDisconnectFromUI(){
+function syncUnlinkFromUI(){
   let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
   raw.enabled=false; lsSet(SYNC_CFG_KEY, JSON.stringify(raw));   // keep the key so reconnect is one click
-  syncStore=null; syncOwnerId=null;
-  const qr=$('#syncQR'); if(qr){ qr.classList.add('hidden'); qr.innerHTML=''; }
-  renderSyncStatus();
+  syncStore=null; syncOwnerId=null; syncShowQR=false;
+  renderSyncUI();
+}
+async function syncResyncFromUI(){
+  const err=$('#syncError'); if(err){ err.classList.add('hidden'); err.textContent=''; }
+  let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
+  const url=raw.url, anon=raw.key;
+  if(!url || !anon){ syncShowQR=false; renderSyncUI(); return; }
+  // Fresh syncKey → a brand-new owner_id bucket, so no stale remote data can conflict.
+  // Both devices re-pair from the new QR; each pushes its current list into the clean bucket.
+  const ok=await setSync({ enabled:true, url, key:anon, syncKey:generateSyncKey() });
+  if(!ok){ if(err){ err.textContent='Could not resync — check the connection.'; err.classList.remove('hidden'); } return; }
+  syncShowQR=true; renderSyncUI();
 }
 function initSyncUI(){
-  let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
-  if($('#syncUrl')) $('#syncUrl').value = raw.url||'';
-  if($('#syncAnon')) $('#syncAnon').value = raw.key||'';
-  const conn=$('#syncConnectBtn'), disc=$('#syncDisconnectBtn');
-  conn && conn.addEventListener('click', syncConnectFromUI);
-  disc && disc.addEventListener('click', syncDisconnectFromUI);
-  // Already paired? Draw the QR so the phone can (re)scan any time Settings is open.
-  if(readSyncCfg() && isValidSyncKey(raw.syncKey)) renderSyncQR(pairingPayload(raw.url, raw.key, raw.syncKey));
-  renderSyncStatus();
+  $('#syncConnectBtn') && $('#syncConnectBtn').addEventListener('click', syncConnectFromUI);
+  $('#syncUnlinkBtn')  && $('#syncUnlinkBtn').addEventListener('click', syncUnlinkFromUI);
+  $('#syncUnlinkBtnP') && $('#syncUnlinkBtnP').addEventListener('click', syncUnlinkFromUI);
+  $('#syncResyncBtn')  && $('#syncResyncBtn').addEventListener('click', syncResyncFromUI);
+  renderSyncUI();
 }
 
 /* ---- Sync identity (QR pairing core) ----
@@ -2137,17 +2174,14 @@ function openSettings(){
   settingsSheet.setAttribute('data-open','true');
   settingsSheet.setAttribute('aria-hidden','false');
   syncCelebrate(); syncReserve(); syncExportCount(); syncChrome();
-  // Redraw the pairing QR every open (it was only drawn once at boot — so pairing after
-  // boot, or anything that cleared the node, left it blank).
-  try{ const raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}');
-       if(readSyncCfg() && isValidSyncKey(raw.syncKey)) renderSyncQR(pairingPayload(raw.url, raw.key, raw.syncKey)); }catch{}
-  renderSyncStatus();
+  renderSyncUI();   // reflect the current pairing state (setup / pairing / linked)
 }
 function closeSettings(){
   settingsOpen=false;
   settingsSheet.classList.add('closing');
   settingsSheet.setAttribute('data-open','false');
   settingsSheet.setAttribute('aria-hidden','true');
+  syncShowQR=false;   // once you've closed Settings you've paired — next open shows the linked view
   syncChrome();
 }
 gearBtn.addEventListener('click', e=>{ e.stopPropagation();
