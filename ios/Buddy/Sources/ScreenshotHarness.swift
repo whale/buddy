@@ -31,6 +31,12 @@ enum ScreenshotHarness {
         case "empty":
             store.seedForScreenshot(tasks: [])
             return (store, .none, false, false)
+        case "long":
+            store.seedForScreenshot(tasks: MockData.longTasks)
+            return (store, .none, false, false)
+        case "long-morning":
+            store.seedForScreenshot(tasks: MockData.longTasks, morningDone: false)
+            return (store, .none, true, false)
         case "morning":
             store.seedForScreenshot(tasks: MockData.normalTasks, morningDone: false)   // includes 2 done → Donezo rows on top
             return (store, .none, true, false)

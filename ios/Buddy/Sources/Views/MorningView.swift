@@ -14,6 +14,10 @@ struct MorningView: View {
     @FocusState private var focusedField: String?
     @State private var weather = WeatherService()
 
+    // Adaptive fit (see RowFit) — the morning planner fills the column and shrinks to fit
+    // like the Mac, instead of scrolling. Morning's comfortable ceiling is 22pt.
+    @State private var fit = RowFit.Result(font: 22, vpad: 16, scroll: false)
+
     private var theme: EscalationTheme { EscalationTheme.from(activeCount: store.activeCount) }
 
     var body: some View {
@@ -26,7 +30,15 @@ struct MorningView: View {
                     .padding(.leading, 28)
                     .padding(.trailing, 24)
                     .padding(.top, 16)
-                ScrollView { plannerCard }
+                GeometryReader { geo in
+                    Group {
+                        if fit.scroll { ScrollView { plannerCard } }
+                        else { plannerCard.frame(maxHeight: .infinity, alignment: .top) }
+                    }
+                    .onAppear { recomputeFit(geo.size) }
+                    .onChange(of: store.today.items) { _, _ in recomputeFit(geo.size) }
+                    .onChange(of: geo.size) { _, _ in recomputeFit(geo.size) }
+                }
                 footer
             }
             .padding(.horizontal, 14)
@@ -73,9 +85,20 @@ struct MorningView: View {
                 addRow
             }
         }
+        .frame(maxHeight: fit.scroll ? nil : .infinity, alignment: .top)
         .background(theme.cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(theme.line, lineWidth: 1))
+    }
+
+    private func recomputeFit(_ size: CGSize) {
+        let active = store.activeTasks.map(\.text)
+        let showRestore = active.isEmpty && store.doneTasks.isEmpty && !store.lastListForRestore().isEmpty
+        // The restore row behaves like one active row for fitting when the list is empty.
+        let texts = active.isEmpty && showRestore ? ["Restore your last list"] : active
+        let next = RowFit.compute(active: texts, doneCount: store.doneTasks.count,
+                                  height: size.height, width: size.width, ceil: 22)
+        if next != fit { fit = next }
     }
 
     // Compact Donezo row (done-word + struck title), like the Mac's buildDonezoRow(morning).
@@ -98,7 +121,7 @@ struct MorningView: View {
         Group {
             if editingId == task.id {
                 TextField("", text: $editText, axis: .vertical)
-                    .font(.geist(22, .medium)).tracking(-0.48)
+                    .font(.geist(fit.font, .medium)).tracking(-0.48)
                     .foregroundStyle(theme.escalationText)
                     .focused($focusedField, equals: task.id)
                     .submitLabel(.done)
@@ -106,15 +129,15 @@ struct MorningView: View {
                     .onChange(of: focusedField) { _, v in if v != task.id { commit(task.id) } }
             } else {
                 Text(task.text.isEmpty ? "Untitled" : task.text)
-                    .font(.geist(22, .medium)).tracking(-0.48)
+                    .font(.geist(fit.font, .medium)).tracking(-0.48).lineSpacing(2)
                     .foregroundStyle(task.text.isEmpty ? theme.inkDim : theme.escalationText)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                     .onTapGesture { startEdit(task) }
             }
         }
-        .padding(.horizontal, 32).padding(.vertical, 30)
-        .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)   // Mac morning min-height:120
+        .padding(.horizontal, 32).padding(.vertical, fit.vpad)
+        .frame(maxWidth: .infinity, maxHeight: fit.scroll ? nil : .infinity, alignment: .leading)
     }
 
     // Empty-morning "Restore your last list" (Mac buildRestoreRowEl) — pulls the most
@@ -127,19 +150,19 @@ struct MorningView: View {
             Text("\(texts.count) task\(texts.count == 1 ? "" : "s")")
                 .font(.geist(15, .regular)).tracking(-0.28).foregroundStyle(theme.inkDim)
         }
-        .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: fit.scroll ? nil : .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .padding(.horizontal, 32).padding(.vertical, 30)
+        .padding(.horizontal, 32).padding(.vertical, fit.vpad)
         .onTapGesture { withAnimation { store.restoreLastList() } }
     }
 
     private var addRow: some View {
         HStack(spacing: 18) { Text("Add"); Text("+") }
-            .font(.geist(22, .medium)).tracking(-0.48)
+            .font(.geist(fit.font, .medium)).tracking(-0.48)
             .foregroundStyle(theme.addInk)
-            .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: fit.scroll ? nil : .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .padding(.horizontal, 32).padding(.vertical, 30)
+            .padding(.horizontal, 32).padding(.vertical, fit.vpad)
             .onTapGesture { addTask() }
     }
 

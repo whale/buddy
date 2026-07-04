@@ -1498,15 +1498,37 @@ function startEdit(id){
   const s=window.getSelection(); s.removeAllRanges(); s.addRange(r);
 }
 
-/* ------------------- fit: distribute height, shrink font/padding --- */
+/* ------------------- fit: content-aware two-stage shrink -----------
+   Fit up to 6 (possibly multi-line) rows in the fixed column with NO scroll.
+   ONE uniform font for the whole list, chosen as the largest at which every row's
+   REAL wrapped text fits. Two stages: compress vertical padding first (barely
+   noticeable), THEN shrink font — down to a legibility floor. Scroll only as a
+   last resort when even floor+min-padding overflows (never clip / never illegible). */
+const FIT = { CEIL:24, FLOOR:15, PADMAX:22, PADMIN:10, PX:32 };
 function fitWrap(wrap){
   if(!wrap || !wrap.isConnected) return;
-  const rows=wrap.querySelectorAll('.buddy-row');
-  if(!rows.length) return;
-  const h=wrap.clientHeight / rows.length;
-  wrap.style.setProperty('--fs',   clamp(13, h*0.30, 24).toFixed(1)+'px');
-  wrap.style.setProperty('--vpad', Math.round(clamp(10, h*0.22, 30))+'px');
-  wrap.style.setProperty('--px',   Math.round(clamp(20, h*0.32, 32))+'px');
+  const kids=[...wrap.children];
+  if(!kids.length) return;
+  const H=wrap.clientHeight;
+  if(H<=0) return;
+  wrap.style.setProperty('--px', FIT.PX+'px');
+  const savedFlex=kids.map(k=>k.style.flex);
+  const natural=on=> kids.forEach((k,i)=>{ k.style.flex = on ? '0 0 auto' : savedFlex[i]; });
+  // Natural total height of all rows at a candidate font + padding (real wrapping).
+  const req=(fs,vp)=>{ wrap.style.setProperty('--fs',fs+'px'); wrap.style.setProperty('--vpad',vp+'px');
+    natural(true); const h=wrap.scrollHeight; natural(false); return h; };
+  let fs=FIT.CEIL, vp=FIT.PADMAX, scroll=false;
+  if(req(FIT.CEIL,FIT.PADMAX) > H){
+    let done=false;
+    for(let p=FIT.PADMAX; p>=FIT.PADMIN && !done; p--){ if(req(FIT.CEIL,p)<=H){ vp=p; done=true; } }   // stage 1: padding
+    if(!done) for(let f=FIT.CEIL; f>=FIT.FLOOR && !done; f-=0.5){ if(req(f,FIT.PADMIN)<=H){ fs=f; vp=FIT.PADMIN; done=true; } }  // stage 2: font
+    if(!done){ fs=FIT.FLOOR; vp=FIT.PADMIN; scroll=true; }   // last resort
+  }
+  wrap.style.setProperty('--fs', fs+'px');
+  wrap.style.setProperty('--vpad', vp+'px');
+  wrap.style.overflowY = scroll ? 'auto' : 'hidden';
+  // When scrolling, rows take natural height so nothing clips; otherwise they flex to fill.
+  kids.forEach((k,i)=>{ k.style.flex = (scroll && /^1 1/.test(savedFlex[i]||'')) ? '0 0 auto' : savedFlex[i]; });
 }
 const morningList=$('#morningList');
 // Morning rows are a FIXED comfortable height (the box sizes to its content and

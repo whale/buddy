@@ -26,6 +26,9 @@ struct TodayView: View {
     @State private var editText: String   = ""
     @FocusState private var focusedField: String?
 
+    // Adaptive row fitting (see RowFit) — recomputed when the list or its size changes.
+    @State private var fit = RowFit.Result(font: 24, vpad: 16, scroll: false)
+
     // Celebration overlay
     @State private var showCelebration = false
 
@@ -88,7 +91,11 @@ struct TodayView: View {
                 // Drive the sheet transitions on open AND close (slide up / slide down).
                 .animation(.easeOut(duration: 0.3), value: showSettings)
                 .animation(.easeOut(duration: 0.3), value: showHistory)
-                bottomBar                 // chrome icons + "Buddy" — bleeds off the bottom edge
+                // While editing, the keyboard covers the bottom bar anyway — hide it so the list
+                // reclaims that height for the row being typed.
+                if editingId == nil {
+                    bottomBar             // chrome icons + "Buddy" — bleeds off the bottom edge
+                }
             }
             .padding(.horizontal, 8)     // even side gutter
             .padding(.top, 8)            // small gutter below the status-bar safe area (no more)
@@ -200,27 +207,44 @@ struct TodayView: View {
     // MARK: - Card 2 — task list
 
     private var listCard: some View {
-        let rows = store.doneTasks + store.activeTasks   // Donezo first, then active
-        // Mac flex logic: done rows are compact (flex:0 0 auto); active rows + the Add row
-        // stretch to share the leftover height EQUALLY (flex:1 1 auto). So the whole list
-        // fills the viewport with no scroll and every undone row is the same height.
-        return VStack(spacing: 0) {
-            ForEach(Array(rows.enumerated()), id: \.element.id) { i, task in
-                if i > 0 { rowDivider }
-                Group {
-                    if task.isDone { doneRowView(task: task) } else { activeRowView(task: task) }
+        GeometryReader { geo in
+            let rows = store.doneTasks + store.activeTasks   // Donezo first, then active
+            // The list content. Rows flex-fill to share the column height equally when there's
+            // room; when the fit falls to its floor and still overflows, we scroll instead of clip.
+            let content = VStack(spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { i, task in
+                    if i > 0 { rowDivider }
+                    Group {
+                        if task.isDone { doneRowView(task: task) } else { activeRowView(task: task) }
+                    }
+                    .transition(.opacity)
                 }
-                .transition(.opacity)   // rows fade in/out; the reorder to Donezo glides (below)
+                if !store.atHardCap {
+                    if !rows.isEmpty { rowDivider }
+                    addRow
+                }
             }
-            if !store.atHardCap {
-                if !rows.isEmpty { rowDivider }
-                addRow
+            Group {
+                if fit.scroll {
+                    ScrollView { content.frame(maxWidth: .infinity, alignment: .top) }
+                } else {
+                    content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
             }
+            .animation(.easeOut(duration: 0.3), value: store.today.items)
+            .onAppear { recomputeFit(geo.size) }
+            .onChange(of: store.today.items) { _, _ in recomputeFit(geo.size) }
+            .onChange(of: geo.size) { _, _ in recomputeFit(geo.size) }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
-        // Item changes (complete→glide to Donezo, add, delete) animate; done→Donezo morph.
-        .animation(.easeOut(duration: 0.3), value: store.today.items)
+    }
+
+    private func recomputeFit(_ size: CGSize) {
+        let active = store.activeTasks.map(\.text)
+        let next = RowFit.compute(active: active, doneCount: store.doneTasks.count,
+                                  height: size.height, width: size.width)
+        if next != fit { fit = next }
     }
 
     private var rowDivider: some View {
@@ -230,9 +254,11 @@ struct TodayView: View {
     // MARK: - Active row — tap the text to edit (Mac idiom); swipe for Complete / Sleep / Delete.
     @ViewBuilder
     private func activeRowView(task: BuddyTask) -> some View {
+        // Flex-fill rows to share the column when there's room; natural height when scrolling.
+        let fillH: CGFloat? = fit.scroll ? nil : .infinity
         if editingId == task.id {
             TextField("", text: $editText, axis: .vertical)
-                .font(.geist(24, .medium)).tracking(-0.48)
+                .font(.geist(fit.font, .medium)).tracking(-0.48)
                 .foregroundStyle(theme.escalationText)
                 .submitLabel(.done)
                 .focused($focusedField, equals: task.id)
@@ -240,8 +266,8 @@ struct TodayView: View {
                 .onChange(of: focusedField) { _, v in
                     if v != task.id && editingId == task.id { commitEdit(id: task.id) }
                 }
-                .padding(.horizontal, 32).padding(.vertical, 16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.horizontal, 32).padding(.vertical, fit.vpad)
+                .frame(maxWidth: .infinity, maxHeight: fillH, alignment: .leading)
         } else {
             SwipeableRow(
                 rowID: task.id,
@@ -253,12 +279,12 @@ struct TodayView: View {
                 onTap:      { startEdit(task: task) }
             ) {
                 Text(task.text.isEmpty ? "Untitled" : task.text)
-                    .font(.geist(24, .medium)).tracking(-0.48).lineSpacing(2)
+                    .font(.geist(fit.font, .medium)).tracking(-0.48).lineSpacing(2)
                     .foregroundStyle(task.text.isEmpty ? theme.inkDim : theme.escalationText)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                    .padding(.horizontal, 32).padding(.vertical, 16)
+                    .frame(maxWidth: .infinity, maxHeight: fillH, alignment: .leading)
+                    .padding(.horizontal, 32).padding(.vertical, fit.vpad)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)   // flex:1 1 auto — equal share of leftover height
+            .frame(maxWidth: .infinity, maxHeight: fillH)
         }
     }
 
@@ -299,12 +325,12 @@ struct TodayView: View {
             Text("Add")
             Text("+")
         }
-        .font(.geist(24, .medium))
+        .font(.geist(fit.font, .medium))
         .tracking(-0.48)
         .foregroundStyle(theme.addInk)
         .padding(.horizontal, 32)
-        .padding(.vertical, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)   // flex:1 1 auto — matches the active rows
+        .padding(.vertical, fit.vpad)
+        .frame(maxWidth: .infinity, maxHeight: fit.scroll ? nil : .infinity, alignment: .leading)   // flex like the active rows
         .contentShape(Rectangle())
         .onTapGesture { addTask() }
     }
