@@ -2604,22 +2604,8 @@ window.__buddy = {
       const doneRow=pastRows.find(r=>r.textContent.includes('finished'));
       ok('done tab: completed past task is struck + carries a done-word ending in !',
          !!doneRow && !!doneRow.querySelector('.line-through') && /!$/.test((doneRow.querySelector('.font-semibold')||{}).textContent||''));
-      ok('done tab: skipped task is NOT shown (it lives in Skipped)',
+      ok('done tab: an undone past task is NOT shown (only completions; Skipped tab removed)',
          !pastRows.some(r=>r.textContent.includes('skipped one')));
-      // …Skipped tab shows ONLY the skipped task (plain) with an Add-to-today + …
-      state.histTab='skipped'; render();
-      const skipRows=[...listEl.querySelectorAll('.hrow')];
-      const skipRow=skipRows.find(r=>r.textContent.includes('skipped one'));
-      ok('skipped tab: skipped task is plain (no strike, no done-word)',
-         !!skipRow && !skipRow.querySelector('.line-through') && !skipRow.querySelector('.font-semibold'));
-      ok('skipped tab: completed task is NOT shown (it lives in Done)',
-         !skipRows.some(r=>r.textContent.includes('finished')));
-      ok('skipped tab: skipped task has an Add-to-today +',
-         !!listEl.querySelector('button[title="Add to today"]'));
-      // …and + brings it into today.
-      restoreHistoryTask('skipped one');
-      ok('skipped tab: + brings the skipped task into today',
-         state.items.some(i=>i.text==='skipped one'));
       // Future tab (holding pen): + moves a parked task into today and clears it.
       state.today={date:localDate(),morningDone:true,items:[]};
       state.deferred=[{id:'dfa',text:'parked A',wake:localDate()}];
