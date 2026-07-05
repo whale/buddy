@@ -643,7 +643,8 @@ function serialize(){
   return JSON.stringify({
     version:1,
     savedAt: Date.now(),
-    today:   { date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null,doneAt:i.doneAt??null,v:i.v||1})) },
+    today:   { date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null,doneAt:i.doneAt??null,doneWord:i.doneWord??null,v:i.v||1})) },
+    doneWordBag: Array.isArray(state.doneWordBag) ? state.doneWordBag : [],
     history: state.history,
     deferred:(state.deferred||[]).map(d=>({id:d.id,text:d.text,wake:d.wake})),
     settings:{ celebrate: Math.max(0,Math.min(100, state.settings.celebrate??100)), reserveSpace: !!state.settings.reserveSpace },
@@ -709,6 +710,7 @@ function freshBoot(){
   state.pinned=false;
   state.tombstones={};
   state.erasedAt=null;
+  state.doneWordBag=[];
 }
 function parseRaw(raw){ if(raw==null) return null; try{ const b=JSON.parse(raw); return (b&&typeof b==='object')?b:null; }catch{ return null; } }
 
@@ -725,11 +727,13 @@ function hydrate(blob){
         id:i.id||nid(), text:String(i.text||''),
         state:(i.state==='done')?i.state:'neutral',   // legacy 'focused' → neutral ("now" removed)
         src:i.src??null, doneAt:(typeof i.doneAt==='number'?i.doneAt:null),
+        doneWord:(typeof i.doneWord==='string'?i.doneWord:null),
         v:(typeof i.v==='number'&&i.v>0)?i.v:1 })) }   // legacy items pre-v default to 1
     : null;
   return {
     today,
     hadToday: !!today,
+    doneWordBag: Array.isArray(blob.doneWordBag) ? blob.doneWordBag.filter(w=>typeof w==='string') : [],
     history: Array.isArray(blob.history) ? blob.history.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items)) : [],
     deferred: Array.isArray(blob.deferred) ? blob.deferred.filter(d=>d&&typeof d.text==='string').map(d=>({id:d.id||nid(),text:String(d.text),wake:String(d.wake||'')})) : [],
     settings: { celebrate: (blob.settings && typeof blob.settings.celebrate==='number') ? Math.max(0,Math.min(100,blob.settings.celebrate)) : (blob.settings && blob.settings.confetti===false ? 0 : 100),
@@ -765,6 +769,7 @@ function applyHydrated(h){
   state.pinned  = h.pinned;
   state.tombstones = h.tombstones || {};
   state.erasedAt   = (typeof h.erasedAt==='number') ? h.erasedAt : null;
+  state.doneWordBag = Array.isArray(h.doneWordBag) ? h.doneWordBag : (state.doneWordBag||[]);  // sync/merge paths omit the bag → keep what we have
   restartStash     = h.restartStash || null;   // persisted set-aside list (Restart Buddy)
 }
 
@@ -1458,7 +1463,7 @@ function applyPinnedUI(){
 // single tap on the row's checkbox; tap again to undo.)
 function cycle(it){
   const was=it.state;
-  if(it.state!=='done'){ it.state='done'; it.doneAt=Date.now(); }
+  if(it.state!=='done'){ it.state='done'; it.doneAt=Date.now(); if(!it.doneWord) it.doneWord=pickDoneWord(); }
   else { if(activeCount()>=HARD_CAP) return; it.state='neutral'; delete it.doneAt; }   // done → restore (capped)
   touch(it);
   if(was!=='done' && it.state==='done'){ fireConfetti(); scheduleDonezo(it.id); }
@@ -1475,10 +1480,29 @@ function removeItem(id){ tombstone(id); state.items=state.items.filter(x=>x.id!=
 const activeCount = () => state.items.filter(i => i.state!=='done').length;
 const DONEZO_DELAY = 2000;          // savor beat before a done row morphs to a "done" word
 let donezoEnterId = null;           // one-shot: the row that just became a Donezo (enter anim)
-// Rotating "done" labels — picked DETERMINISTICALLY per task id (stable across
-// re-renders, no flicker; equal weight, no favourite). Shown on every completed row.
+// Rotating "done" labels shown on every completed row.
 const DONE_WORDS = ['Donezo!','Done!','Done & Dusted!','Sorted!','Wrapped!','Handled!','Bagged!','Squared Away!','Locked In!','Ticked Off!','Checked Off!','Buttoned Up!','All Set!','Good To Go!','Cleared!','Settled!','Tidied!','Put To Bed!','Golden!','There It Is!','Ta-Da!','Voilà!','Finito!','Fin!','Shipped!'];
+// LEGACY fallback only. Old hash-of-id pick: stable, but it MARCHED down the list
+// whenever ids were sequential (history rows, the n1/n2 fallback), so neighbouring
+// tasks got neighbouring words — the "not random / not spread out" bug. Kept solely
+// so past-day history rows (no stored word) still show *a* word.
 function doneWord(id){ const s=String(id||''); let h=0; for(let i=0;i<s.length;i++){ h=(h*31 + s.charCodeAt(i))>>>0; } return DONE_WORDS[h % DONE_WORDS.length]; }
+// Shuffle bag: hand out every word ONCE before any repeat, then refill and start over.
+// The pick happens once at completion and is stored on the item (it.doneWord), so it's
+// both genuinely spread out AND stable across re-renders. This replaces id-hashing.
+function pickDoneWord(){
+  let bag=state.doneWordBag;
+  if(!Array.isArray(bag) || !bag.length) bag=state.doneWordBag=DONE_WORDS.slice();
+  const k=Math.floor(Math.random()*bag.length);
+  return bag.splice(k,1)[0];
+}
+// One-time heal: give any already-done item that predates stored words a bag pick, so an
+// existing list stops looking patterned the instant this ships (not just new completions).
+function backfillDoneWords(){
+  let changed=false;
+  (state.today.items||[]).forEach(it=>{ if(it.state==='done' && !it.doneWord){ it.doneWord=pickDoneWord(); changed=true; } });
+  if(changed) save();
+}
 // A done row shows as its struck self for DONEZO_DELAY, then becomes a Donezo row.
 const isDonezo = it => it.state==='done' && it.doneAt && (Date.now()-it.doneAt) >= DONEZO_DELAY;
 // 2s after a completion, slide the struck row out and re-render it as a Donezo row.
@@ -1808,7 +1832,7 @@ function buildDonezoRow(it, idx, morning){
   lab.style.paddingRight='44px';
   const tag=document.createElement('span');
   tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:15px;color:var(--ink)';
-  tag.textContent=doneWord(it.id);
+  tag.textContent=it.doneWord||doneWord(it.id);
   const ttl=document.createElement('span');
   ttl.className='line-through truncate'; ttl.style.cssText='font-size:15px;color:var(--ink-dim)';
   ttl.textContent=it.text||'';
@@ -1858,7 +1882,7 @@ function renderPast(){
     .filter(d=>d.items.length);
   if(!todayDone.length && !past.length){ histBody.appendChild(histEmpty('No completed tasks yet.')); return; }
   const groups=[];
-  if(todayDone.length) groups.push({ name:'Today', items:todayDone.map(it=>({text:it.text,liveId:it.id,id:it.id})), today:true });
+  if(todayDone.length) groups.push({ name:'Today', items:todayDone.map(it=>({text:it.text,liveId:it.id,id:it.id,doneWord:it.doneWord})), today:true });
   past.forEach(d=>groups.push({ name:d.name, items:d.items.map(it=>({text:it.text,id:it.id})), today:false }));
   groups.forEach((day,di)=>{
     const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
@@ -1869,7 +1893,7 @@ function renderPast(){
       // Today's completions get an ↩ undo (back to active); past completions are history.
       const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(day.today?' pr-[44px]':'');
       const lab=document.createElement('div'); lab.className='flex items-baseline gap-2 min-w-0 flex-1';
-      const tag=document.createElement('span'); tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:18px;color:var(--ink)'; tag.textContent=doneWord(it.id);
+      const tag=document.createElement('span'); tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:18px;color:var(--ink)'; tag.textContent=it.doneWord||doneWord(it.id);
       const t=document.createElement('span'); t.className='tracking-[-0.36px] line-through truncate'; t.style.cssText='font-size:18px;color:var(--ink-dim)'; t.textContent=it.text;
       lab.append(tag,t); r.appendChild(lab);
       if(day.today){
@@ -3050,6 +3074,7 @@ function bootFinish(recovered){
   applyPinnedUI();
   syncCelebrate();                        // reflect stored settings.confetti
   updateHistBtn();                        // disc icon shows the configured day-count (or hides if Off)
+  backfillDoneWords();                    // heal any pre-existing done items to a shuffled word
   render();
   // Show the morning whenever today hasn't been planned yet (morningDone flag) —
   // even if slept tasks have woken into the list, so you still plan your three.

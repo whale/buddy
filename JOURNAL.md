@@ -5,6 +5,29 @@ Newest first.
 
 ---
 
+## 2026-07-01 — "random" celebration words weren't random (deterministic hash of sequential ids)
+
+**The bug.** A tester's completed tasks showed patterned done-words (Donezo / Ticked Off /
+Donezo / Ticked Off) instead of random ones. The word was `DONE_WORDS[hash(id) % 25]` — a
+*deterministic* pick, chosen so the word stays stable across re-renders (a good goal). But
+the input was the task **id**, and ids are often **sequential** (history rows `h-DATE-0/1/2`,
+the `n1/n2` fallback). A rolling hash of near-identical strings increments in lockstep, so
+`% 25` **marched down the word list** — neighbouring tasks got neighbouring words. Random
+UUID ids actually spread fine; the bug only surfaced when ids were sequential, which is easy
+to miss if you only test with fresh UUID tasks.
+
+**The fix.** Don't derive randomness from a value that isn't random. Use a **shuffle bag**
+(every word handed out once before any repeat, then refill) and pick **once at completion**,
+storing the result on the item (`it.doneWord`). That gets you *both* properties the hash was
+trying to fake: genuinely spread out (bag) AND stable across renders (stored, not recomputed).
+Persist it; backfill existing done items at boot so an old list re-shuffles immediately.
+
+**Lesson: a deterministic hash of a non-random, sequential input is not a shuffle — it's a
+march.** If you want "random but stable," roll once and store the result; don't hash an id and
+hope it looks random. **Verify with the real input distribution** (sequential ids), not just
+the happy-path one (UUIDs) — and confirm a pre-existing test failure is pre-existing by
+stashing your change and re-running (the "hit targets" smoke check failed on baseline too).
+
 ## 2026-06-30 (later) — "Done" was conflating done + skipped; Future became a manual backlog
 
 **The design bug.** History stores each task as `{text, done}`, and the Done tab rendered
