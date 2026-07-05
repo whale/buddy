@@ -1,6 +1,26 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-06-30 (later). Current branch: `main`. Latest **released** version: **`0.3.1`** — history split into three tabs (Future · Done · Skipped) + Future turned into a manual holding pen. Signed/notarized, published via a manual `Release Mac app` dispatch (the in-app updater delivers it). `AUTO_RELEASE_MAC` stays **OFF** — a manual `gh workflow run "Release Mac app"` publishes anyway (workflow_dispatch bypasses the gate); no need to flip the var. Open work: the de-inline-styles / token-system follow-up (memory `buddy-token-system-todo`)._
+_Last updated: 2026-07-04. Current branch: **`feat/ios-sync-live`** (latest commit `304dacb`, pushed). Latest **released Mac** version: **`0.3.2`** (cut LOCALLY from this branch — CI hardcodes `ref: main`, so it can't build the branch; see memory `buddy-0-3-2-release`). iOS is on **TestFlight `0.1.0 (11)`**. **Mac `0.3.3` NOT yet cut** — the adaptive-fit work is on the branch + in the running dev app but not in the installed Mac app. See the 2026-07-04 summary below for the one known bug to fix first._
+
+## Session summary — 2026-07-04 — Mac⇄iOS polish, staged sync UI, adaptive row fitting
+
+Long session refining the synced Mac + iPhone apps against live testing. Branch `feat/ios-sync-live`.
+
+**Shipped / done + verified:**
+- **Mac 0.3.2 released** (signed+notarized, local build from the branch): Done-page **jitter fix** (poll no longer re-renders on no-change), **grey day headers** (not chrome→no red at lvl1), **Skipped tab removed** (Future · Done), **staged sync UI** (setup → pairing/QR → linked with **Unlink / Resync**; Resync mints a fresh syncKey = clean bucket), **pairing-QR redraws** on every Settings open.
+- **iOS through TestFlight `0.1.0 (11)`**: sync-settings + date-baseline alignment (killed a stray `+12` hack), one 32pt gutter everywhere (close ✕ / weather / row icons), Future `+`/`×` always shown, Done-tab **revert** icon, **rollover carries all 6** (was 5), Skipped removed, **tap-to-edit focus fix** (deferred focus — kept text + cursor lands), bottom bar hides while editing.
+- **Adaptive row fitting — one engine both platforms** (`RowFit` iOS, `fitWrap` Mac): largest uniform font where every row's real wrapped text fits → compress padding then font → floor (Mac 15 / iOS main 16 / morning 22→16) → scroll only as last resort; clip-safe by construction. **Fixed the iOS morning scroll** (was a ScrollView + fixed 120pt rows). Verified 6 multi-line tasks fit on Mac drawer, iOS main, iOS morning.
+- **Tests:** iOS **49/49**, Mac browser smoke **35/35**.
+
+**KNOWN BUG (unfixed — do first next session):** the **sync merge can exceed the 6-task cap and creates duplicates**. The `HARD_CAP` is only enforced on manual Add; `mergeWire`/`mergeHistory` union both devices' active lists and never re-clamp, so Mac(6)+iPhone(different) → 8 rows with dup titles (seen live: two "Check on Anthropic bill"). **Fix:** after a merge, clamp active list to 6 + dedupe by title. Contained change in the merge logic (dist `mergeWire` + iOS `BuddySync`), NOT the fit code.
+
+**Also parked:** installed-app vs dev-build **localStorage split** — pairing/config lives per-origin (`WebKit/buddy` dev vs `WebKit/fyi.whale.buddy` installed), so updating the installed app showed "Off" until re-paired (backend URL/key are in `.supabase-buddy.secret` / `SYNC-HANDOFF.md`). Not a bug, but worth a note in onboarding.
+
+**Next session:** (1) fix the merge cap+dedupe bug; (2) cut **Mac 0.3.3** so the installed app gets adaptive fit; (3) confirm TestFlight `0.1.0 (11)` feels right on the real phone.
+
+---
+
+_Historical: 2026-06-30. Branch `main`. Released **`0.3.1`** — history split into three tabs (Future · Done · Skipped) + Future turned into a manual holding pen. Signed/notarized, published via a manual `Release Mac app` dispatch (the in-app updater delivers it). `AUTO_RELEASE_MAC` stays **OFF** — a manual `gh workflow run "Release Mac app"` publishes anyway (workflow_dispatch bypasses the gate); no need to flip the var. Open work: the de-inline-styles / token-system follow-up (memory `buddy-token-system-todo`)._
 
 Buddy is a shipped, public, self-updating macOS menu-bar focus app for ADHD.
 Repo: `github.com/whale/buddy`.
