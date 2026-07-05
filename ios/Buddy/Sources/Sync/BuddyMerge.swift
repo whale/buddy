@@ -63,7 +63,7 @@ enum BuddyMerge {
         if let ta = va.today, let tb = vb.today, ta.date == tb.date {
             today = TodayState(
                 date: ta.date,
-                items: mergeItems(newer.today?.items ?? [], older.today?.items ?? [], tombstones),
+                items: clampActiveItems(mergeItems(newer.today?.items ?? [], older.today?.items ?? [], tombstones)),
                 morningDone: ta.morningDone || tb.morningDone     // OR-wins, mirrors the Mac
             )
         } else {
@@ -102,6 +102,29 @@ enum BuddyMerge {
         let dx = x.doneAt?.timeIntervalSince1970 ?? 0
         let dy = y.doneAt?.timeIntervalSince1970 ?? 0
         return dy > dx ? y : x          // tie on v → newer completion wins, else keep x
+    }
+
+    /// After a cross-device merge the UNION of both devices' active tasks can exceed the
+    /// 6-task cap and carry same-title duplicates (each device minted its own id, so
+    /// `mergeItems` keeps both). `hardCap` is only enforced on manual Add, never on merge —
+    /// so re-clamp here: keep every done item, drop same-title active dupes, cap active tasks
+    /// at `hardCap`. Order preserved (primary = newer save first → newer device's dup wins).
+    /// Deterministic → both devices converge on the same clamped list, no ping-pong.
+    /// Mirrors the Mac's `clampActiveItems` in dist/index.html.
+    static func clampActiveItems(_ items: [BuddyTask]) -> [BuddyTask] {
+        var seenTitles = Set<String>()
+        var active = 0
+        var out = [BuddyTask]()
+        for it in items {
+            if it.isDone { out.append(it); continue }   // done work never counts against the cap
+            let title = it.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !title.isEmpty && seenTitles.contains(title) { continue }   // same-title dup → drop
+            if active >= BuddyStore.hardCap { continue }                   // past the cap → drop overflow
+            if !title.isEmpty { seenTitles.insert(title) }
+            active += 1
+            out.append(it)
+        }
+        return out
     }
 
     static func mergeItems(_ primary: [BuddyTask], _ secondary: [BuddyTask],

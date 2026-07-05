@@ -110,4 +110,30 @@ final class BuddyMergeTests: XCTestCase {
             snap(today: TodayState(date: "d", items: [item("c","new-done",.done,2, Date(timeIntervalSince1970: 200))]), savedAt: 1001))
         XCTAssertEqual(m?.today?.items.first?.text, "new-done")
     }
+
+    // 13. Merge cap — the UNION of two full-ish devices re-clamps to hardCap.
+    // Without the clamp, Mac(6) + iPhone(2 new) → 8 active rows (the live bug).
+    func testMergeClampsActiveToHardCap() {
+        let a = snap(today: TodayState(date: "2026-06-19", items: [
+            item("a1","one"), item("a2","two"), item("a3","three"),
+            item("a4","four"), item("a5","five"), item("a6","six")]), savedAt: 2000)
+        let b = snap(today: TodayState(date: "2026-06-19", items: [
+            item("b7","seven"), item("b8","eight")]), savedAt: 1900)
+        let m = BuddyMerge.merge(a, b)
+        let active = (m?.today?.items ?? []).filter { $0.isActive }.count
+        XCTAssertEqual(active, BuddyStore.hardCap)
+    }
+
+    // 14. Merge dedupe — same title from both devices (different ids) collapses to one;
+    // done items are never counted against the cap nor dropped by the clamp.
+    func testMergeDedupesSameTitleAndKeepsDone() {
+        let a = snap(today: TodayState(date: "2026-06-19", items: [
+            item("m1","Check on Anthropic bill"), item("dn","archived",.done,1, Date(timeIntervalSince1970: 1))]), savedAt: 2000)
+        let b = snap(today: TodayState(date: "2026-06-19", items: [
+            item("i1","Check on Anthropic bill")]), savedAt: 1900)
+        let m = BuddyMerge.merge(a, b)
+        let bills = (m?.today?.items ?? []).filter { $0.isActive && $0.text == "Check on Anthropic bill" }.count
+        XCTAssertEqual(bills, 1)
+        XCTAssertTrue((m?.today?.items ?? []).contains { $0.id == "dn" && $0.isDone })
+    }
 }
