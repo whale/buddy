@@ -2,56 +2,41 @@
 
 _Last updated: 2026-07-05 (sync branch merged to main, cutting 0.3.3)._
 
-## ⚠️ Active branch right now: `feat/ios-sync-live` (Mac⇄iOS sync — in progress)
+## Start here — `main`, clean, released `0.3.3`
 
-Off `fix/ios-visual-parity`. Building live sync. **P0 (backend + CAS SQL 7/7) and P1
-(iOS live adapter, 3 live tests ran & passed) are DONE & verified.** Full plan + progress
-+ resume commands: `ios/_review/SYNC-PLAN.md` (read the "PROGRESS — resume here" block first).
-Next: P2 wire auto-sync into BuddyStore → P3 Settings opt-in → P4 Mac side → P5 round-trip.
-Needs local Supabase running (`orb start && supabase start`). A **hosted** Supabase is only
-needed later (P7) to sync a *physical* iPhone; everything through P5 verifies on localhost.
-The visual-parity work (below) is its own branch/PR #61 — sync stacks on it, rebase if #61 changes.
+The big sync branch is **merged and shipped**. `feat/ios-sync-live` (iOS companion + live
+Mac⇄iPhone sync, adaptive fit, merge cap/dedupe fix — 42 commits) merged to `main` (PR #62,
+squash) and released as **Mac `0.3.3`** via CI. iOS is on **TestFlight `0.1.0 (11)`**.
 
----
-
-## `fix/ios-visual-parity` (iOS visual work, PR #61 — draft)
-
-This session rebuilt the **iPhone** UI to visually match the Mac drawer (it had drifted
-badly — system font, single card, native iOS chrome). Branch is **committed + pushed**,
-**no PR yet** (waiting on the user's review). All 37 iOS unit tests pass. The Mac app,
-PR #60, and `main` are untouched.
-
-- **Review it:** open `ios/_review/comparison.html` (Mac vs iPhone, every screen, side by side).
-- **What's done:** Geist font bundled; TodayView (two Geist cards, chrome row, numeral-left
-  date, clean rows, escalation lvl0/1/2); Settings + History rebuilt as custom Buddy sheets;
-  MorningView restyled. Details in `ios/_review/PROGRESS.md` + memory `buddy-ios-visual-parity`.
-- **Regenerate any shot:** build, install to sim, then
-  `xcrun simctl launch booted fyi.whale.buddy -uiFixture <lvl0|lvl1|lvl2|empty|morning|history|settings>`
-  → `xcrun simctl io booted screenshot out.png`.
-- **Next decision for the user:** eyeball comparison.html → if good, open the PR. Known
-  deltas (fixed "Donezo." vs rotating words; tap-to-complete vs swipe; static moon weather;
-  focused/"now" state still in the store) are listed at the bottom of comparison.html.
-
----
-
-## Start here (Mac app — resumes when back on `main`)
-
-- Branch: `fix/done-word-shuffle` (clean, pushed). **PR #60 open** — done-word shuffle-bag fix (tester bug: celebration words were patterned, not random). Verified in browser, not on-device.
-- **Batching mode:** the user is gathering several small bug-fix PRs and will cut ONE release at the end. Merging fixes to `main` is safe — `AUTO_RELEASE_MAC` is OFF, so a merge only bumps the version, it does not publish. Don't release until the batch is done and the user says "let's release."
-- Branch: `main`, clean.
-- **Released = `0.3.1`** (Latest) — Future/Done/Skipped tabs + Future manual holding pen. Signed/notarized, published via manual `Release Mac app` dispatch. **Not yet on-device-verified** — confirm via Settings → Check for Updates (the in-app updater should offer 0.3.1).
-- `AUTO_RELEASE_MAC` is **OFF** — but a manual `gh workflow run "Release Mac app"` publishes anyway (a `workflow_dispatch` bypasses the OFF gate and builds+publishes whatever version is on `main`). No need to flip the var. Note: the auto-bump bot **+1's the patch on every merge to `main`**, so set the version expecting the bump (or add `[skip release]` to freeze it).
-- **Open work:** the design-token / de-inline-styles follow-up (memory `buddy-token-system-todo`).
-- Also unmerged: `feat/styleguide-proposals` (styleguide Proposals/discrepancy spec) — merge or drop.
-- **First alpha tester:** onboarding is just "send the DMG link" — see the STATUS.md "Alpha-tester onboarding" note. No feedback tooling built yet (fine for n=1).
+- **Branch:** `main`, clean, synced with origin. No feature branch in progress.
+- **Released = `0.3.3`** (Latest) — signed/notarized, published by CI, `releases/latest`
+  resolves to v0.3.3 with DMG + `Buddy.app.tar.gz` + `latest.json`. The updater will offer it.
+- **Release flow (confirmed this session):** merge to `main` → bump bot sets the next patch →
+  `gh workflow run "Release Mac app"` builds + publishes from `main`. `AUTO_RELEASE_MAC` stays
+  **OFF**; the manual `workflow_dispatch` bypasses the gate. **CI can cut the signed release —
+  no local notarization needed** once code is on `main` (corrects the old "must build locally"
+  note; that only applied to releasing branch code like 0.3.2). Add `[skip release]` to a
+  commit/merge subject to stop the bump bot on docs-only changes.
+- **Full detail:** see `STATUS.md` (2026-07-05 summary) — it's the authoritative record.
 
 ## Next 3–5 tasks
 
-1. **Keep batching fixes.** PR #60 (done-word shuffle bag) is open — merge it when ready (safe: auto-release OFF). Then tackle the next tester/bug item on its own branch off `main`. When the batch is complete, cut ONE release (version bump in lockstep + `gh workflow run "Release Mac app"`).
-2. **On-device verify 0.3.1** — Settings → Check for Updates → install → confirm the three tabs (Future/Done/Skipped) and the Future holding pen (+/×/click-edit) work in the real app. Much of the 0.3.1 work was browser-verified only.
-3. **Send the first alpha tester the DMG link** (`…/releases/download/v0.3.1/Buddy_0.3.1_universal.dmg`) — see STATUS.md onboarding note. If it grows past one tester, add a lightweight feedback loop (GitHub issue template or a form).
-4. **Build the design-token system** as a PR (branch off `main`). Spec: memory `buddy-token-system-todo` + the styleguide's "⚐ Proposals" section (on **unmerged** `feat/styleguide-proposals`). OKLCH hover (`--red-hover: oklch(from var(--red) calc(l-.05) calc(c+.05) h)`), type scale 16→15 / 13→14, icon weights ≤20→1.8 / weather 1.4, de-inline all `style="color:…"`. Verify all three colour states.
-5. **Decide on `feat/styleguide-proposals`** — merge it or fold its content into the token PR. **Prune stale local branches** (`feat/sync-*`, `worktree-agent-*`, `feat/styleguide`, `docs/session-wrap-*`, `docs/wrap-0.3.1-tabs`).
+1. **iPhone TestFlight distribution to the 2 friends.** Needs the user in App Store Connect;
+   a public TestFlight link requires an Apple beta review (~a day). User said they'll do this
+   later — walk them through it in numbered steps when they're ready.
+2. **On-device confirm 0.3.3 (Mac).** Settings → Check for Updates → install → confirm live
+   sync, adaptive row fitting (6 multi-line tasks, no scroll), and that merged lists no longer
+   exceed 6 or duplicate. Much was browser/simulator-verified only.
+3. **Close/prune stale PR + branches.** PR #61 (`fix/ios-visual-parity`, WIP) is **superseded**
+   by #62 (the iOS parity work is on main now) — close it. Prune stale local branches.
+4. **Design-token system** (still open, memory `buddy-token-system-todo`): OKLCH hover
+   (`--red-hover: oklch(from var(--red) calc(l-.05) calc(c+.05) h)`), type scale 16→15 / 13→14,
+   icon weights ≤20→1.8 / weather 1.4, de-inline all `style="color:…"`. Spec in the styleguide's
+   "⚐ Proposals" section (unmerged `feat/styleguide-proposals` — merge or fold into this PR).
+
+---
+
+_Archive of earlier sessions below (pre-0.3.3 handoff notes; kept for history)._
 
 ## What just happened (2026-06-30, later)
 
