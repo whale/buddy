@@ -1,6 +1,16 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-04. Current branch: **`feat/ios-sync-live`** (latest commit `304dacb`, pushed). Latest **released Mac** version: **`0.3.2`** (cut LOCALLY from this branch — CI hardcodes `ref: main`, so it can't build the branch; see memory `buddy-0-3-2-release`). iOS is on **TestFlight `0.1.0 (11)`**. **Mac `0.3.3` NOT yet cut** — the adaptive-fit work is on the branch + in the running dev app but not in the installed Mac app. See the 2026-07-04 summary below for the one known bug to fix first._
+_Last updated: 2026-07-05. Branch `main`. Latest **released Mac** version: **`0.3.3`** (published via CI). iOS is on **TestFlight `0.1.0 (11)`**. `AUTO_RELEASE_MAC` stays **OFF** (a manual `gh workflow run "Release Mac app"` dispatch publishes anyway — workflow_dispatch bypasses the gate and checks out `ref: main`; no local build needed once code is on main). See the 2026-07-05 summary below._
+
+## Session summary — 2026-07-05 — merge cap+dedupe fix, sync-UI tweak, 0.3.3 shipped via CI
+
+- **Merge cap + dedupe fix (the known bug).** Cross-device merge unioned both devices' active lists and never re-clamped, so Mac(6)+iPhone(new) → 8 rows with same-title dupes (seen live: two "Check on Anthropic bill"). New `clampActiveItems()` runs after every same-day merge on **both** platforms (`dist/index.html` + `ios/.../BuddyMerge.swift`): keep all done items, drop same-title active dupes (newer device wins), cap active at `HARD_CAP`. Deterministic → devices converge, no ping-pong. Tests: Mac `mergeTest` **18/18** (+3), iOS `BuddyTests` **51/51** (+2).
+- **Sync-settings tweak.** "Synced HH:MM" moved to the right of Unlink/Resync, one type step down (15→14px). Stays legible on the lvl2 red sheet via the existing `.lvl2 #settings [class*="text-black"]` override.
+- **Shipped as Mac 0.3.3 (via CI).** `feat/ios-sync-live` (the whole iOS companion + live sync, 42 commits) merged to main (PR #62, squash) → bump bot → **`gh workflow run "Release Mac app"`** built + published v0.3.3 with DMG + `Buddy.app.tar.gz` + `latest.json`; `releases/latest` resolves to v0.3.3. **Correction to prior belief:** CI *can* cut the signed release from main via manual dispatch — local notarization only needed for code not yet on main (like 0.3.2). See memory `buddy-0-3-2-release`.
+- **Still open:** iPhone TestFlight distribution to the 2 friends (public link needs Apple beta review — user will do later). Confirm 0.3.3 on-device.
+
+---
+
 
 ## Session summary — 2026-07-04 — Mac⇄iOS polish, staged sync UI, adaptive row fitting
 
