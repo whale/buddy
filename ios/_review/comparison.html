@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buddy iOS — visual parity review</title>
+<style>
+  :root{ --bg:#0e0e10; --panel:#17171a; --ink:#f4f4f5; --dim:#a1a1aa; --line:#2a2a2e; --ok:#4ade80; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; padding:40px 24px 80px; }
+  .wrap{ max-width:1040px; margin:0 auto; }
+  h1{ font-size:26px; letter-spacing:-.4px; margin:0 0 6px; }
+  .sub{ color:var(--dim); margin:0 0 28px; max-width:70ch; }
+  .sub b{ color:var(--ink); font-weight:600; }
+  section{ background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:22px 22px 26px; margin:18px 0; }
+  h2{ font-size:18px; letter-spacing:-.3px; margin:0 0 4px; }
+  .note{ color:var(--dim); font-size:13.5px; margin:0 0 18px; }
+  .pair{ display:grid; grid-template-columns:1fr 1fr; gap:22px; align-items:start; }
+  .pair.solo{ grid-template-columns:1fr; max-width:360px; }
+  figure{ margin:0; }
+  figcaption{ color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.6px; margin:0 0 8px; }
+  figcaption .tag{ color:var(--ok); }
+  img{ width:100%; height:auto; border-radius:14px; border:1px solid var(--line); background:#000; display:block; }
+  .lvls{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+  .lvls figcaption b{ color:var(--ink); }
+  ul{ color:var(--dim); font-size:13.5px; margin:14px 0 0; padding-left:18px; }
+  li{ margin:3px 0; }
+  .foot{ color:var(--dim); font-size:13px; margin-top:34px; border-top:1px solid var(--line); padding-top:18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Buddy iOS — visual parity</h1>
+  <p class="sub">The iPhone app rebuilt to match the Mac drawer. <b>Left = Mac (source of truth), right = iPhone (after).</b>
+  Both captured live — the Mac rendered at its real 340&times;760 drawer size, the iPhone from the running simulator. The
+  iPhone now uses <b>Geist</b> (was the system font), the two-card structure, the chrome row, the numeral-left date block,
+  clean text rows, and the escalation red states.</p>
+
+  <section>
+    <h2>Daily drawer — normal (lvl0)</h2>
+    <p class="note">The hero screen. Two floating rounded cards, chrome glyphs + “Buddy”, the big date block, Donezo rows on top, then active tasks and the Add row.</p>
+    <div class="pair">
+      <figure><figcaption>Mac — reference</figcaption><img src="mac/mac-daily.png" alt="Mac daily"></figure>
+      <figure><figcaption>iPhone — <span class="tag">after</span></figcaption><img src="ios/daily-lvl0.png" alt="iOS daily lvl0"></figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Escalation states (iPhone)</h2>
+    <p class="note">Driven by active-task count, entirely through the theme tokens (RULE 1). lvl1 turns every text red but keeps the Donezo row neutral; lvl2 turns the whole field red with light, legible text.</p>
+    <div class="lvls">
+      <figure><figcaption><b>lvl0</b> — ≤4 active</figcaption><img src="ios/daily-lvl0.png" alt="lvl0"></figure>
+      <figure><figcaption><b>lvl1</b> — 5 active (red text)</figcaption><img src="ios/daily-lvl1.png" alt="lvl1"></figure>
+      <figure><figcaption><b>lvl2</b> — 6 active (red bg)</figcaption><img src="ios/daily-lvl2.png" alt="lvl2"></figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Morning planner</h2>
+    <p class="note">Centered column: numeral-left date, a bordered rounded planner card, Skip / Buddy! footer — all Geist.</p>
+    <div class="pair">
+      <figure><figcaption>Mac — reference</figcaption><img src="mac/mac-morning.png" alt="Mac morning"></figure>
+      <figure><figcaption>iPhone — <span class="tag">after</span></figcaption><img src="ios/morning.png" alt="iOS morning"></figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>History sheet</h2>
+    <p class="note">Was a native iOS list. Now the Mac’s custom sheet: a [Future | Done | Skipped] segmented control, ✕ close, Geist day-group headers, “Donezo.” + struck titles. (Mac shown on its default Future tab; iPhone on Done.)</p>
+    <div class="pair">
+      <figure><figcaption>Mac — reference</figcaption><img src="mac/mac-history.png" alt="Mac history"></figure>
+      <figure><figcaption>iPhone — <span class="tag">after</span></figcaption><img src="ios/history.png" alt="iOS history"></figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Settings sheet</h2>
+    <p class="note">Was a native grouped Form. Now the Mac’s custom sheet: “Settings” + ✕ header, the 👍🏼 … 🦜 celebrate slider, hairline dividers, red “Erase all data”, pill buttons, version footer.</p>
+    <div class="pair">
+      <figure><figcaption>Mac — reference</figcaption><img src="mac/mac-settings.png" alt="Mac settings"></figure>
+      <figure><figcaption>iPhone — <span class="tag">after</span></figcaption><img src="ios/settings.png" alt="iOS settings"></figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Known deltas &amp; recommended follow-ups</h2>
+    <p class="note">Honest list of what’s not pixel-identical yet, and small decisions for you.</p>
+    <ul>
+      <li><b>Done words.</b> Mac rotates a word per task (“Shipped!”, “Locked In!”); iPhone shows a fixed “Donezo.”. Easy to port the word list next.</li>
+      <li><b>Row interaction.</b> With no hover on iPhone, a <b>tap completes</b> a task and <b>long-press</b> opens edit/sleep/remove. Clean at rest like the Mac — but confirm this feels right vs. a swipe.</li>
+      <li><b>“Now/focused” state.</b> The Mac removed it (tap just toggles done); the iPhone store still models it but the UI no longer highlights it. Aligning the store is a small functional PR (3 tests reference it).</li>
+      <li><b>Weather.</b> A static moon glyph stands in; the live Open-Meteo fetch isn’t ported to iOS yet.</li>
+      <li><b>Morning done rows.</b> Mac shows completed tasks in the planner too; iPhone currently lists active only.</li>
+      <li><b>Row size/height.</b> Mac rows stretch to fill the tall drawer; iPhone uses comfortable fixed heights — a judgement call, tune if you want them taller.</li>
+    </ul>
+  </section>
+
+  <p class="foot">Branch <b>fix/ios-visual-parity</b>. Screenshots regenerate via the DEBUG harness:
+  <code>xcrun simctl launch booted fyi.whale.buddy -uiFixture &lt;lvl0|lvl1|lvl2|morning|history|settings&gt;</code>.
+  All 37 iOS unit tests pass.</p>
+</div>
+</body>
+</html>

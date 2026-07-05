@@ -129,6 +129,25 @@ struct SyncWire: Codable {
     var tombstones: [String: Double]    // id → epoch ms
     var erasedAt: Double?               // epoch ms
 
+    // Tolerant decode: a missing key must NEVER throw and kill a sync pass. Swift's
+    // synthesized decoder throws keyNotFound even for properties that HAVE a default
+    // (e.g. `pinned`), so decode every field defensively. Encoding stays synthesized.
+    private enum CodingKeys: String, CodingKey {
+        case version, savedAt, today, history, deferred, settings, pinned, tombstones, erasedAt
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version    = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        savedAt    = try c.decodeIfPresent(Double.self, forKey: .savedAt) ?? 0
+        today      = try c.decodeIfPresent(Today.self, forKey: .today)
+        history    = try c.decodeIfPresent([HistDay].self, forKey: .history) ?? []
+        deferred   = try c.decodeIfPresent([Deferred].self, forKey: .deferred) ?? []
+        settings   = try c.decodeIfPresent(BuddySettings.self, forKey: .settings)
+        pinned     = try c.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
+        tombstones = try c.decodeIfPresent([String: Double].self, forKey: .tombstones) ?? [:]
+        erasedAt   = try c.decodeIfPresent(Double.self, forKey: .erasedAt)
+    }
+
     // snapshot (seconds) → wire (ms)
     init(_ s: SyncSnapshot) {
         savedAt = s.savedAt * MS

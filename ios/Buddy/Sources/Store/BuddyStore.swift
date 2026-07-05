@@ -33,6 +33,13 @@ final class BuddyStore {
     // MARK: - Save debounce
     private var saveWorkItem: DispatchWorkItem?
 
+    // MARK: - Sync hooks (P1.5/P2)
+    // The sync engine sets onLocalChange to schedule a debounced push. While `applyingRemote`
+    // is true (inside adopt), local mutations are the RESULT of a pull — they must NOT re-trigger
+    // a push (that ping-pongs versions). adopt() persists directly and never fires onLocalChange.
+    var onLocalChange: (() -> Void)?
+    private var applyingRemote = false
+
     // MARK: - Init
     init() {
         loadFromDisk()
@@ -133,6 +140,67 @@ final class BuddyStore {
         scheduleSave()
     }
 
+    /// Bring a PAST (skipped) task back into today by text — fresh id, capped, no dupes.
+    /// Mirrors Mac's `restoreHistoryTask(text)`.
+    func restoreHistoryTask(text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, activeCount < Self.hardCap else { return }
+        guard !today.items.contains(where: { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == t }) else { return }
+        today.items.append(BuddyTask(id: newId(), text: t, state: .neutral))
+        scheduleSave()
+    }
+
+    /// Pull a parked (Future) task into today's list, then drop it from deferred.
+    /// Mirrors Mac's Future-tab restore.
+    func wakeDeferredTask(id: String) {
+        guard let idx = deferred.firstIndex(where: { $0.id == id }) else { return }
+        guard activeCount < Self.hardCap else { return }
+        today.items.append(BuddyTask(id: newId(), text: deferred[idx].text, state: .neutral))
+        deferred.remove(at: idx)
+        scheduleSave()
+    }
+
+    /// Most recent archived day's unfinished tasks — for the morning "Restore your last list".
+    /// Mirrors the Mac's mostRecentRestorableRecord + restorableTexts.
+    func lastListForRestore() -> [String] {
+        for d in history.sorted(by: { $0.date > $1.date }) {
+            let texts = d.items.filter { !$0.done }.map { $0.text }.filter { !$0.isEmpty }
+            if !texts.isEmpty { return Array(texts.prefix(Self.hardCap)) }
+        }
+        return []
+    }
+
+    /// Pull that list into today (capped, no dupes). Mirrors the Mac's restoreLastList().
+    func restoreLastList() {
+        for t in lastListForRestore() where activeCount < Self.hardCap {
+            if !today.items.contains(where: { $0.text == t }) {
+                today.items.append(BuddyTask(id: newId(), text: t, state: .neutral))
+            }
+        }
+        scheduleSave()
+    }
+
+    /// True if any archived day is older than `days` back — drives History "Load more".
+    func hasHistoryBefore(days: Int) -> Bool {
+        guard let boundary = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else { return false }
+        let ds = Self.localDate(boundary)
+        return history.contains { $0.date < ds }
+    }
+
+    /// Remove a parked (Future) task for good. Mirrors the Mac Future-tab × button.
+    func deleteDeferred(id: String) {
+        deferred.removeAll { $0.id == id }
+        scheduleSave()
+    }
+
+    /// Every completed task text (today + history), newest first — for the Settings export.
+    var doneExport: [String] {
+        var out = store_todayDone()
+        for d in history { out += d.items.filter { $0.done }.map { $0.text } }
+        return out
+    }
+    private func store_todayDone() -> [String] { doneTasks.map { $0.text } }
+
     /// Push a task to tomorrow's deferred list. Mirrors Mac's `sleepItem(id)`.
     func deferToTomorrow(id: String) {
         guard let idx = today.items.firstIndex(where: { $0.id == id }) else { return }
@@ -156,6 +224,19 @@ final class BuddyStore {
     }
 
     #if DEBUG
+    // Screenshot/preview seed: replace state directly so a fixture renders exactly as
+    // given. Rollover already ran in init() but is a no-op for today's date, and this
+    // overwrites its result anyway. Not persisted — purely for deterministic captures.
+    func seedForScreenshot(tasks: [BuddyTask], history: [Day] = [], morningDone: Bool = true, settings: BuddySettings = .default) {
+        saveWorkItem?.cancel()
+        today = TodayState(date: Self.localDate(), items: tasks, morningDone: morningDone)
+        self.history = history
+        deferred = []
+        tombstones = [:]
+        erasedAt = nil
+        self.settings = settings
+    }
+
     // Dev-only: wipe to a clean first-run state so the morning planner shows again.
     func resetForDev() {
         today = TodayState(date: Self.localDate(), items: [], morningDone: false)
@@ -166,6 +247,30 @@ final class BuddyStore {
         scheduleSave(immediate: true)
     }
     #endif
+
+    // MARK: - Sync bridge (P1.5)
+
+    /// Build the mergeable snapshot the sync loop pushes. savedAt is stamped NOW (mirrors the
+    /// Mac's serialize()), so a genuine local change wins scalar (settings / today.date) conflicts.
+    func snapshot() -> SyncSnapshot {
+        SyncSnapshot(today: today, history: history, deferred: deferred, settings: settings,
+                     tombstones: tombstones, erasedAt: erasedAt, savedAt: Date().timeIntervalSince1970)
+    }
+
+    /// Replace local state from a merged snapshot (the result of a pull+merge). Persists directly
+    /// and NEVER fires onLocalChange — adopting remote truth must not schedule another push. Must
+    /// be called on the main actor (mutates @Observable state the UI reads). Fires no celebration.
+    func adopt(_ merged: SyncSnapshot) {
+        applyingRemote = true
+        defer { applyingRemote = false }
+        if let t = merged.today { today = t }
+        history    = merged.history
+        deferred   = merged.deferred
+        if let s = merged.settings { settings = s }
+        tombstones = merged.tombstones
+        erasedAt   = merged.erasedAt
+        saveToDisk()                         // persist without going through scheduleSave/dirty
+    }
 
     // MARK: - Morning planner
     // Mirrors the Mac: on a fresh/rolled day the morning planner shows until the user
@@ -209,9 +314,8 @@ final class BuddyStore {
             )
             history.insert(record, at: 0)
 
-            // Hybrid carry-over: pre-fill today with yesterday's unfinished tasks (up to softCap).
-            // Mirrors Mac's bootFinish carry-over block.
-            let unfinished = record.items.filter { !$0.done }.prefix(Self.softCap)
+            // Carry ALL unfinished tasks forward (up to the hard cap of 6, the full list).
+            let unfinished = record.items.filter { !$0.done }.prefix(Self.hardCap)
             var carryItems: [BuddyTask] = []
             for item in unfinished where carryItems.count < Self.hardCap {
                 carryItems.append(BuddyTask(id: newId(), text: item.text, state: .neutral))
@@ -256,6 +360,9 @@ final class BuddyStore {
     }
 
     private func scheduleSave(immediate: Bool = false) {
+        // A local mutation → signal the sync engine to schedule a debounced push. Suppressed
+        // while adopting a remote snapshot (that write is the RESULT of a pull, not a new edit).
+        if !applyingRemote { onLocalChange?() }
         saveWorkItem?.cancel()
         if immediate {
             saveToDisk()

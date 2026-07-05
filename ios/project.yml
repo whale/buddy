@@ -57,6 +57,19 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         ITSAppUsesNonExemptEncryption: false
+        # Allow plain-HTTP loads to localhost/LAN so sync can reach a local Supabase
+        # (127.0.0.1:54321) in dev. Production hosted Supabase is HTTPS (ATS-clean).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        # Camera is used ONLY to scan the pairing QR code shown on the Mac.
+        NSCameraUsageDescription: Buddy uses the camera to scan the pairing QR code from your Mac to set up sync.
+        # Geist (SIL OFL) — the Mac app's typeface. Bundled as static OTFs so the
+        # iPhone shares Buddy's exact type language. PostScript names: Geist-<Weight>.
+        UIAppFonts:
+          - Geist-Regular.otf
+          - Geist-Medium.otf
+          - Geist-SemiBold.otf
+          - Geist-Bold.otf
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fyi.whale.buddy

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Buddy — prototype</title>
 <script src="assets/vendor/tailwindcss.js"></script>
+<script src="vendor/qrcode.js"></script>   <!-- QR render for iPhone pairing (davidshimjs/qrcodejs, MIT) -->
 <style>
   /* Native (Tauri) mode: hide the web-demo scaffolding so only Buddy shows;
      the real macOS desktop sits behind the transparent window. */
@@ -186,8 +187,9 @@
   /* Settings / history sheets: Fade+Drift up (fade + small rise + slight scale). */
   .sheet{ transition: transform var(--t-drift) var(--ease-out), opacity var(--t-drift) var(--ease-out); will-change:transform,opacity; }
   .sheet.closing{ transition: transform .34s var(--ease-out), opacity .34s var(--ease-out); }
-  .sheet[data-open="false"]{ transform: translateY(22px) scale(.99); opacity:0; pointer-events:none; }
-  .sheet[data-open="true"]{ transform: translateY(0) scale(1); opacity:1; }
+  /* Just present — a quick fade, no slide. */
+  .sheet[data-open="false"]{ transform: none; opacity:0; pointer-events:none; }
+  .sheet[data-open="true"]{ transform: none; opacity:1; }
 
   /* Last-7-days crossfade — blur-masked so it reads as ONE motion (§3.4).
      blur ≤ 4px (Safari cost). Crossfade, no bar-travel tween. */
@@ -366,6 +368,44 @@
             </span>
           </button>
           <p class="mt-2 text-[14px] text-black/35 tracking-[-0.26px] leading-snug">Pushes other windows out of Buddy's column. Asks for Accessibility permission the first time.</p>
+        </div>
+        <!-- Sync with iPhone — three states: setup → pairing (QR) → linked -->
+        <div class="border-b border-[#d9d9d9] px-8 py-5">
+          <div class="mb-3">
+            <span class="text-[18px] text-black/60 tracking-[-0.36px]">Sync with iPhone</span>
+          </div>
+
+          <!-- STATE 1: not paired — backend fields + Connect -->
+          <div id="syncSetup" class="hidden flex flex-col gap-2 my-3">
+            <input id="syncUrl" placeholder="Backend URL" spellcheck="false" autocapitalize="off"
+              style="color:#000;-webkit-text-fill-color:#000;color-scheme:light"
+              class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] bg-white outline-none focus:border-black/40">
+            <input id="syncAnon" placeholder="Anon (publishable) key" spellcheck="false" autocapitalize="off"
+              style="color:#000;-webkit-text-fill-color:#000;color-scheme:light"
+              class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] bg-white outline-none focus:border-black/40">
+            <button id="syncConnectBtn" class="pressable tap-target self-start inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Connect &amp; show QR</button>
+          </div>
+
+          <!-- STATE 2: pairing — QR the phone scans -->
+          <div id="syncPairing" class="hidden flex items-center gap-4 my-3">
+            <div id="syncQR" class="shrink-0 leading-none rounded-[8px] overflow-hidden"></div>
+            <div class="flex-1 min-w-0">
+              <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Scan this in Buddy on your iPhone: Settings → “Scan QR to pair”.</p>
+              <button id="syncUnlinkBtnP" class="pressable tap-target inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Unlink iPhone</button>
+            </div>
+          </div>
+
+          <!-- STATE 3: linked — synced; unlink or resync -->
+          <div id="syncLinked" class="hidden my-3">
+            <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Your iPhone is linked — changes sync automatically.</p>
+            <div class="flex items-center gap-2">
+              <button id="syncUnlinkBtn" class="pressable tap-target inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Unlink iPhone</button>
+              <button id="syncResyncBtn" class="pressable tap-target inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Resync</button>
+              <span id="syncStatus" class="ml-auto text-[14px] text-black/35">Off</span>
+            </div>
+          </div>
+
+          <p id="syncError" class="hidden text-[13px] leading-snug mb-1" style="color:var(--red)"></p>
         </div>
         <button id="exportBtn" class="pressable w-full px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] ihover flex items-center justify-between gap-3 text-left">
           <span>Export my done tasks</span>
@@ -636,7 +676,10 @@ function writeNow(){
   catch(e){ (memoryStore||(memoryStore={}))[STORAGE_KEY]=blob; console.warn('[buddy] localStorage write failed — relying on the file mirror', e); }
   fileSave(blob);                // durable record regardless of localStorage state
 }
-function save(){ if(saveSuppressed) return; clearTimeout(saveTimer); saveTimer=setTimeout(writeNow,250); }
+function save(){ if(saveSuppressed) return; clearTimeout(saveTimer); saveTimer=setTimeout(writeNow,250);
+  // opt-in: debounced push to other devices — but NOT while adopting a pulled snapshot
+  // (that write is the RESULT of a sync, not a new local edit → would loop).
+  if(!applyingRemote && typeof scheduleSync==='function') scheduleSync(); }
 
 /* Force-flush synchronously when the tab is hidden / closing — a trailing
    debounce gets killed by tab close, so cancel the timer and write inline. */
@@ -788,6 +831,30 @@ function mergeItems(primary, secondary, tombstones){
   }
   return out;
 }
+// After a cross-device merge, the UNION of both devices' active tasks can exceed the
+// 6-task cap and carry same-title duplicates (each device minted its own id, so
+// mergeItems keeps both). HARD_CAP is only enforced on manual Add, never on merge —
+// so re-clamp here: keep every done item untouched, drop same-title active dupes, and
+// cap active tasks at HARD_CAP. Order is preserved (primary = newer save comes first,
+// so the newer device's copy of a duplicate wins). Deterministic → both devices
+// converge on the same clamped list, no ping-pong.
+function clampActiveItems(items){
+  if(!Array.isArray(items)) return items;
+  const seenTitles = new Set();
+  let active = 0;
+  const out = [];
+  for(const it of items){
+    if(!it) continue;
+    if(it.state==='done'){ out.push(it); continue; }   // done work never counts against the cap
+    const title = String(it.text||'').trim().toLowerCase();
+    if(title && seenTitles.has(title)) continue;        // same-title duplicate → drop
+    if(active >= HARD_CAP) continue;                     // past the cap → drop the overflow
+    if(title) seenTitles.add(title);
+    active++;
+    out.push(it);
+  }
+  return out;
+}
 function todayToHistoryRecord(today){
   if(!today || !today.date || !Array.isArray(today.items) || !today.items.length) return null;
   const wd = DOW[new Date(today.date+'T00:00:00').getDay()];
@@ -840,7 +907,7 @@ function merge(a, b){
     today = {
       date: va.today.date,
       morningDone: !!(va.today.morningDone || vb.today.morningDone),
-      items: mergeItems(newer.today.items, older.today.items, tombstones),
+      items: clampActiveItems(mergeItems(newer.today.items, older.today.items, tombstones)),
     };
   } else {
     today = newer.today || older.today || null;   // different/missing days → newer day wins live
@@ -901,9 +968,11 @@ function blobIsEmpty(b){
 // (otherwise two idle devices would ping-pong version bumps forever).
 function blobContentKey(b){
   if(!b) return '';
+  // `pinned` is DEVICE-LOCAL (a desktop window toggle iOS doesn't model) — deliberately
+  // excluded so it never forces a sync or ping-pongs versions between Mac and phone.
   return JSON.stringify({ td:b.today&&b.today.date, m:!!(b.today&&b.today.morningDone),
     t:(b.today&&b.today.items)||[], h:b.history||[], d:b.deferred||[],
-    tomb:b.tombstones||{}, e:b.erasedAt??null, s:b.settings||{}, p:!!b.pinned });
+    tomb:b.tombstones||{}, e:b.erasedAt??null, s:b.settings||{} });
 }
 // Map a merged hydrated result (merge() output) back to a wire blob for push/apply.
 function hydratedToWire(h){
@@ -926,11 +995,16 @@ function applyWire(blob){
   // mid-type and the blur handler could tombstone a half-typed task. Defer — the next
   // sync pass re-merges and applies once the edit commits.
   if(editingId !== null) return;
+  const keepPinned = state.pinned;               // pinned is device-local — never adopt the remote's
   const h = hydrate(migrate(blob));
   if(!h) return;
-  applyHydrated(h);
-  if(!h.hadToday) state.today = { date:localDate(), items:[], morningDone:false };
-  render(); writeNow();
+  applyingRemote = true;                          // suppress scheduleSync from the render() below
+  try{
+    applyHydrated(h);
+    state.pinned = keepPinned;                    // restore local pin after adopting merged state
+    if(!h.hadToday) state.today = { date:localDate(), items:[], morningDone:false };
+    render(); writeNow();
+  } finally { applyingRemote = false; }
 }
 
 // One sync pass against a CAS store. Pure w.r.t. the store contract; mutates local
@@ -948,9 +1022,11 @@ async function syncOnce(store, key){
 
   let mergedBlob = mergeWire(localBlob, remote.blob);
 
-  // Nothing new vs remote → adopt remote, don't churn the version.
+  // Nothing new vs remote → adopt remote, don't churn the version. Only re-apply (and
+  // re-render) when our LOCAL copy is actually behind remote — otherwise the 1.5s poll
+  // would applyWire→render on every tick and visibly jitter the UI (esp. the Done page).
   if(blobContentKey(mergedBlob) === blobContentKey(remote.blob)){
-    if(remote.blob) applyWire(remote.blob);
+    if(remote.blob && blobContentKey(localBlob) !== blobContentKey(remote.blob)) applyWire(remote.blob);
     return { ok:true, pushed:false, noop:true, version:remote.version };
   }
 
@@ -987,6 +1063,156 @@ function makeFakeCASStore(seed){
   };
 }
 
+/* Real CAS store over Supabase — the network adapter syncOnce() talks to. Same {pull,push}
+   contract as makeFakeCASStore + the buddy_cas.sql RPCs. Dumb transport only; all merge /
+   conflict logic stays in syncOnce(). Mirror of ios SupabaseCASStore.swift. */
+function makeSupabaseCASStore(baseUrl, anonKey, device){
+  const rpc = (fn, body) => fetch(baseUrl.replace(/\/$/,'')+'/rest/v1/rpc/'+fn, {
+    method:'POST',
+    headers:{ apikey:anonKey, Authorization:'Bearer '+anonKey, 'Content-Type':'application/json' },
+    body: JSON.stringify(body),
+  }).then(async r => { if(!r.ok) throw new Error('rpc '+fn+' '+r.status+' '+(await r.text())); return r.json(); });
+  const row0 = rows => (Array.isArray(rows) && rows.length) ? rows[0] : null;
+  return {
+    async pull(key){
+      const r = row0(await rpc('buddy_pull', { p_key:key }));
+      return r ? { blob:r.blob, version:r.version } : { blob:null, version:0 };
+    },
+    async push(key, blob, expected){
+      const r = row0(await rpc('buddy_push', { p_key:key, p_blob:blob, p_expected:expected, p_device:device||'web' }));
+      return r ? { ok:r.ok, blob:r.blob, version:r.version } : { ok:false, blob:null, version:0 };
+    },
+  };
+}
+
+/* ---- Auto-sync engine (opt-in) --------------------------------------------
+   Config in localStorage `buddy.sync.v1` = { enabled, url, key(anon), syncKey }.
+   owner_id = sha256(syncKey) — the row key BOTH devices derive (never the raw key).
+   Triggers: boot, window focus/visible, and debounced (~3s) after a local change.
+   One sync at a time; a change during an in-flight pass RE-ARMS (syncPending) so it's
+   never lost. Failures log + retry on the next trigger. `syncLastError`/`syncLastAt`
+   drive the Settings status (never stamp a success time on failure). */
+const SYNC_CFG_KEY = 'buddy.sync.v1';
+const SYNC_DEBOUNCE_MS = 3000;
+let syncStore=null, syncOwnerId=null, syncing=false, syncPending=false,
+    syncLastAt=0, syncLastError=null, syncDebounce=null;
+// True while applyWire is adopting a pulled snapshot. render() ends with save(), and a
+// sync adoption calls render() — without this guard that save() re-arms scheduleSync,
+// which re-syncs, re-adopts, re-renders… an infinite push loop. Mirrors iOS applyingRemote.
+let applyingRemote=false;
+
+function isValidSyncKey(k){ return typeof k==='string' && k.length===43 && /^[A-Za-z0-9_-]+$/.test(k); }
+function readSyncCfg(){
+  try{ const o=JSON.parse(lsGet(SYNC_CFG_KEY)||'null');
+       return (o && o.enabled && o.url && o.key && isValidSyncKey(o.syncKey)) ? o : null; }
+  catch{ return null; }
+}
+function syncConfigured(){ return !!readSyncCfg(); }
+async function initSync(){
+  const cfg = readSyncCfg();
+  if(!cfg){ syncStore=null; syncOwnerId=null; return false; }
+  syncStore   = makeSupabaseCASStore(cfg.url, cfg.key, NATIVE ? 'mac' : 'web');
+  syncOwnerId = await deriveOwnerId(cfg.syncKey);   // M2: hash, not the raw key
+  return true;
+}
+async function setSync(cfg){                        // Settings/pairing writes config here
+  lsSet(SYNC_CFG_KEY, JSON.stringify(cfg || {}));
+  await initSync();
+  if(syncStore) await syncNow('config');
+  return !!syncStore;
+}
+async function syncNow(reason){
+  if(!syncStore || !syncOwnerId) return null;
+  if(syncing){ syncPending = true; return null; }   // coalesce; re-arm after the in-flight pass
+  syncing = true;
+  try{
+    do{
+      syncPending = false;
+      const res = await syncOnce(syncStore, syncOwnerId);   // pull → merge → CAS push → retry
+      if(res && res.ok){ syncLastAt = Date.now(); syncLastError = null; T('sync '+reason+' ok pushed='+(!!res.pushed)+' v='+(res.version||0)); }
+      else { syncLastError = 'conflict'; T('sync '+reason+' not-ok'); }
+    } while(syncPending && syncStore);
+    return true;
+  }catch(e){ syncLastError = (e&&e.message)||'error'; console.warn('[buddy] sync failed ('+reason+')', e); T('sync '+reason+' FAILED '+(e&&e.message)); return null; }
+  finally{ syncing = false; if(typeof renderSyncStatus==='function') renderSyncStatus(); }
+}
+function scheduleSync(){                             // debounced push after a local change
+  if(!syncStore || applyingRemote) return;           // never from a sync's own adopt-render
+  if(syncing){ syncPending = true; return; }         // re-arm: change landed mid-flight
+  clearTimeout(syncDebounce);
+  syncDebounce = setTimeout(()=>syncNow('change'), SYNC_DEBOUNCE_MS);
+}
+
+/* ---- Settings sync UI: three states — setup → pairing (QR) → linked ----
+   syncShowQR is transient (in-memory): true right after Connect/Resync so the QR shows
+   for scanning, cleared when Settings closes (by then you've paired) or on Unlink. So the
+   QR is present only while pairing; once linked, the area offers Unlink / Resync. */
+let syncShowQR = false;
+function renderSyncUI(){
+  const st=$('#syncStatus'); if(!st) return;
+  let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
+  const cfg=readSyncCfg();
+  // status pill
+  if(!cfg) st.textContent='Off';
+  else if(syncLastError) st.textContent='Error';
+  else if(syncLastAt){ const d=new Date(syncLastAt); st.textContent='Synced '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+  else st.textContent='Connected';
+  // which of the three blocks is visible
+  const inPairing = !!cfg && syncShowQR && isValidSyncKey(raw.syncKey);
+  const inSetup   = !cfg;
+  const inLinked  = !!cfg && !inPairing;
+  const setup=$('#syncSetup'), pairing=$('#syncPairing'), linked=$('#syncLinked');
+  setup   && setup.classList.toggle('hidden', !inSetup);
+  pairing && pairing.classList.toggle('hidden', !inPairing);
+  linked  && linked.classList.toggle('hidden', !inLinked);
+  if(inSetup){ if($('#syncUrl')) $('#syncUrl').value=raw.url||''; if($('#syncAnon')) $('#syncAnon').value=raw.key||''; }
+  // draw the QR once on entering pairing (don't redraw every sync tick → no flicker)
+  const qr=$('#syncQR');
+  if(inPairing){ if(qr && qr.children.length===0) renderSyncQR(pairingPayload(raw.url, raw.key, raw.syncKey)); }
+  else if(qr) qr.innerHTML='';
+}
+function renderSyncStatus(){ renderSyncUI(); }   // back-compat: sync engine calls this on each pass
+function renderSyncQR(payload){
+  const el=$('#syncQR'); if(!el) return;
+  el.innerHTML='';
+  try{ new QRCode(el, { text:payload, width:150, height:150, colorDark:'#000000', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M }); }
+  catch(e){ const err=$('#syncError'); if(err){ err.textContent='Could not render QR: '+(e&&e.message); err.classList.remove('hidden'); } }
+}
+async function syncConnectFromUI(){
+  const err=$('#syncError'); if(err){ err.classList.add('hidden'); err.textContent=''; }
+  const url=(($('#syncUrl')||{}).value||'').trim(), anon=(($('#syncAnon')||{}).value||'').trim();
+  let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
+  const syncKey=isValidSyncKey(raw.syncKey)?raw.syncKey:generateSyncKey();   // reuse existing key, else mint one
+  if(!url || !anon){ if(err){ err.textContent='Enter the backend URL and anon key.'; err.classList.remove('hidden'); } return; }
+  const ok=await setSync({ enabled:true, url, key:anon, syncKey });
+  if(!ok){ if(err){ err.textContent='Could not connect — check the URL and anon key.'; err.classList.remove('hidden'); } return; }
+  syncShowQR=true; renderSyncUI();
+}
+function syncUnlinkFromUI(){
+  let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
+  raw.enabled=false; lsSet(SYNC_CFG_KEY, JSON.stringify(raw));   // keep the key so reconnect is one click
+  syncStore=null; syncOwnerId=null; syncShowQR=false;
+  renderSyncUI();
+}
+async function syncResyncFromUI(){
+  const err=$('#syncError'); if(err){ err.classList.add('hidden'); err.textContent=''; }
+  let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
+  const url=raw.url, anon=raw.key;
+  if(!url || !anon){ syncShowQR=false; renderSyncUI(); return; }
+  // Fresh syncKey → a brand-new owner_id bucket, so no stale remote data can conflict.
+  // Both devices re-pair from the new QR; each pushes its current list into the clean bucket.
+  const ok=await setSync({ enabled:true, url, key:anon, syncKey:generateSyncKey() });
+  if(!ok){ if(err){ err.textContent='Could not resync — check the connection.'; err.classList.remove('hidden'); } return; }
+  syncShowQR=true; renderSyncUI();
+}
+function initSyncUI(){
+  $('#syncConnectBtn') && $('#syncConnectBtn').addEventListener('click', syncConnectFromUI);
+  $('#syncUnlinkBtn')  && $('#syncUnlinkBtn').addEventListener('click', syncUnlinkFromUI);
+  $('#syncUnlinkBtnP') && $('#syncUnlinkBtnP').addEventListener('click', syncUnlinkFromUI);
+  $('#syncResyncBtn')  && $('#syncResyncBtn').addEventListener('click', syncResyncFromUI);
+  renderSyncUI();
+}
+
 /* ---- Sync identity (QR pairing core) ----
    A high-entropy capability key is generated once on the Mac and shared to the phone
    by QR. The DB row key (owner_id) is derived as sha256(syncKey) so the raw secret is
@@ -1000,9 +1226,15 @@ async function deriveOwnerId(syncKey){
   const buf=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(syncKey)));
   return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
 }
-function pairingPayload(backendUrl, syncKey){ return JSON.stringify({ v:1, backendUrl:String(backendUrl), syncKey:String(syncKey) }); }
+// The QR payload carries everything the phone needs: backendUrl, anonKey (publishable by
+// design), and the capability syncKey. Mac and iOS MUST agree on these JSON keys.
+function pairingPayload(backendUrl, anonKey, syncKey){
+  return JSON.stringify({ v:1, backendUrl:String(backendUrl), anonKey:String(anonKey), syncKey:String(syncKey) });
+}
 function parsePairingPayload(s){
-  try{ const o=JSON.parse(s); if(o&&typeof o.syncKey==='string'&&typeof o.backendUrl==='string') return { backendUrl:o.backendUrl, syncKey:o.syncKey }; }catch{}
+  try{ const o=JSON.parse(s);
+       if(o && typeof o.syncKey==='string' && typeof o.backendUrl==='string' && typeof o.anonKey==='string')
+         return { backendUrl:o.backendUrl, anonKey:o.anonKey, syncKey:o.syncKey }; }catch{}
   return null;
 }
 
@@ -1314,15 +1546,37 @@ function startEdit(id){
   const s=window.getSelection(); s.removeAllRanges(); s.addRange(r);
 }
 
-/* ------------------- fit: distribute height, shrink font/padding --- */
+/* ------------------- fit: content-aware two-stage shrink -----------
+   Fit up to 6 (possibly multi-line) rows in the fixed column with NO scroll.
+   ONE uniform font for the whole list, chosen as the largest at which every row's
+   REAL wrapped text fits. Two stages: compress vertical padding first (barely
+   noticeable), THEN shrink font — down to a legibility floor. Scroll only as a
+   last resort when even floor+min-padding overflows (never clip / never illegible). */
+const FIT = { CEIL:24, FLOOR:15, PADMAX:22, PADMIN:10, PX:32 };
 function fitWrap(wrap){
   if(!wrap || !wrap.isConnected) return;
-  const rows=wrap.querySelectorAll('.buddy-row');
-  if(!rows.length) return;
-  const h=wrap.clientHeight / rows.length;
-  wrap.style.setProperty('--fs',   clamp(13, h*0.30, 24).toFixed(1)+'px');
-  wrap.style.setProperty('--vpad', Math.round(clamp(10, h*0.22, 30))+'px');
-  wrap.style.setProperty('--px',   Math.round(clamp(20, h*0.32, 32))+'px');
+  const kids=[...wrap.children];
+  if(!kids.length) return;
+  const H=wrap.clientHeight;
+  if(H<=0) return;
+  wrap.style.setProperty('--px', FIT.PX+'px');
+  const savedFlex=kids.map(k=>k.style.flex);
+  const natural=on=> kids.forEach((k,i)=>{ k.style.flex = on ? '0 0 auto' : savedFlex[i]; });
+  // Natural total height of all rows at a candidate font + padding (real wrapping).
+  const req=(fs,vp)=>{ wrap.style.setProperty('--fs',fs+'px'); wrap.style.setProperty('--vpad',vp+'px');
+    natural(true); const h=wrap.scrollHeight; natural(false); return h; };
+  let fs=FIT.CEIL, vp=FIT.PADMAX, scroll=false;
+  if(req(FIT.CEIL,FIT.PADMAX) > H){
+    let done=false;
+    for(let p=FIT.PADMAX; p>=FIT.PADMIN && !done; p--){ if(req(FIT.CEIL,p)<=H){ vp=p; done=true; } }   // stage 1: padding
+    if(!done) for(let f=FIT.CEIL; f>=FIT.FLOOR && !done; f-=0.5){ if(req(f,FIT.PADMIN)<=H){ fs=f; vp=FIT.PADMIN; done=true; } }  // stage 2: font
+    if(!done){ fs=FIT.FLOOR; vp=FIT.PADMIN; scroll=true; }   // last resort
+  }
+  wrap.style.setProperty('--fs', fs+'px');
+  wrap.style.setProperty('--vpad', vp+'px');
+  wrap.style.overflowY = scroll ? 'auto' : 'hidden';
+  // When scrolling, rows take natural height so nothing clips; otherwise they flex to fill.
+  kids.forEach((k,i)=>{ k.style.flex = (scroll && /^1 1/.test(savedFlex[i]||'')) ? '0 0 auto' : savedFlex[i]; });
 }
 const morningList=$('#morningList');
 // Morning rows are a FIXED comfortable height (the box sizes to its content and
@@ -1599,8 +1853,8 @@ function buildDonezoRow(it, idx, morning){
 function renderHist(){
   histBody.innerHTML='';
   histBody.className='stagger';     // day-groups stagger in on open (§3.4)
+  if(state.histTab==='skipped') state.histTab='past';   // Skipped tab removed → fall back to Done
   if(state.histTab==='future') renderFuture();
-  else if(state.histTab==='skipped') renderSkipped();
   else renderPast();
 }
 function histEmpty(msg){
@@ -1633,7 +1887,7 @@ function renderPast(){
   groups.forEach((day,di)=>{
     const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
     const h=document.createElement('div');
-    h.className='chrome text-[18px] font-medium tracking-[-0.36px] mb-1'; h.style.color='var(--ink)';  // adaptive: light on red
+    h.className='text-[18px] font-medium tracking-[-0.36px] mb-1'; h.style.color='var(--ink-dim)';  // grey day headers (NOT chrome → no red at lvl1); adapts dim-on-red
     h.textContent=day.name; grp.appendChild(h);
     day.items.forEach(it=>{
       // Today's completions get an ↩ undo (back to active); past completions are history.
@@ -1668,7 +1922,7 @@ function renderSkipped(){
   past.forEach((day,di)=>{
     const grp=document.createElement('div'); grp.className='bd px-8 py-5 '+(di>0?'border-t border-[#d9d9d9]':'');
     const h=document.createElement('div');
-    h.className='chrome text-[18px] font-medium tracking-[-0.36px] mb-1'; h.style.color='var(--ink)';  // adaptive: light on red
+    h.className='text-[18px] font-medium tracking-[-0.36px] mb-1'; h.style.color='var(--ink-dim)';  // grey day headers (NOT chrome → no red at lvl1); adapts dim-on-red
     h.textContent=day.name; grp.appendChild(h);
     day.items.forEach(it=>{
       const tx=String(it.text||'').trim();
@@ -1766,7 +2020,7 @@ function renderHistHeader(){
     b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; pastDaysShown=PAST_PAGE; render(); } });
     return b;
   };
-  seg.append(mkSeg('future','Future'), mkSeg('past','Done'), mkSeg('skipped','Skipped'));
+  seg.append(mkSeg('future','Future'), mkSeg('past','Done'));
   // ✕ close — same affordance as Settings.
   const close=document.createElement('button'); close.title='Close';
   close.className='chrome-btn pressable size-[36px] grid place-items-center rounded-full';
@@ -1990,12 +2244,14 @@ function openSettings(){
   settingsSheet.setAttribute('data-open','true');
   settingsSheet.setAttribute('aria-hidden','false');
   syncCelebrate(); syncReserve(); syncExportCount(); syncChrome();
+  renderSyncUI();   // reflect the current pairing state (setup / pairing / linked)
 }
 function closeSettings(){
   settingsOpen=false;
   settingsSheet.classList.add('closing');
   settingsSheet.setAttribute('data-open','false');
   settingsSheet.setAttribute('aria-hidden','true');
+  syncShowQR=false;   // once you've closed Settings you've paired — next open shows the linked view
   syncChrome();
 }
 gearBtn.addEventListener('click', e=>{ e.stopPropagation();
@@ -2255,7 +2511,8 @@ window.__buddy = {
   boot,
   rollover: maybeRollover,
   eraseAll,                                  // sync step 2: erase + stamp erasedAt (merge barrier)
-  syncOnce, makeFakeCASStore,                // sync step 5: CAS-on-client loop + reference store
+  syncOnce, makeFakeCASStore, makeSupabaseCASStore,   // sync step 5: CAS loop + reference + live store
+  setSync, syncNow, syncConfigured, isValidSyncKey,   // auto-sync engine (opt-in)
   generateSyncKey, deriveOwnerId, pairingPayload, parsePairingPayload,   // QR pairing core
   openDrawer, closeDrawer,
   showMorning, render,
@@ -2417,22 +2674,8 @@ window.__buddy = {
       const doneRow=pastRows.find(r=>r.textContent.includes('finished'));
       ok('done tab: completed past task is struck + carries a done-word ending in !',
          !!doneRow && !!doneRow.querySelector('.line-through') && /!$/.test((doneRow.querySelector('.font-semibold')||{}).textContent||''));
-      ok('done tab: skipped task is NOT shown (it lives in Skipped)',
+      ok('done tab: an undone past task is NOT shown (only completions; Skipped tab removed)',
          !pastRows.some(r=>r.textContent.includes('skipped one')));
-      // …Skipped tab shows ONLY the skipped task (plain) with an Add-to-today + …
-      state.histTab='skipped'; render();
-      const skipRows=[...listEl.querySelectorAll('.hrow')];
-      const skipRow=skipRows.find(r=>r.textContent.includes('skipped one'));
-      ok('skipped tab: skipped task is plain (no strike, no done-word)',
-         !!skipRow && !skipRow.querySelector('.line-through') && !skipRow.querySelector('.font-semibold'));
-      ok('skipped tab: completed task is NOT shown (it lives in Done)',
-         !skipRows.some(r=>r.textContent.includes('finished')));
-      ok('skipped tab: skipped task has an Add-to-today +',
-         !!listEl.querySelector('button[title="Add to today"]'));
-      // …and + brings it into today.
-      restoreHistoryTask('skipped one');
-      ok('skipped tab: + brings the skipped task into today',
-         state.items.some(i=>i.text==='skipped one'));
       // Future tab (holding pen): + moves a parked task into today and clears it.
       state.today={date:localDate(),morningDone:true,items:[]};
       state.deferred=[{id:'dfa',text:'parked A',wake:localDate()}];
@@ -2575,6 +2818,29 @@ window.__buddy = {
       ok('different-day merge preserves older live list in history for restore',
          h12 && h12.items.length===1 && h12.items[0].text==='yesterday' && h12.items[0].done===false,
          'history='+JSON.stringify(m12.history));
+
+      // 13. Merge cap — the UNION of two full-ish devices must re-clamp to HARD_CAP.
+      // Without the clamp, Mac(6) + iPhone(2 new) → 8 active rows (the live bug).
+      const bigA=snap({savedAt:2000,today:{date:'2026-06-19',items:[
+        item('a1','one',null,1),item('a2','two',null,1),item('a3','three',null,1),
+        item('a4','four',null,1),item('a5','five',null,1),item('a6','six',null,1)]}});
+      const bigB=snap({savedAt:1900,today:{date:'2026-06-19',items:[
+        item('b7','seven',null,1),item('b8','eight',null,1)]}});
+      const m13=merge(bigA,bigB);
+      const active13=m13.today.items.filter(i=>i.state!=='done').length;
+      ok('merge clamps active tasks to HARD_CAP (no 7th/8th)', active13===HARD_CAP, 'active='+active13);
+
+      // 14. Merge dedupe — same title from both devices (different ids) collapses to one,
+      // and done items are never counted/dropped by the clamp.
+      const dupA=snap({savedAt:2000,today:{date:'2026-06-19',items:[
+        item('m1','Check on Anthropic bill',null,1), item('dn','archived','done',1,1) ]}});
+      const dupB=snap({savedAt:1900,today:{date:'2026-06-19',items:[
+        item('i1','Check on Anthropic bill',null,1) ]}});
+      const m14=merge(dupA,dupB);
+      const bills=m14.today.items.filter(i=>i.state!=='done' && i.text==='Check on Anthropic bill').length;
+      const doneKept=m14.today.items.some(i=>i.id==='dn' && i.state==='done');
+      ok('merge dedupes same-title active tasks to one', bills===1, 'bills='+bills);
+      ok('merge keeps done items through the clamp', doneKept, 'items='+JSON.stringify(m14.today.items.map(i=>i.id+':'+i.state)));
     }catch(e){ ok('mergeTest ran without throwing', false, e&&e.message); }
     const failed=R.filter(r=>!r.pass);
     return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
@@ -2674,9 +2940,9 @@ window.__buddy = {
       ok('owner_id matches the shared JS↔Swift test vector', oid==='9a39afad46d5205bc0d6abb9be6dd625649a796e09519cee438ba56b5899d79a', 'oid='+oid);
       const key=generateSyncKey();
       ok('sync key is 256-bit (43-char base64url)', typeof key==='string' && key.length===43 && /^[A-Za-z0-9_-]+$/.test(key), 'len='+key.length);
-      const round=parsePairingPayload(pairingPayload('https://x.supabase.co', key));
-      ok('pairing payload round-trips', round && round.syncKey===key && round.backendUrl==='https://x.supabase.co');
-      ok('pairing payload rejects garbage', parsePairingPayload('not json')===null && parsePairingPayload('{}')===null);
+      const round=parsePairingPayload(pairingPayload('https://x.supabase.co', 'anon-abc', key));
+      ok('pairing payload round-trips', round && round.syncKey===key && round.backendUrl==='https://x.supabase.co' && round.anonKey==='anon-abc');
+      ok('pairing payload rejects garbage', parsePairingPayload('not json')===null && parsePairingPayload('{}')===null && parsePairingPayload('{"backendUrl":"x","syncKey":"y"}')===null);
     }catch(e){ ok('syncTest ran without throwing', false, e&&(e.message+' @ '+(e.stack||'').split('\n')[1])); }
     state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
     state.tombstones=snap.tombstones||{}; state.erasedAt=(typeof snap.erasedAt==='number')?snap.erasedAt:null;
@@ -2867,6 +3133,17 @@ async function bootReconcileFile(){
   bootFinish(recovered);
 }
 boot();
+
+// ---- Sync triggers (opt-in; all inert until the user pairs) ----
+// Pull once after boot, and on every window focus / tab-visible so the other device's
+// edits show up. Local changes push via scheduleSync() (hooked into save()).
+initSyncUI();
+initSync().then(()=>{ if(syncStore) syncNow('boot'); });
+window.addEventListener('focus', ()=>{ if(syncStore) syncNow('focus'); });
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && syncStore) syncNow('focus'); });
+// LIVE sync: poll every 1.5s while visible so the OTHER device's edits show up within ~1.5s
+// (syncNow no-ops when nothing changed, so this is cheap and never flickers the UI).
+setInterval(()=>{ if(syncStore && document.visibilityState==='visible') syncNow('poll'); }, 1500);
 </script>
 </body>
 </html>

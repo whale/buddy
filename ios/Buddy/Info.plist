@@ -24,6 +24,20 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Buddy uses the camera to scan the pairing QR code from your Mac to set up sync.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Geist-Regular.otf</string>
+		<string>Geist-Medium.otf</string>
+		<string>Geist-SemiBold.otf</string>
+		<string>Geist-Bold.otf</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

@@ -25,3 +25,9 @@ src-tauri/icons/android/
 
 # Playwright run artifacts
 test-results/
+.supabase-buddy.secret
+
+# iOS build output + fastlane run artifacts
+ios/build/
+ios/fastlane/report.xml
+ios/fastlane/README.md

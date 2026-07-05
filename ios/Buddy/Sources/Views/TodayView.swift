@@ -1,351 +1,401 @@
 import SwiftUI
 
 // MARK: - TodayView
-// The iPhone's main screen. A date header, active task list, Donezo section,
-// an Add row, and toolbar buttons for history + settings.
-// All colours come from EscalationTheme — never hardcoded.
+// The iPhone's main screen — a faithful port of the Mac's right-edge drawer:
+// two floating rounded cards (header + list) on a neutral backdrop, set in Geist.
+//   Card 1: chrome glyphs + "Buddy" · divider · big date block (numeral · weekday/month · weather)
+//   Card 2: Donezo rows (top) · active task rows · Add row
+// All colour comes from EscalationTheme so lvl0/lvl1/lvl2 re-theme together (RULE 1).
 struct TodayView: View {
 
-    @State private var store = BuddyStore()
+    @State private var store: BuddyStore
 
-    // Sheet state
+    // Sync (P2/P3): created once on appear; drives pull-on-foreground + debounced push.
+    @State private var sync: SyncEngine?
+    @Environment(\.scenePhase) private var scenePhase
+
+    // Sheets
     @State private var showHistory  = false
     @State private var showSettings = false
+
+    // Swipe: which row's actions are currently open (only one at a time)
+    @State private var openRowID: String? = nil
 
     // Inline editing
     @State private var editingId: String? = nil
     @State private var editText: String   = ""
+    @FocusState private var focusedField: String?
 
-    // New task that should auto-focus
-    @State private var pendingFocusId: String? = nil
+    // Adaptive row fitting (see RowFit) — recomputed when the list or its size changes.
+    @State private var fit = RowFit.Result(font: 24, vpad: 16, scroll: false)
 
     // Celebration overlay
     @State private var showCelebration = false
 
+    // Live weather ornament
+    @State private var weather = WeatherService()
+
     // Morning planner (shown on a fresh/rolled day until Buddy!/Skip)
     @State private var showMorning = false
 
-    // DEBUG: force an escalation level in previews
-    @State var debugActiveOverride: Int? = nil
+    // DEBUG override to force an escalation level in previews
+    @State private var debugActiveOverride: Int? = nil
+    // Screenshot harness: force the morning surface even when morningDone (so captures
+    // are deterministic) and pre-fire the celebration overlay.
+    private let forceMorning: Bool
+    private let forceCelebration: Bool
 
-    init(debugActiveOverride: Int? = nil) {
+    init(store: BuddyStore = BuddyStore(),
+         debugActiveOverride: Int? = nil,
+         initialSheet: InitialSheetKind = .none,
+         forceMorning: Bool = false,
+         forceCelebration: Bool = false) {
+        _store = State(initialValue: store)
         _debugActiveOverride = State(initialValue: debugActiveOverride)
+        _showHistory  = State(initialValue: initialSheet == .history)
+        _showSettings = State(initialValue: initialSheet == .settings)
+        self.forceMorning = forceMorning
+        self.forceCelebration = forceCelebration
     }
 
-    // MARK: Computed state
+    // MARK: Derived
 
-    private var activeCount: Int {
-        debugActiveOverride ?? store.activeCount
-    }
-
-    private var theme: EscalationTheme {
-        EscalationTheme.from(activeCount: activeCount)
-    }
+    private var activeCount: Int { debugActiveOverride ?? store.activeCount }
+    private var theme: EscalationTheme { EscalationTheme.from(activeCount: activeCount) }
 
     // MARK: Body
 
     var body: some View {
         ZStack {
-            theme.cardBackground
+            theme.screenBackground
                 .ignoresSafeArea()
                 .animation(.easeInOut(duration: 0.2), value: activeCount)
 
-            NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        dateHeader
-                            .padding(.horizontal, 20)
-                            .padding(.top, 20)
-
-                        taskCard
-                            .padding(.horizontal, 16)
-
-                        Spacer(minLength: 40)
+            VStack(spacing: 8) {          // gap-2 between the cards
+                headerCard                // date only
+                // Settings/History slide up over the LIST card; the header + bottom bar stay put.
+                ZStack {
+                    listCard
+                    if showHistory {
+                        HistoryView(store: store, onClose: { withAnimation(.easeOut(duration: 0.28)) { showHistory = false } })
+                            .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
+                            .transition(sheetTransition)
+                    }
+                    if showSettings {
+                        SettingsView(store: store, sync: sync, onClose: { withAnimation(.easeOut(duration: 0.28)) { showSettings = false } })
+                            .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
+                            .transition(sheetTransition)
                     }
                 }
-                .scrollContentBackground(.hidden)
-                .background(theme.cardBackground)
-                .animation(.easeInOut(duration: 0.2), value: activeCount)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { toolbarContent }
-            }
-            .tint(theme.ink)
-
-            // Celebration overlay
-            if showCelebration {
-                CelebrationView(intensity: store.settings.celebrate) {
-                    showCelebration = false
+                .frame(maxWidth: .infinity, maxHeight: .infinity)   // fills the gap between header + bottom bar
+                // Drive the sheet transitions on open AND close (slide up / slide down).
+                .animation(.easeOut(duration: 0.3), value: showSettings)
+                .animation(.easeOut(duration: 0.3), value: showHistory)
+                // While editing, the keyboard covers the bottom bar anyway — hide it so the list
+                // reclaims that height for the row being typed.
+                if editingId == nil {
+                    bottomBar             // chrome icons + "Buddy" — bleeds off the bottom edge
                 }
-                .ignoresSafeArea()
-                .transition(.opacity)
+            }
+            .padding(.horizontal, 8)     // even side gutter
+            .padding(.top, 8)            // small gutter below the status-bar safe area (no more)
+            .ignoresSafeArea(.container, edges: .bottom)   // bottom bar runs off the bottom edge
+            .animation(.easeInOut(duration: 0.2), value: activeCount)
+
+            if showCelebration {
+                CelebrationView(intensity: store.settings.celebrate) { showCelebration = false }
+                    .ignoresSafeArea()
+                    .transition(.opacity)
             }
         }
-        .sheet(isPresented: $showHistory)  { HistoryView(store: store) }
-        .sheet(isPresented: $showSettings) { SettingsView(store: store) }
         .fullScreenCover(isPresented: $showMorning) {
             MorningView(store: store, onDone: { showMorning = false })
         }
-        // Show the planner on a fresh/rolled day. Runs once on appear — ACCEPTED GAP:
-        // an app left open across midnight won't re-show the morning until next launch
-        // (the Mac re-runs rollover on focus/interval; iOS live-rollover is a later item).
-        .task { showMorning = store.needsMorning }
+        .task {
+            showMorning = forceMorning || store.needsMorning
+            if forceCelebration { showCelebration = true }
+            #if DEBUG
+            if ScreenshotHarness.activeFixture == nil { weather.refresh() }   // no network under a fixture (deterministic shots)
+            #else
+            weather.refresh()
+            #endif
+            // Bring up the sync engine (inert until the user pairs) and pull once on launch.
+            if sync == nil { sync = SyncEngine(store: store) }
+            sync?.syncOnForeground()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { sync?.syncOnForeground() }   // pull + go live on foreground
+            else { sync?.pauseSync() }                          // stop polling in the background
+        }
     }
 
-    // MARK: - Date header
+    // Sheet in/out: just present (a quick fade), no slide.
+    private var sheetTransition: AnyTransition {
+        .opacity
+    }
 
-    // Mac-style header: weekday + month stacked on the left, giant numeral on the right.
-    private var dateHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: -2) {
-                Text(currentWeekday)
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(theme.ink)
-                Text(currentMonth)
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(theme.inkDim)
+    // MARK: - Card 1 — date block (numeral · weekday/month · weather)
+
+    private var headerCard: some View {
+        HStack(alignment: .center) {   // Figma 41:286: fixed 114h, items-center
+            HStack(alignment: .lastTextBaseline, spacing: 12) {
+                Text(dayNumber)
+                    .font(.geist(62, .medium)).tracking(-1.24)
+                    .foregroundStyle(theme.escalationText)
+                    .fixedSize()
+                VStack(alignment: .leading, spacing: 12) {   // gap-3 (Figma)
+                    Text(weekday)
+                        .font(.geist(24, .medium)).tracking(-0.48)
+                        .foregroundStyle(theme.escalationText)
+                    Text(month)
+                        .font(.geist(18, .regular)).tracking(-0.36)
+                        .foregroundStyle(theme.chromeMuted)
+                }
+                .fixedSize()
             }
             Spacer()
-            Text(currentDayNumber)
-                .font(.system(size: 56, weight: .bold))
-                .foregroundStyle(theme.ink)
+            WeatherIcon(key: weather.iconKey, size: 50)
+                .foregroundStyle(theme.escalationText)
+                .frame(width: 50, height: 50)
         }
+        .padding(.horizontal, 32)
+        .frame(height: 114)          // Figma fixed header height
+        .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
     }
 
-    // The bordered rounded card holding Donezo (top) + active tasks + Add (Mac model).
-    private var taskCard: some View {
-        let rows = store.doneTasks + store.activeTasks   // Donezo first, then active
-        return VStack(spacing: 0) {
-            ForEach(Array(rows.enumerated()), id: \.element.id) { i, task in
-                if i > 0 { rowDivider }
-                if task.isDone { doneRowView(task: task) } else { activeRowView(task: task) }
+    // MARK: - Bottom bar (Figma 41:306) — pin/calendar/gear + "Buddy".
+    // Top corners rounded only; runs off the bottom edge (bleeds past the home indicator).
+    private var bottomBar: some View {
+        HStack(alignment: .center) {
+            HStack(spacing: 30) {    // Figma gap-35 between the 20px icons
+                // (Figma shows a pin here too, but it has no iPhone function — omitted for now.)
+                bottomChrome("calendar", selected: showHistory) {
+                    withAnimation(.easeOut(duration: 0.28)) { showHistory.toggle(); showSettings = false }
+                }
+                bottomChrome("settings", selected: showSettings) {
+                    withAnimation(.easeOut(duration: 0.28)) { showSettings.toggle(); showHistory = false }
+                }
             }
-            if !store.atHardCap {
-                if !rows.isEmpty { rowDivider }
-                addRow
-            }
+            Spacer()
+            Text("Buddy")
+                .font(.geist(18, .regular)).tracking(-0.36)
+                .foregroundStyle(theme.chromeMuted)
         }
-        .background(theme.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(theme.line, lineWidth: 1))
-        .shadow(color: theme.level == .lvl2 ? .clear : Color.black.opacity(0.06), radius: 12, y: 6)
+        .padding(.horizontal, 32)
+        .padding(.top, 26)
+        .padding(.bottom, 36)        // extends past the home-indicator area → bleed (−8pt shorter)
+        .frame(maxWidth: .infinity)
+        .background(
+            theme.cardBackground,
+            in: UnevenRoundedRectangle(topLeadingRadius: 24, bottomLeadingRadius: 0,
+                                       bottomTrailingRadius: 0, topTrailingRadius: 24, style: .continuous)
+        )
+        .shadow(color: theme.level != .lvl2 ? .black.opacity(0.06) : .clear, radius: 8, y: -2)
+    }
+
+    private func bottomChrome(_ icon: String, selected: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            LucideIcon(icon, size: 20)
+                .foregroundStyle(selected ? theme.selInk : theme.chromeInk)
+                .frame(width: 34, height: 34, alignment: .center)
+                .background(selected ? theme.selBg : .clear, in: Circle())   // filled circle when active
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Card 2 — task list
+
+    private var listCard: some View {
+        GeometryReader { geo in
+            let rows = store.doneTasks + store.activeTasks   // Donezo first, then active
+            // The list content. Rows flex-fill to share the column height equally when there's
+            // room; when the fit falls to its floor and still overflows, we scroll instead of clip.
+            let content = VStack(spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { i, task in
+                    if i > 0 { rowDivider }
+                    Group {
+                        if task.isDone { doneRowView(task: task) } else { activeRowView(task: task) }
+                    }
+                    .transition(.opacity)
+                }
+                if !store.atHardCap {
+                    if !rows.isEmpty { rowDivider }
+                    addRow
+                }
+            }
+            Group {
+                if fit.scroll {
+                    ScrollView { content.frame(maxWidth: .infinity, alignment: .top) }
+                } else {
+                    content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+            }
+            .animation(.easeOut(duration: 0.3), value: store.today.items)
+            .onAppear { recomputeFit(geo.size) }
+            .onChange(of: store.today.items) { _, _ in recomputeFit(geo.size) }
+            .onChange(of: geo.size) { _, _ in recomputeFit(geo.size) }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
+    }
+
+    private func recomputeFit(_ size: CGSize) {
+        let active = store.activeTasks.map(\.text)
+        let next = RowFit.compute(active: active, doneCount: store.doneTasks.count,
+                                  height: size.height, width: size.width)
+        if next != fit { fit = next }
     }
 
     private var rowDivider: some View {
         Rectangle().fill(theme.line).frame(height: 1)
     }
 
-    // MARK: - Active task row
-    // Check-off circle completes; tapping the body cycles (focus → done); tapping the
-    // text edits; long-press opens edit/sleep/delete (swipeActions don't work outside a List).
+    // MARK: - Active row — tap the text to edit (Mac idiom); swipe for Complete / Sleep / Delete.
     @ViewBuilder
     private func activeRowView(task: BuddyTask) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            // Check-off circle — the discoverable "mark done" affordance.
-            Button { handleComplete(task: task) } label: {
-                Circle()
-                    .strokeBorder(theme.escalationText.opacity(0.5), lineWidth: 1.5)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-
-            if editingId == task.id {
-                TextField("", text: $editText, axis: .vertical)
-                    .font(.system(size: 16))
-                    .foregroundStyle(theme.escalationText)
-                    .submitLabel(.done)
-                    .focused($focusedField, equals: task.id)
-                    .onSubmit { commitEdit(id: task.id) }
-                    .onChange(of: focusedField) { _, newVal in
-                        if newVal != task.id && editingId == task.id {
-                            commitEdit(id: task.id)
-                        }
-                    }
-            } else {
+        // Flex-fill rows to share the column when there's room; natural height when scrolling.
+        let fillH: CGFloat? = fit.scroll ? nil : .infinity
+        if editingId == task.id {
+            TextField("", text: $editText, axis: .vertical)
+                .font(.geist(fit.font, .medium)).tracking(-0.48)
+                .foregroundStyle(theme.escalationText)
+                .submitLabel(.done)
+                .focused($focusedField, equals: task.id)
+                .onSubmit { commitEdit(id: task.id) }
+                .onChange(of: focusedField) { _, v in
+                    if v != task.id && editingId == task.id { commitEdit(id: task.id) }
+                }
+                .padding(.horizontal, 32).padding(.vertical, fit.vpad)
+                .frame(maxWidth: .infinity, maxHeight: fillH, alignment: .leading)
+        } else {
+            SwipeableRow(
+                rowID: task.id,
+                openRowID: $openRowID,
+                cardFill: theme.cardBackground,
+                onComplete: { handleComplete(task: task) },
+                onSleep:    { withAnimation { store.deferToTomorrow(id: task.id) } },
+                onDelete:   { withAnimation { store.deleteTask(id: task.id) } },
+                onTap:      { startEdit(task: task) }
+            ) {
                 Text(task.text.isEmpty ? "Untitled" : task.text)
-                    .font(.system(size: 16, weight: .regular))
+                    .font(.geist(fit.font, .medium)).tracking(-0.48).lineSpacing(2)
                     .foregroundStyle(task.text.isEmpty ? theme.inkDim : theme.escalationText)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture { startEdit(task: task) }
+                    .frame(maxWidth: .infinity, maxHeight: fillH, alignment: .leading)
+                    .padding(.horizontal, 32).padding(.vertical, fit.vpad)
             }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        // The focused task is your "now" — fill it so you can see it at a glance (mirrors the Mac).
-        .background(task.state == .focused ? theme.focusFill : Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture { if editingId == nil { handleCycle(task: task) } }
-        .contextMenu {
-            Button { startEdit(task: task) } label: { Label("Edit", systemImage: "pencil") }
-            Button { store.deferToTomorrow(id: task.id) } label: { Label("Sleep till tomorrow", systemImage: "moon.zzz") }
-            Button(role: .destructive) { store.deleteTask(id: task.id) } label: { Label("Delete", systemImage: "trash") }
+            .frame(maxWidth: .infinity, maxHeight: fillH)
         }
     }
 
-    // MARK: - Done (Donezo) row — neutral + adaptive (inkDim, not escalationText).
-    // Filled circle (tap to restore) + inline struck "Donezo. <title>" like the Mac.
+    // MARK: - Done (Donezo) row — neutral + adaptive (ink / inkDim, never escalation red).
     @ViewBuilder
     private func doneRowView(task: BuddyTask) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            Button { store.restoreTask(id: task.id) } label: {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 21))
+        // Compact done row with a STABLE revert icon on the right (no swipe). Its right edge
+        // sits at the row's 32pt trailing gutter — same as the weather icon's right edge.
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(DoneWords.word(for: task.id))
+                .font(.geist(15, .semibold))
+                .tracking(-0.30)
+                .foregroundStyle(theme.ink)
+                .fixedSize(horizontal: true, vertical: false)
+            Text(task.text)
+                .font(.geist(15, .regular))
+                .tracking(-0.30)
+                .strikethrough(true, color: theme.inkDim)
+                .foregroundStyle(theme.inkDim)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Button { withAnimation(.easeOut(duration: 0.3)) { store.restoreTask(id: task.id) } } label: {
+                LucideIcon("undo", size: 18)
                     .foregroundStyle(theme.inkDim)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Circle())
+                    .frame(width: 22, height: 22, alignment: .trailing)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(store.atHardCap)
-
-            HStack(spacing: 6) {
-                Text("Donezo.")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(theme.ink)
-                Text(task.text)
-                    .font(.system(size: 15))
-                    .strikethrough(true, color: theme.inkDim)
-                    .foregroundStyle(theme.inkDim)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .contentShape(Rectangle())
-        .contextMenu {
-            Button { store.restoreTask(id: task.id) } label: { Label("Restore", systemImage: "arrow.uturn.backward") }
-            Button(role: .destructive) { store.deleteTask(id: task.id) } label: { Label("Delete", systemImage: "trash") }
-        }
+        .padding(.horizontal, 32)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Add row
     private var addRow: some View {
         HStack(spacing: 18) {
             Text("Add")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(theme.inkDim)
-            Image(systemName: "plus")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(theme.inkDim)
+            Text("+")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .font(.geist(fit.font, .medium))
+        .tracking(-0.48)
+        .foregroundStyle(theme.addInk)
+        .padding(.horizontal, 32)
+        .padding(.vertical, fit.vpad)
+        .frame(maxWidth: .infinity, maxHeight: fit.scroll ? nil : .infinity, alignment: .leading)   // flex like the active rows
         .contentShape(Rectangle())
         .onTapGesture { addTask() }
     }
 
-    // MARK: - Toolbar
-
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        // History (calendar icon) — hidden if historyDays is 0
-        if store.settings.historyDays > 0 {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    showHistory = true
-                } label: {
-                    Image(systemName: "calendar")
-                        .foregroundStyle(theme.ink)
-                }
-            }
-        }
-
-        // Settings (gear icon)
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Button {
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-                    .foregroundStyle(theme.ink)
-            }
-        }
-    }
-
-    // MARK: - Focus state
-    @FocusState private var focusedField: String?
-
     // MARK: - Interactions
 
-    private func handleCycle(task: BuddyTask) {
-        let didComplete = store.cycle(task)
-        if didComplete && store.settings.celebrate > 0 {
-            withAnimation { showCelebration = true }
-        }
-    }
-
     private func handleComplete(task: BuddyTask) {
-        let didComplete = store.complete(task)
+        let didComplete = withAnimation(.easeOut(duration: 0.3)) { store.complete(task) }
         if didComplete && store.settings.celebrate > 0 {
             withAnimation { showCelebration = true }
         }
     }
 
     private func addTask() {
-        if let newId = store.addTask() {
-            pendingFocusId = newId
-            // Auto-start editing the new task
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                startEditById(id: newId, currentText: "")
-            }
+        let newId = withAnimation(.easeOut(duration: 0.28)) { store.addTask() }
+        if let newId {
+            editText = ""
+            editingId = newId
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { focusedField = newId }
         }
     }
 
     private func startEdit(task: BuddyTask) {
-        startEditById(id: task.id, currentText: task.text)
-    }
-
-    private func startEditById(id: String, currentText: String) {
-        editText   = currentText
-        editingId  = id
-        focusedField = id
+        editText = task.text            // keep the existing text (don't blank the row)
+        editingId = task.id
+        // Focus AFTER the TextField exists in the hierarchy. Setting @FocusState synchronously
+        // (before the row swaps from label → field) silently fails to attach — the field shows
+        // but the keyboard/cursor never lands, and the empty focus binding can bounce editingId
+        // back, blanking the row. The add-task path uses the same deferred-focus trick.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { focusedField = task.id }
     }
 
     private func commitEdit(id: String) {
         guard editingId == id else { return }
         let text = editText
-        editingId    = nil
+        editingId = nil
         focusedField = nil
         store.commitEdit(id: id, text: text)
     }
 
-    // MARK: - Date helpers
+    // MARK: - Date + weather helpers
 
-    private var currentWeekday: String {
-        let f = DateFormatter()
-        f.dateFormat = "EEEE"
-        return f.string(from: Date())
+    private var weekday: String   { Self.df("EEEE") }
+    private var month: String     { Self.df("MMMM") }
+    private var dayNumber: String { Self.df("d") }
+
+    private static func df(_ fmt: String) -> String {
+        let f = DateFormatter(); f.dateFormat = fmt; return f.string(from: Date())
     }
 
-    private var currentDayNumber: String {
-        let f = DateFormatter()
-        f.dateFormat = "d"
-        return f.string(from: Date())
-    }
-
-    private var currentMonth: String {
-        let f = DateFormatter()
-        f.dateFormat = "MMMM"
-        return f.string(from: Date())
-    }
 }
+
+// Kept in this file so the app target sees it even in release (harness uses a DEBUG-gated variant).
+enum InitialSheetKind { case none, history, settings }
 
 // MARK: - Previews
+#Preview("lvl0")  { TodayView(store: seeded(MockData.normalTasks)) }
+#Preview("lvl1")  { TodayView(store: seeded(MockData.warningTasks)) }
+#Preview("lvl2")  { TodayView(store: seeded(MockData.alarmTasks)) }
+#Preview("empty") { TodayView(store: seeded([])) }
 
-#Preview("Normal — lvl0 (≤4 active)") {
-    TodayView()
-}
-
-#Preview("Warning — lvl1 (5 active, red text)") {
-    TodayView(debugActiveOverride: 5)
-}
-
-#Preview("Alarm — lvl2 (6+ active, red background)") {
-    TodayView(debugActiveOverride: 6)
-}
-
-#Preview("Empty state") {
-    TodayView()
+private func seeded(_ tasks: [BuddyTask]) -> BuddyStore {
+    let s = BuddyStore()
+    #if DEBUG
+    s.seedForScreenshot(tasks: tasks)
+    #endif
+    return s
 }

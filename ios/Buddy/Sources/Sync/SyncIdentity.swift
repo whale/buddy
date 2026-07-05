@@ -21,19 +21,22 @@ enum SyncIdentity {
         SHA256.hash(data: Data(syncKey.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
-    struct Pairing: Codable, Equatable { var v: Int = 1; var backendUrl: String; var syncKey: String }
+    // The QR payload carries everything the phone needs to sync: where the backend is
+    // (backendUrl), how to authenticate (anonKey — publishable by design, safe to embed),
+    // and the capability key (syncKey). Mac and iOS MUST agree on these JSON keys.
+    struct Pairing: Codable, Equatable { var v: Int = 1; var backendUrl: String; var anonKey: String; var syncKey: String }
 
-    /// The QR payload: {v, backendUrl, syncKey} JSON.
-    static func payload(backendUrl: String, syncKey: String) -> String {
-        let p = Pairing(backendUrl: backendUrl, syncKey: syncKey)
+    /// The QR payload: {v, backendUrl, anonKey, syncKey} JSON.
+    static func payload(backendUrl: String, anonKey: String, syncKey: String) -> String {
+        let p = Pairing(backendUrl: backendUrl, anonKey: anonKey, syncKey: syncKey)
         return (try? String(data: JSONEncoder().encode(p), encoding: .utf8) ?? "") ?? ""
     }
 
-    /// Parse a scanned payload; nil if malformed or missing fields.
+    /// Parse a scanned payload; nil if malformed or missing required fields.
     static func parse(_ s: String) -> Pairing? {
         guard let data = s.data(using: .utf8),
               let p = try? JSONDecoder().decode(Pairing.self, from: data),
-              !p.syncKey.isEmpty, !p.backendUrl.isEmpty else { return nil }
+              !p.syncKey.isEmpty, !p.backendUrl.isEmpty, !p.anonKey.isEmpty else { return nil }
         return p
     }
 }

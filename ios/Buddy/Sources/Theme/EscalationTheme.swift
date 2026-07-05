@@ -66,6 +66,54 @@ struct EscalationTheme {
         }
     }
 
+    // Header chrome glyphs (pin / calendar / gear). Mac --chrome-ink:
+    //   lvl0 rgba(0,0,0,.45) · lvl1 red · lvl2 #fff
+    var chromeInk: Color {
+        switch level {
+        case .lvl0: return Color.black.opacity(0.45)
+        case .lvl1: return Color(hex: "#e5484d")
+        case .lvl2: return .white
+        }
+    }
+
+    // Muted chrome TEXT — the "Buddy" title + the month line. Mac: text-black/60 with
+    // the `.chrome` class, so it reddens at lvl1 and goes white at lvl2.
+    var chromeMuted: Color {
+        switch level {
+        case .lvl0: return Color.black.opacity(0.6)
+        case .lvl1: return Color(hex: "#e5484d")
+        case .lvl2: return .white
+        }
+    }
+
+    // "Add +" placeholder text. Mac --addtxt: lvl0/1 rgba(0,0,0,.20) · lvl2 rgba(255,255,255,.60)
+    var addInk: Color {
+        switch level {
+        case .lvl0, .lvl1: return Color.black.opacity(0.20)
+        case .lvl2:        return Color.white.opacity(0.60)
+        }
+    }
+
+    // The backdrop the floating cards sit on — ALWAYS the neutral "desktop", at every
+    // level. At lvl2 only the CARDS turn red (like the Mac, where red panels sit on the
+    // unchanged desktop); the backdrop staying neutral keeps the card edges + dividers
+    // reading. (Was red at lvl2, which merged everything into one field — wrong.)
+    var screenBackground: Color { Color(hex: "#ececee") }
+
+    // macOS-style layered panel shadow (.bcard). Suppressed at lvl2 (red on red).
+    var cardShadow: Color { level == .lvl2 ? .clear : Color.black.opacity(0.10) }
+
+    // Selected chrome glyph (the filled circle behind the active header icon). Mac --sel-bg
+    // / --sel-ink: lvl0 black-on-white · lvl1 red-on-white · lvl2 white-on-red.
+    var selBg: Color {
+        switch level {
+        case .lvl0: return .black
+        case .lvl1: return Color(hex: "#e5484d")
+        case .lvl2: return .white
+        }
+    }
+    var selInk: Color { level == .lvl2 ? Color(hex: "#e5484d") : .white }
+
     // Focused ("now") row fill. Mirrors the Mac:
     //   .row-focused { background:#f4f4f4 }  (lvl0/1)
     //   .lvl2 .row-focused { red + 15% black overlay } → ≈ #c33d41

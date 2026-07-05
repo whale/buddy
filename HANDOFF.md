@@ -1,8 +1,40 @@
 # Buddy — Next Session Handoff
 
-_Last updated: 2026-07-01._
+_Last updated: 2026-07-05 (sync branch merged to main, cutting 0.3.3)._
 
-## Start here
+## ⚠️ Active branch right now: `feat/ios-sync-live` (Mac⇄iOS sync — in progress)
+
+Off `fix/ios-visual-parity`. Building live sync. **P0 (backend + CAS SQL 7/7) and P1
+(iOS live adapter, 3 live tests ran & passed) are DONE & verified.** Full plan + progress
++ resume commands: `ios/_review/SYNC-PLAN.md` (read the "PROGRESS — resume here" block first).
+Next: P2 wire auto-sync into BuddyStore → P3 Settings opt-in → P4 Mac side → P5 round-trip.
+Needs local Supabase running (`orb start && supabase start`). A **hosted** Supabase is only
+needed later (P7) to sync a *physical* iPhone; everything through P5 verifies on localhost.
+The visual-parity work (below) is its own branch/PR #61 — sync stacks on it, rebase if #61 changes.
+
+---
+
+## `fix/ios-visual-parity` (iOS visual work, PR #61 — draft)
+
+This session rebuilt the **iPhone** UI to visually match the Mac drawer (it had drifted
+badly — system font, single card, native iOS chrome). Branch is **committed + pushed**,
+**no PR yet** (waiting on the user's review). All 37 iOS unit tests pass. The Mac app,
+PR #60, and `main` are untouched.
+
+- **Review it:** open `ios/_review/comparison.html` (Mac vs iPhone, every screen, side by side).
+- **What's done:** Geist font bundled; TodayView (two Geist cards, chrome row, numeral-left
+  date, clean rows, escalation lvl0/1/2); Settings + History rebuilt as custom Buddy sheets;
+  MorningView restyled. Details in `ios/_review/PROGRESS.md` + memory `buddy-ios-visual-parity`.
+- **Regenerate any shot:** build, install to sim, then
+  `xcrun simctl launch booted fyi.whale.buddy -uiFixture <lvl0|lvl1|lvl2|empty|morning|history|settings>`
+  → `xcrun simctl io booted screenshot out.png`.
+- **Next decision for the user:** eyeball comparison.html → if good, open the PR. Known
+  deltas (fixed "Donezo." vs rotating words; tap-to-complete vs swipe; static moon weather;
+  focused/"now" state still in the store) are listed at the bottom of comparison.html.
+
+---
+
+## Start here (Mac app — resumes when back on `main`)
 
 - Branch: `fix/done-word-shuffle` (clean, pushed). **PR #60 open** — done-word shuffle-bag fix (tester bug: celebration words were patterned, not random). Verified in browser, not on-device.
 - **Batching mode:** the user is gathering several small bug-fix PRs and will cut ONE release at the end. Merging fixes to `main` is safe — `AUTO_RELEASE_MAC` is OFF, so a merge only bumps the version, it does not publish. Don't release until the batch is done and the user says "let's release."

@@ -11,7 +11,7 @@ enum TaskState: String, Codable {
 
 // MARK: - Single task item
 // Mirrors: state.today.items[] in the web app
-struct BuddyTask: Identifiable, Codable {
+struct BuddyTask: Identifiable, Codable, Equatable {
     var id: String
     var text: String
     var state: TaskState

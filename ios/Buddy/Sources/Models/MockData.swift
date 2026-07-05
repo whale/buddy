@@ -39,6 +39,16 @@ enum MockData {
         BuddyTask(id: "a7", text: "Morning walk", state: .done, doneAt: Date()),
     ]
 
+    // MARK: Long/multi-line stress (6 active = lvl2) — exercises the adaptive row fit
+    static let longTasks: [BuddyTask] = [
+        BuddyTask(id: "l1", text: "Check on the Anthropic bill and confirm this month's usage before Monday", state: .neutral),
+        BuddyTask(id: "l2", text: "Review Sodo's latest work and leave detailed feedback on the new dashboard", state: .neutral),
+        BuddyTask(id: "l3", text: "Draft the Guides page copy and wire up all the code examples for review", state: .neutral),
+        BuddyTask(id: "l4", text: "Musou Tshirts — finalize the colorways, order the sample run, book the shoot", state: .neutral),
+        BuddyTask(id: "l5", text: "Renew the whale.fyi domain before it expires and confirm auto-renew is on", state: .neutral),
+        BuddyTask(id: "l6", text: "Wimp decaf newsletter — outline the three sections and gather all the links", state: .neutral),
+    ]
+
     // MARK: History days
     static let historyDays: [Day] = [
         Day(
