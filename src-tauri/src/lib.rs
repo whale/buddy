@@ -119,6 +119,20 @@ fn set_morning_mode(app: AppHandle, on: bool) {
             let _ = win.show();
             let _ = win.set_focus();
         }
+        // set_always_on_top(false) does NOT reset the level on a window created
+        // alwaysOnTop, so morning stayed floating over other apps. Force it: morning is a
+        // Normal-level window (goes behind when you work elsewhere); the drawer floats.
+        #[cfg(target_os = "macos")]
+        if let Ok(ptr) = win.ns_window() {
+            if !ptr.is_null() {
+                use objc2_app_kit::NSWindow;
+                unsafe {
+                    if let Some(ns) = (ptr as *const NSWindow).as_ref() {
+                        ns.setLevel(if on { 0 } else { 3 }); // 0 = Normal, 3 = Floating (drawer)
+                    }
+                }
+            }
+        }
     }
     #[cfg(target_os = "macos")]
     {
