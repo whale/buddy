@@ -2372,9 +2372,12 @@ function moveCursor(delta){
 function cursoredItem(){ return cursor<state.items.length ? state.items[cursor] : null; }
 
 document.addEventListener('keydown', e=>{
-  // Secret demo hotkey ⌘⌥⌃M — re-show the morning planner on command (for
-  // showing Buddy off). code==='KeyM' so the ⌥ modifier doesn't mangle the key.
-  if(e.metaKey && e.altKey && e.ctrlKey && e.code==='KeyM'){
+  // Secret demo hotkey ⌘⌥⌃M — re-show the morning planner on command. In the
+  // native app this is a GLOBAL shortcut that RAISES the window first (see the
+  // buddy://morning listener); a webview keydown can't raise its own occluded
+  // window, so morning flashed then hid behind the active app. This keydown is
+  // the browser-preview fallback only.
+  if(!NATIVE && e.metaKey && e.altKey && e.ctrlKey && e.code==='KeyM'){
     e.preventDefault(); showMorning(); return;
   }
 
@@ -2967,6 +2970,7 @@ if(NATIVE){
   const ev=window.__TAURI__.event;
   ev.listen('buddy://reveal', ()=>{ if(morningUp()||state.pinned) return; clearTimeout(closeTimer); openDrawer(); });
   ev.listen('buddy://hide',   ()=>{ if(morningUp()||state.pinned) return; clearTimeout(openTimer); closeDrawer(); });
+  ev.listen('buddy://morning', ()=> showMorning());   // ⌘⌥⌃M: native raises the window, then we show morning
   ev.listen('buddy://toggle', ()=>{ if(morningUp()) return;
     drawer.classList.contains('translate-x-full') ? openDrawer() : closeDrawer(); });
   ev.listen('buddy://report-bug', ()=> reportBug());
