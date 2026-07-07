@@ -99,6 +99,21 @@ fn quit(app: AppHandle) {
 #[tauri::command]
 fn set_morning_mode(app: AppHandle, on: bool) {
     if let Some(win) = app.get_webview_window("main") {
+        // Morning is a real, resizable window (traffic-light buttons + resize edges);
+        // the drawer is a frameless, fixed edge panel. Set the frame/chrome FIRST —
+        // set_decorations resets the window level, so always-on-top must come AFTER it.
+        let _ = win.set_decorations(on);
+        let _ = win.set_resizable(on);
+        // Morning can't shrink below the planner + 16px on every side (min-width 432 =
+        // the 400px column + 16×2) and a comfortable min-height. Cleared for the drawer,
+        // whose sliver is only ~2px wide.
+        if on {
+            let _ = win.set_min_size(Some(tauri::LogicalSize::new(432.0, 600.0)));
+        } else {
+            let _ = win.set_min_size(None::<tauri::LogicalSize<f64>>);
+        }
+        #[cfg(target_os = "macos")]
+        morning_window_chrome(&win, on);
         let _ = win.set_always_on_top(!on);
         if on {
             let _ = win.show();
@@ -113,6 +128,48 @@ fn set_morning_mode(app: AppHandle, on: bool) {
             tauri::ActivationPolicy::Accessory
         };
         let _ = app.set_activation_policy(policy);
+    }
+}
+
+/// macOS: while morning is up, give the (transparent) window a full-size content view
+/// with a transparent titlebar, so the real traffic-light buttons float over the opaque
+/// morning content instead of sitting on a broken see-through title bar.
+#[cfg(target_os = "macos")]
+fn morning_window_chrome(win: &tauri::WebviewWindow, on: bool) {
+    use objc2_app_kit::{NSColor, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility};
+    let Ok(ptr) = win.ns_window() else { return };
+    if ptr.is_null() {
+        return;
+    }
+    let ns = ptr as *const NSWindow;
+    unsafe {
+        let Some(ns) = ns.as_ref() else { return };
+        ns.setTitlebarAppearsTransparent(on);
+        ns.setTitleVisibility(if on {
+            NSWindowTitleVisibility::Hidden
+        } else {
+            NSWindowTitleVisibility::Visible
+        });
+        let mut mask = ns.styleMask();
+        if on {
+            mask |= NSWindowStyleMask::FullSizeContentView | NSWindowStyleMask::Resizable;
+        } else {
+            mask &= !NSWindowStyleMask::FullSizeContentView;
+        }
+        ns.setStyleMask(mask);
+        // The webview doesn't paint the titlebar strip, so on a transparent window that
+        // area shows through dark. Make the window opaque + white while morning is up so
+        // the strip matches the card; revert to clear/non-opaque for the drawer. Also give
+        // morning a real window shadow (the transparent drawer suppresses it and draws its
+        // own CSS shadow instead).
+        ns.setHasShadow(on);
+        if on {
+            ns.setOpaque(true);
+            ns.setBackgroundColor(Some(&NSColor::whiteColor()));
+        } else {
+            ns.setOpaque(false);
+            ns.setBackgroundColor(Some(&NSColor::clearColor()));
+        }
     }
 }
 
