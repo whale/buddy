@@ -11,9 +11,6 @@
      the real macOS desktop sits behind the transparent window. */
   body.native #wallpaper, body.native #desktop, body.native #devMorning{ display:none !important; }
   body.native{ background:transparent !important; }
-  /* Native morning = a large CENTERED window (nativeFit sizes it with a desktop
-     gutter). Round the corners so it reads as a floating card, not a takeover. */
-  body.native #morning{ border-radius:28px; overflow:hidden; }
 
   /* ---- HIDDEN state: no widget --------------------------------------------
      Per the brief: the trigger is the right SCREEN EDGE itself, not a thing to
@@ -2380,13 +2377,11 @@ function moveCursor(delta){
 function cursoredItem(){ return cursor<state.items.length ? state.items[cursor] : null; }
 
 document.addEventListener('keydown', e=>{
-  // Secret demo hotkey ⌘⌥⌃M — re-show the morning planner on command. In the
-  // native app this is a GLOBAL shortcut that RAISES the window first (see the
-  // buddy://morning listener); a webview keydown can't raise its own occluded
-  // window, so morning flashed then hid behind the active app. This keydown is
-  // the browser-preview fallback only.
-  if(!NATIVE && e.metaKey && e.altKey && e.ctrlKey && e.code==='KeyM'){
-    e.preventDefault(); showMorning(); return;
+  // Show-off hotkey ⌘⇧M — toggle the morning planner. In the native app this is a
+  // GLOBAL shortcut that raises the window first (see the buddy://morning-toggle
+  // listener); this keydown is the browser-preview fallback only.
+  if(!NATIVE && e.metaKey && e.shiftKey && e.code==='KeyM'){
+    e.preventDefault(); if(morningUp()) skip(); else showMorning(); return;
   }
 
   // Morning overlay owns its own keys (Enter/Esc) — don't double-handle.
@@ -2978,7 +2973,7 @@ if(NATIVE){
   const ev=window.__TAURI__.event;
   ev.listen('buddy://reveal', ()=>{ if(morningUp()||state.pinned) return; clearTimeout(closeTimer); openDrawer(); });
   ev.listen('buddy://hide',   ()=>{ if(morningUp()||state.pinned) return; clearTimeout(openTimer); closeDrawer(); });
-  ev.listen('buddy://morning', ()=> showMorning());   // ⌘⌥⌃M: native raises the window, then we show morning
+  ev.listen('buddy://morning-toggle', ()=>{ if(morningUp()) skip(); else showMorning(); });   // ⌘⇧M: raise, then show/hide morning
   ev.listen('buddy://toggle', ()=>{ if(morningUp()) return;
     drawer.classList.contains('translate-x-full') ? openDrawer() : closeDrawer(); });
   ev.listen('buddy://report-bug', ()=> reportBug());

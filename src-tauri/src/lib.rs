@@ -44,16 +44,16 @@ fn toggle_drawer(app: &AppHandle) {
     let _ = app.emit("buddy://toggle", ());
 }
 
-/// Summon the morning planner on demand (the hidden ⌘⌥⌃M show-off shortcut).
-/// Like `toggle_drawer`, we RAISE the OS window FIRST: a JS-only keydown can't
-/// bring its own occluded window frontmost, so morning flashed then hid behind
-/// the active app. Raise + focus here, then emit the intent for the web layer.
-fn summon_morning(app: &AppHandle) {
+/// Toggle the morning planner (the ⌘⇧M show-off shortcut). Like `toggle_drawer`,
+/// we RAISE the OS window FIRST — a JS-only keydown can't bring its own occluded
+/// window frontmost. Then emit the toggle intent; the web layer shows morning if
+/// it's hidden, or dismisses it if it's already up.
+fn toggle_morning(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.set_focus();
     }
-    let _ = app.emit("buddy://morning", ());
+    let _ = app.emit("buddy://morning-toggle", ());
 }
 
 /// macOS: allow this (alwaysOnTop) window to be shown in the SAME Space as an app
@@ -100,6 +100,10 @@ fn quit(app: AppHandle) {
 fn set_morning_mode(app: AppHandle, on: bool) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_always_on_top(!on);
+        // Morning is a normal, movable, resizable window (title bar + traffic lights);
+        // the all-day drawer is a frameless, fixed edge panel.
+        let _ = win.set_decorations(on);
+        let _ = win.set_resizable(on);
         if on {
             let _ = win.show();
             let _ = win.set_focus();
@@ -565,12 +569,9 @@ pub fn run() {
                     // Fire once, on key-down only (ignore the release event).
                     if event.state == ShortcutState::Pressed {
                         use tauri_plugin_global_shortcut::{Code, Modifiers};
-                        // ⌘⌥⌃M summons the morning planner; ` toggles the drawer.
-                        if shortcut.matches(
-                            Modifiers::SUPER | Modifiers::ALT | Modifiers::CONTROL,
-                            Code::KeyM,
-                        ) {
-                            summon_morning(app);
+                        // ⌘⇧M toggles the morning planner; ` toggles the drawer.
+                        if shortcut.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyM) {
+                            toggle_morning(app);
                         } else {
                             toggle_drawer(app);
                         }
@@ -637,10 +638,10 @@ pub fn run() {
                     eprintln!("[buddy] could not register `\\`` global shortcut: {e}");
                     eprintln!("[buddy] (try a chord such as CmdOrCtrl+` instead — see README-MAC.md)");
                 }
-                // Hidden show-off shortcut: ⌘⌥⌃M summons the morning planner from
-                // anywhere (raises the window first — see `summon_morning`).
-                if let Err(e) = handle.global_shortcut().register("Super+Alt+Control+KeyM") {
-                    eprintln!("[buddy] could not register the morning (⌘⌥⌃M) shortcut: {e}");
+                // Show-off shortcut: ⌘⇧M toggles the morning planner from anywhere
+                // (raises the window first — see `toggle_morning`).
+                if let Err(e) = handle.global_shortcut().register("Super+Shift+KeyM") {
+                    eprintln!("[buddy] could not register the morning (⌘⇧M) shortcut: {e}");
                 }
             }
 
