@@ -2372,6 +2372,12 @@ function moveCursor(delta){
 function cursoredItem(){ return cursor<state.items.length ? state.items[cursor] : null; }
 
 document.addEventListener('keydown', e=>{
+  // Secret demo hotkey ⌘⌥⌃M — re-show the morning planner on command (for
+  // showing Buddy off). code==='KeyM' so the ⌥ modifier doesn't mangle the key.
+  if(e.metaKey && e.altKey && e.ctrlKey && e.code==='KeyM'){
+    e.preventDefault(); showMorning(); return;
+  }
+
   // Morning overlay owns its own keys (Enter/Esc) — don't double-handle.
   if(!morning.classList.contains('hidden')) return;
 
