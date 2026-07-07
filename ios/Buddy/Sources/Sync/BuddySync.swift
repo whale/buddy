@@ -117,7 +117,7 @@ struct SyncWire: Codable {
     struct Today: Codable { var date: String; var morningDone: Bool; var items: [Item] }
     struct HistItem: Codable { var id: String; var text: String; var done: Bool }
     struct HistDay: Codable { var date: String; var weekday: String; var items: [HistItem] }
-    struct Deferred: Codable { var id: String; var text: String; var wake: String }
+    struct Deferred: Codable { var id: String; var text: String; var wake: String; var sent: Bool? = nil; var sentTid: String? = nil }
 
     var version = 1
     var savedAt: Double                 // epoch ms
@@ -158,7 +158,7 @@ struct SyncWire: Codable {
         }
         history = s.history.map { d in HistDay(date: d.date, weekday: d.weekday,
                      items: d.items.map { HistItem(id: $0.id, text: $0.text, done: $0.done) }) }
-        deferred = s.deferred.map { Deferred(id: $0.id, text: $0.text, wake: $0.wake) }
+        deferred = s.deferred.map { Deferred(id: $0.id, text: $0.text, wake: $0.wake, sent: $0.sent, sentTid: $0.sentTid) }
         settings = s.settings
         tombstones = s.tombstones.mapValues { $0 * MS }
         erasedAt = s.erasedAt.map { $0 * MS }
@@ -175,7 +175,7 @@ struct SyncWire: Codable {
             },
             history: history.map { Day(date: $0.date, weekday: $0.weekday,
                         items: $0.items.map { DayItem(id: $0.id, text: $0.text, done: $0.done) }) },
-            deferred: deferred.map { DeferredTask(id: $0.id, text: $0.text, wake: $0.wake) },
+            deferred: deferred.map { DeferredTask(id: $0.id, text: $0.text, wake: $0.wake, sent: $0.sent, sentTid: $0.sentTid) },
             settings: settings,
             tombstones: tombstones.mapValues { $0 / MS },
             erasedAt: erasedAt.map { $0 / MS },

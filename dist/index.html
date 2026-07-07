@@ -646,7 +646,7 @@ function serialize(){
     today:   { date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null,doneAt:i.doneAt??null,doneWord:i.doneWord??null,v:i.v||1})) },
     doneWordBag: Array.isArray(state.doneWordBag) ? state.doneWordBag : [],
     history: state.history,
-    deferred:(state.deferred||[]).map(d=>({id:d.id,text:d.text,wake:d.wake})),
+    deferred:(state.deferred||[]).map(d=>{ const o={id:d.id,text:d.text,wake:d.wake}; if(d.sent){o.sent=true; o.sentTid=d.sentTid||null;} return o; }),
     settings:{ celebrate: Math.max(0,Math.min(100, state.settings.celebrate??100)), reserveSpace: !!state.settings.reserveSpace },
     pinned:  !!state.pinned,
     tombstones: state.tombstones||{},
@@ -735,7 +735,7 @@ function hydrate(blob){
     hadToday: !!today,
     doneWordBag: Array.isArray(blob.doneWordBag) ? blob.doneWordBag.filter(w=>typeof w==='string') : [],
     history: Array.isArray(blob.history) ? blob.history.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items)) : [],
-    deferred: Array.isArray(blob.deferred) ? blob.deferred.filter(d=>d&&typeof d.text==='string').map(d=>({id:d.id||nid(),text:String(d.text),wake:String(d.wake||'')})) : [],
+    deferred: Array.isArray(blob.deferred) ? blob.deferred.filter(d=>d&&typeof d.text==='string').map(d=>{ const o={id:d.id||nid(),text:String(d.text),wake:String(d.wake||'')}; if(d.sent){o.sent=true; o.sentTid=d.sentTid||null;} return o; }) : [],
     settings: { celebrate: (blob.settings && typeof blob.settings.celebrate==='number') ? Math.max(0,Math.min(100,blob.settings.celebrate)) : (blob.settings && blob.settings.confetti===false ? 0 : 100),
                 reserveSpace: !!(blob.settings && blob.settings.reserveSpace) },
     pinned: !!blob.pinned,
@@ -1326,6 +1326,8 @@ function rolloverAndCarry(){
   const rolled=maybeRollover();
   if(rolled){
     restartStash=null;                        // a real new day re-plans; an old set-aside is stale
+    state.deferred=(state.deferred||[]).filter(d=>!d.sent);   // "Sent to today!" rows persist only till tomorrow, then clear
+    state.deferred.forEach(d=>{ delete d.sentTid; });
     if(state.history.length>histBefore){
       // Pre-fill the new planner with yesterday's UNFINISHED tasks (up to the cap),
       // so the working set is never silently dropped on a new day.
@@ -1402,11 +1404,21 @@ function sleepItem(id){
 /* Pull ONE parked (Future) task into today's list, then drop it from Future.
    Capped — the + is hidden at HARD_CAP, so this only fires when there's room. */
 function addDeferredToToday(id){
-  const d=(state.deferred||[]).find(x=>x.id===id); if(!d) return;
+  const d=(state.deferred||[]).find(x=>x.id===id); if(!d||d.sent) return;
   if(activeCount()>=HARD_CAP) return;              // today is full — no 7th
-  state.items.push(newItem(d.text));
-  state.deferred=state.deferred.filter(x=>x.id!==id);
-  state.histOpen=false;                            // close Future so the task is VISIBLE landing in Today (else the open panel hides it)
+  const it=newItem(d.text); state.items.push(it);
+  // The parked row STAYS in Future, flipped to a "Sent to today!" confirmation (mirrors a
+  // Today task going Donezo). `sentTid` links the Today copy so undo can pull it back. It
+  // clears on tomorrow's rollover. Panel stays OPEN so the confirmation shows in place.
+  d.sent=true; d.sentTid=it.id;
+  save(); render();
+}
+// Undo a "Sent to today!" row — remove the Today copy (if still there) and return the
+// parked item to a normal, sendable Future row. Mirrors restoring a Donezo task.
+function unsendDeferred(id){
+  const d=(state.deferred||[]).find(x=>x.id===id); if(!d||!d.sent) return;
+  if(d.sentTid){ tombstone(d.sentTid); state.items=state.items.filter(x=>x.id!==d.sentTid); }
+  d.sent=false; d.sentTid=null;
   save(); render();
 }
 
@@ -1983,6 +1995,7 @@ function renderFuture(){
   const full = activeCount()>=HARD_CAP;            // today maxed → hide every +
   const grp=document.createElement('div'); grp.className='bd px-8 py-5';
   state.deferred.slice().reverse().forEach(d=>{
+    if(d.sent){ grp.appendChild(buildSentFutureRow(d)); return; }   // "Sent to today!" confirmation row
     const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(full?' pr-[44px]':' pr-[72px]');
     // Editable text — adaptive ink so it stays legible on the red (lvl2) background.
     const t=document.createElement('div');
@@ -2015,6 +2028,27 @@ function renderFuture(){
     grp.appendChild(r);
   });
   histBody.appendChild(grp);
+}
+// A parked task that's been sent to Today: bold "Sent to today!" + the title in grey,
+// NO strikethrough (it isn't done — it's in play today). Adaptive tokens so it stays
+// legible on the red (lvl2) background. Only action is ↩ undo (same icon as Donezo).
+function buildSentFutureRow(d){
+  const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5 pr-[44px]';
+  const lab=document.createElement('div'); lab.className='flex items-baseline gap-2 min-w-0 flex-1';
+  const tag=document.createElement('span');
+  tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:18px;color:var(--ink)';
+  tag.textContent='Sent to today!';
+  const ttl=document.createElement('span');
+  ttl.className='truncate'; ttl.style.cssText='font-size:18px;color:var(--ink-dim)';   // grey, NO line-through
+  ttl.textContent=d.text;
+  lab.append(tag, ttl); r.appendChild(lab);
+  const undo=document.createElement('button'); undo.title='Undo — back to Future';
+  undo.className='absolute right-0 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
+  undo.style.color='var(--ink-dim)'; undo.innerHTML=UNDO; muteIconPointerEvents(undo);
+  undo.addEventListener('mousedown',e=>e.preventDefault());
+  undo.addEventListener('click',()=>unsendDeferred(d.id));
+  r.appendChild(undo);
+  return r;
 }
 function deleteDeferred(id){ state.deferred=state.deferred.filter(d=>d.id!==id); save(); render(); }
 
@@ -2704,15 +2738,30 @@ window.__buddy = {
          !!doneRow && !!doneRow.querySelector('.line-through') && /!$/.test((doneRow.querySelector('.font-semibold')||{}).textContent||''));
       ok('done tab: an undone past task is NOT shown (only completions; Skipped tab removed)',
          !pastRows.some(r=>r.textContent.includes('skipped one')));
-      // Future tab (holding pen): + moves a parked task into today and clears it.
+      // Future tab (holding pen): + SENDS a parked task to today, and the row STAYS in
+      // Future flipped to a "Sent to today!" confirmation (persists till tomorrow).
       state.today={date:localDate(),morningDone:true,items:[]};
       state.deferred=[{id:'dfa',text:'parked A',wake:localDate()}];
       state.histTab='future'; editingId=null; render();
       ok('future tab: parked task shows an Add-to-today +',
          !!listEl.querySelector('button[title="Add to today"]'));
       addDeferredToToday('dfa');
-      ok('future tab: + moves the parked task into today and clears it from Future',
-         state.items.some(i=>i.text==='parked A') && state.deferred.length===0);
+      ok('future tab: + sends the parked task to today and keeps it as a "sent" row',
+         state.items.some(i=>i.text==='parked A') && state.deferred.length===1 && state.deferred[0].sent===true);
+      render();
+      ok('future tab: a sent row shows "Sent to today!", no + and no strikethrough',
+         /Sent to today!/.test(listEl.textContent) && !listEl.querySelector('button[title="Add to today"]') && !listEl.querySelector('.line-through'));
+      // Undo un-sends: removes the today copy and returns a normal, sendable Future row.
+      const sentTid=state.deferred[0].sentTid;
+      unsendDeferred('dfa');
+      ok('future tab: undo un-sends — today copy gone, row sendable again',
+         !state.items.some(i=>i.id===sentTid) && state.deferred[0].sent!==true && (sentTid in state.tombstones));
+      // sent rows clear on the next-day rollover (persist only till tomorrow)
+      state.deferred=[{id:'dfb',text:'parked B',wake:localDate(),sent:true,sentTid:'x'}];
+      state.today={date:yesterdayDate(),morningDone:true,items:[]};
+      rolloverAndCarry();
+      ok('future tab: "sent" rows clear on rollover (persist till tomorrow only)',
+         !state.deferred.some(d=>d.text==='parked B'));
       // Done-word rotation: deterministic per id, all end in "!", and they vary.
       ok('done words: deterministic + end in "!"',
          doneWord('abc')===doneWord('abc') && /!$/.test(doneWord('abc')));
