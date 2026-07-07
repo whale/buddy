@@ -92,6 +92,30 @@ fn quit(app: AppHandle) {
     app.exit(0);
 }
 
+/// Morning-planner window mode. ON: drop always-on-top and become a normal Dock /
+/// ⌘-Tab app (Regular) so the user can tab away to a meeting and back, and raise to
+/// front — but NOT locked on top, so other apps can come forward (no takeover). OFF:
+/// back to the quiet edge-drawer (always-on-top, Accessory / no Dock icon).
+#[tauri::command]
+fn set_morning_mode(app: AppHandle, on: bool) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.set_always_on_top(!on);
+        if on {
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let policy = if on {
+            tauri::ActivationPolicy::Regular
+        } else {
+            tauri::ActivationPolicy::Accessory
+        };
+        let _ = app.set_activation_policy(policy);
+    }
+}
+
 /// The running version, baked in from Cargo.toml at compile time.
 #[tauri::command]
 fn app_version() -> String {
@@ -558,7 +582,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, set_reserve, check_for_update, install_update, load_state, load_recovery_state, save_state])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, set_reserve, set_morning_mode, check_for_update, install_update, load_state, load_recovery_state, save_state])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).

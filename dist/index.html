@@ -11,6 +11,9 @@
      the real macOS desktop sits behind the transparent window. */
   body.native #wallpaper, body.native #desktop, body.native #devMorning{ display:none !important; }
   body.native{ background:transparent !important; }
+  /* Native morning = a large CENTERED window (nativeFit sizes it with a desktop
+     gutter). Round the corners so it reads as a floating card, not a takeover. */
+  body.native #morning{ border-radius:28px; overflow:hidden; }
 
   /* ---- HIDDEN state: no widget --------------------------------------------
      Per the brief: the trigger is the right SCREEN EDGE itself, not a thing to
@@ -1396,6 +1399,7 @@ function addDeferredToToday(id){
   if(activeCount()>=HARD_CAP) return;              // today is full — no 7th
   state.items.push(newItem(d.text));
   state.deferred=state.deferred.filter(x=>x.id!==id);
+  state.histOpen=false;                            // close Future so the task is VISIBLE landing in Today (else the open panel hides it)
   save(); render();
 }
 
@@ -2076,7 +2080,11 @@ function toggleUndone(){
   }
   save(); render();
 }
-function showMorning(){ T('showMorning'); undoneAdded=false; undoneIds=[]; morning.classList.remove('morning-leaving','hidden'); render(); nativeFit('full'); }
+// Morning window mode (native): ON = drop always-on-top + become a normal Dock/⌘-Tab
+// app so the user can tab away to a meeting and back; comes to front but never locks
+// on top. OFF = back to the quiet edge-drawer. No-op in the browser.
+function morningMode(on){ if(!NATIVE) return; try{ window.__TAURI__.core.invoke('set_morning_mode',{on}); }catch(_){} }
+function showMorning(){ T('showMorning'); undoneAdded=false; undoneIds=[]; morning.classList.remove('morning-leaving','hidden'); render(); nativeFit('full'); morningMode(true); }
 // Morning → drawer handoff. The planner fades + shrinks out (~.5s linear) while the
 // drawer slides in from the right (its existing ease-out curve), arriving just as
 // the planner vanishes. Native: hold the window full-screen through the fade, then
@@ -2093,7 +2101,7 @@ function leaveMorningToDrawer(tuckMs){
   // Planner is gone → drop it, then shrink the window to the drawer (panel stays put).
   setTimeout(()=>{
     morning.classList.add('hidden'); morning.classList.remove('morning-leaving'); render();
-    if(NATIVE) nativeFit('drawer');
+    if(NATIVE){ morningMode(false); nativeFit('drawer'); }   // restore always-on-top + Accessory, then hug the edge
     if(!state.pinned && tuckMs!=null) closeTimer=setTimeout(()=>{ if(!state.pinned) closeDrawer(); }, tuckMs);
   }, FADE);
 }
@@ -3050,8 +3058,13 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
     const top=Math.round(MENUBAR*sf);     // clear the menu bar so the top panel gets the same breathing room as the bottom
     const h=sz.height - top;
     if(mode==='full'){
-      await win.setSize(new D.PhysicalSize(sz.width, h));
-      await win.setPosition(new D.PhysicalPosition(p.x, p.y + top));
+      // A large CENTERED window (not edge-to-edge): a ~5% desktop gutter all round
+      // so other apps show behind it — frontmost, not a takeover. Top gutter still
+      // clears the menu bar.
+      const m=Math.round(Math.min(sz.width,sz.height)*0.05);
+      const t=Math.max(m, top);
+      await win.setSize(new D.PhysicalSize(sz.width - m*2, sz.height - t - m));
+      await win.setPosition(new D.PhysicalPosition(p.x + m, p.y + t));
       return;
     }
     const w=Math.round((mode==='drawer'?DRAWERW:SLIVER)*sf);
