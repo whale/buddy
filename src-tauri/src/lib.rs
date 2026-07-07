@@ -44,7 +44,7 @@ fn toggle_drawer(app: &AppHandle) {
     let _ = app.emit("buddy://toggle", ());
 }
 
-/// Toggle the morning planner (the ⌘⇧M show-off shortcut). Like `toggle_drawer`,
+/// Toggle the morning planner (the ⌘⌥⌃M show-off shortcut). Like `toggle_drawer`,
 /// we RAISE the OS window FIRST — a JS-only keydown can't bring its own occluded
 /// window frontmost. Then emit the toggle intent; the web layer shows morning if
 /// it's hidden, or dismisses it if it's already up.

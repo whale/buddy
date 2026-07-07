@@ -966,10 +966,11 @@ function blobIsEmpty(b){
 }
 // Content fingerprint that IGNORES savedAt — so an unchanged re-sync is a no-op
 // (otherwise two idle devices would ping-pong version bumps forever).
-// Stable stringify: sort object keys recursively. Two blobs that differ ONLY in field
-// ORDER (Mac and iPhone serialize history/deferred/settings items in different key
-// order) must hash EQUAL — otherwise the 1.5s sync poll sees a "difference" every tick,
-// re-applies the remote, and re-renders, so the Future/Done list visibly jitters.
+// Stable stringify: sort object keys recursively. The blob is stored as Postgres `jsonb`,
+// which REORDERS object keys on every round-trip — so a blob this device just pushed comes
+// back key-reordered, and a plain JSON.stringify compare would read "changed" on every 1.5s
+// poll, re-applying + re-rendering forever (the Future/Done list "jitter"). Reproduces with
+// ONE device + sync on; no second device needed. Canonical order makes the compare stable.
 function canonicalJSON(v){
   if(Array.isArray(v)) return '['+v.map(canonicalJSON).join(',')+']';
   if(v && typeof v==='object') return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonicalJSON(v[k])).join(',')+'}';
@@ -1592,13 +1593,13 @@ const morningList=$('#morningList');
 // Morning rows are a FIXED comfortable height (the box sizes to its content and
 // stays compact when there are few tasks) — unlike the drawer, which fills height.
 if(morningList){ morningList.style.setProperty('--fs','22px'); morningList.style.setProperty('--vpad','30px'); morningList.style.setProperty('--px','32px'); }
-// `_lastFitH` breaks the native scrollbar-oscillation loop: fitWrap fits the rows to
-// the available HEIGHT, and the drawer's width is fixed — so a WIDTH-only change (an
-// overflow scrollbar appearing/disappearing) must NOT trigger a re-fit, or auto↔hidden
-// flip-flops forever and the rows visibly "bounce"/reload. Only refit on a real height
-// change (window resize, content change). `_fitBusy` guards against re-entrancy.
-let _lastFitH=-1, _fitBusy=false;
-function fitToday(){ if(_fitBusy) return; _fitBusy=true; try{ fitWrap(todayWrap); _lastFitH=todayWrap.clientHeight; } finally{ _fitBusy=false; } }
+// `_lastFitH` breaks a native scrollbar-oscillation loop: fitWrap fits the rows to the
+// available HEIGHT, and the drawer's width is fixed — so a WIDTH-only change (an overflow
+// scrollbar appearing/disappearing) must NOT trigger a re-fit, or auto↔hidden flip-flops
+// forever. Only the OBSERVER is gated on height; every content change re-fits directly via
+// render()'s rAF(fitToday), so this can't skip a needed fit.
+let _lastFitH=-1;
+function fitToday(){ fitWrap(todayWrap); _lastFitH=todayWrap.clientHeight; }
 new ResizeObserver(()=>{ if(todayWrap.clientHeight===_lastFitH) return; requestAnimationFrame(fitToday); }).observe(todayWrap);
 window.addEventListener('resize',()=>{ _lastFitH=-1; requestAnimationFrame(fitToday); });
 
@@ -2096,7 +2097,7 @@ function toggleUndone(){
 // app so the user can tab away to a meeting and back; comes to front but never locks
 // on top. OFF = back to the quiet edge-drawer. No-op in the browser.
 function morningMode(on){ if(!NATIVE) return; try{ window.__TAURI__.core.invoke('set_morning_mode',{on}); }catch(_){} }
-function showMorning(){ T('showMorning'); undoneAdded=false; undoneIds=[]; morning.classList.remove('morning-leaving','hidden'); render(); nativeFit('full'); morningMode(true); }
+function showMorning(){ T('showMorning'); clearTimeout(shrinkTimer); clearTimeout(closeTimer); clearTimeout(openTimer); undoneAdded=false; undoneIds=[]; morning.classList.remove('morning-leaving','hidden'); render(); nativeFit('full'); morningMode(true); }
 // Morning → drawer handoff. The planner fades + shrinks out (~.5s linear) while the
 // drawer slides in from the right (its existing ease-out curve), arriving just as
 // the planner vanishes. Native: hold the window full-screen through the fade, then
@@ -2396,7 +2397,7 @@ document.addEventListener('keydown', e=>{
   // GLOBAL shortcut that raises the window first (see the buddy://morning-toggle
   // listener); this keydown is the browser-preview fallback only.
   if(!NATIVE && e.metaKey && e.altKey && e.ctrlKey && e.code==='KeyM'){
-    e.preventDefault(); if(morningUp()) skip(); else showMorning(); return;
+    e.preventDefault(); if(morningUp()) leaveMorningToDrawer(state.pinned?null:1600); else showMorning(); return;
   }
 
   // Morning overlay owns its own keys (Enter/Esc) — don't double-handle.
@@ -2988,7 +2989,9 @@ if(NATIVE){
   const ev=window.__TAURI__.event;
   ev.listen('buddy://reveal', ()=>{ if(morningUp()||state.pinned) return; clearTimeout(closeTimer); openDrawer(); });
   ev.listen('buddy://hide',   ()=>{ if(morningUp()||state.pinned) return; clearTimeout(openTimer); closeDrawer(); });
-  ev.listen('buddy://morning-toggle', ()=>{ if(morningUp()) skip(); else showMorning(); });   // ⌘⇧M: raise, then show/hide morning
+  // ⌘⌥⌃M: raise, then show/hide morning. Hiding uses leaveMorningToDrawer (NOT skip)
+  // so a peek-and-close does NOT mark the day planned — the auto-morning can still fire.
+  ev.listen('buddy://morning-toggle', ()=>{ if(morningUp()) leaveMorningToDrawer(state.pinned?null:1600); else showMorning(); });
   ev.listen('buddy://toggle', ()=>{ if(morningUp()) return;
     drawer.classList.contains('translate-x-full') ? openDrawer() : closeDrawer(); });
   ev.listen('buddy://report-bug', ()=> reportBug());
