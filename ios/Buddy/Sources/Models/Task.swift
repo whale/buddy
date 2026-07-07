@@ -105,11 +105,13 @@ struct TodayState: Codable {
 }
 
 // MARK: - Deferred task model
-// Mirrors the Mac's deferred[] shape: { id, text, wake }
+// Mirrors the Mac's deferred[] shape: { id, text, wake, sent?, sentTid? }
 struct DeferredTask: Codable, Identifiable {
     var id: String
     var text: String
     var wake: String  // "YYYY-MM-DD"
+    var sent: Bool? = nil       // "Sent to today!" confirmation (omitted when not sent)
+    var sentTid: String? = nil  // id of the Today copy this was sent to, for undo
 }
 
 // MARK: - Full persisted state
