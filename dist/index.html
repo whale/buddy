@@ -966,11 +966,20 @@ function blobIsEmpty(b){
 }
 // Content fingerprint that IGNORES savedAt — so an unchanged re-sync is a no-op
 // (otherwise two idle devices would ping-pong version bumps forever).
+// Stable stringify: sort object keys recursively. Two blobs that differ ONLY in field
+// ORDER (Mac and iPhone serialize history/deferred/settings items in different key
+// order) must hash EQUAL — otherwise the 1.5s sync poll sees a "difference" every tick,
+// re-applies the remote, and re-renders, so the Future/Done list visibly jitters.
+function canonicalJSON(v){
+  if(Array.isArray(v)) return '['+v.map(canonicalJSON).join(',')+']';
+  if(v && typeof v==='object') return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonicalJSON(v[k])).join(',')+'}';
+  return JSON.stringify(v===undefined?null:v);
+}
 function blobContentKey(b){
   if(!b) return '';
   // `pinned` is DEVICE-LOCAL (a desktop window toggle iOS doesn't model) — deliberately
   // excluded so it never forces a sync or ping-pongs versions between Mac and phone.
-  return JSON.stringify({ td:b.today&&b.today.date, m:!!(b.today&&b.today.morningDone),
+  return canonicalJSON({ td:b.today&&b.today.date, m:!!(b.today&&b.today.morningDone),
     t:(b.today&&b.today.items)||[], h:b.history||[], d:b.deferred||[],
     tomb:b.tombstones||{}, e:b.erasedAt??null, s:b.settings||{} });
 }
@@ -2383,10 +2392,10 @@ function moveCursor(delta){
 function cursoredItem(){ return cursor<state.items.length ? state.items[cursor] : null; }
 
 document.addEventListener('keydown', e=>{
-  // Show-off hotkey ⌘⇧M — toggle the morning planner. In the native app this is a
+  // Show-off hotkey ⌘⌥⌃M — toggle the morning planner. In the native app this is a
   // GLOBAL shortcut that raises the window first (see the buddy://morning-toggle
   // listener); this keydown is the browser-preview fallback only.
-  if(!NATIVE && e.metaKey && e.shiftKey && e.code==='KeyM'){
+  if(!NATIVE && e.metaKey && e.altKey && e.ctrlKey && e.code==='KeyM'){
     e.preventDefault(); if(morningUp()) skip(); else showMorning(); return;
   }
 
@@ -3059,13 +3068,10 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
     const top=Math.round(MENUBAR*sf);     // clear the menu bar so the top panel gets the same breathing room as the bottom
     const h=sz.height - top;
     if(mode==='full'){
-      // A large CENTERED window (not edge-to-edge): a ~5% desktop gutter all round
-      // so other apps show behind it — frontmost, not a takeover. Top gutter still
-      // clears the menu bar.
-      const m=Math.round(Math.min(sz.width,sz.height)*0.05);
-      const t=Math.max(m, top);
-      await win.setSize(new D.PhysicalSize(sz.width - m*2, sz.height - t - m));
-      await win.setPosition(new D.PhysicalPosition(p.x + m, p.y + t));
+      // Full size: fill the screen below the menu bar. Not always-on-top + a Dock
+      // icon (see set_morning_mode), so it's frontmost but you can ⌘-Tab away.
+      await win.setSize(new D.PhysicalSize(sz.width, sz.height - top));
+      await win.setPosition(new D.PhysicalPosition(p.x, p.y + top));
       return;
     }
     const w=Math.round((mode==='drawer'?DRAWERW:SLIVER)*sf);
