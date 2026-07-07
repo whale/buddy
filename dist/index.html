@@ -1583,9 +1583,15 @@ const morningList=$('#morningList');
 // Morning rows are a FIXED comfortable height (the box sizes to its content and
 // stays compact when there are few tasks) — unlike the drawer, which fills height.
 if(morningList){ morningList.style.setProperty('--fs','22px'); morningList.style.setProperty('--vpad','30px'); morningList.style.setProperty('--px','32px'); }
-function fitToday(){ fitWrap(todayWrap); }
-new ResizeObserver(()=>requestAnimationFrame(fitToday)).observe(todayWrap);
-window.addEventListener('resize',()=>requestAnimationFrame(fitToday));
+// `_lastFitH` breaks the native scrollbar-oscillation loop: fitWrap fits the rows to
+// the available HEIGHT, and the drawer's width is fixed — so a WIDTH-only change (an
+// overflow scrollbar appearing/disappearing) must NOT trigger a re-fit, or auto↔hidden
+// flip-flops forever and the rows visibly "bounce"/reload. Only refit on a real height
+// change (window resize, content change). `_fitBusy` guards against re-entrancy.
+let _lastFitH=-1, _fitBusy=false;
+function fitToday(){ if(_fitBusy) return; _fitBusy=true; try{ fitWrap(todayWrap); _lastFitH=todayWrap.clientHeight; } finally{ _fitBusy=false; } }
+new ResizeObserver(()=>{ if(todayWrap.clientHeight===_lastFitH) return; requestAnimationFrame(fitToday); }).observe(todayWrap);
+window.addEventListener('resize',()=>{ _lastFitH=-1; requestAnimationFrame(fitToday); });
 
 /* --------------------------- rendering --------------------------- */
 let prevHistOpen=false;          // detect the open↔close transition for the crossfade
