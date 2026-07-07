@@ -44,6 +44,18 @@ fn toggle_drawer(app: &AppHandle) {
     let _ = app.emit("buddy://toggle", ());
 }
 
+/// Summon the morning planner on demand (the hidden ⌘⌥⌃M show-off shortcut).
+/// Like `toggle_drawer`, we RAISE the OS window FIRST: a JS-only keydown can't
+/// bring its own occluded window frontmost, so morning flashed then hid behind
+/// the active app. Raise + focus here, then emit the intent for the web layer.
+fn summon_morning(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+    let _ = app.emit("buddy://morning", ());
+}
+
 /// macOS: allow this (alwaysOnTop) window to be shown in the SAME Space as an app
 /// that's in native full-screen mode. Without `FullScreenAuxiliary`, a floating
 /// window lives only on the desktop Space, so when the user is in a full-screen
@@ -525,10 +537,19 @@ pub fn run() {
 
         builder = builder.plugin(
             GsBuilder::new()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     // Fire once, on key-down only (ignore the release event).
                     if event.state == ShortcutState::Pressed {
-                        toggle_drawer(app);
+                        use tauri_plugin_global_shortcut::{Code, Modifiers};
+                        // ⌘⌥⌃M summons the morning planner; ` toggles the drawer.
+                        if shortcut.matches(
+                            Modifiers::SUPER | Modifiers::ALT | Modifiers::CONTROL,
+                            Code::KeyM,
+                        ) {
+                            summon_morning(app);
+                        } else {
+                            toggle_drawer(app);
+                        }
                     }
                 })
                 .build(),
@@ -591,6 +612,11 @@ pub fn run() {
                 if let Err(e) = handle.global_shortcut().register("Backquote") {
                     eprintln!("[buddy] could not register `\\`` global shortcut: {e}");
                     eprintln!("[buddy] (try a chord such as CmdOrCtrl+` instead — see README-MAC.md)");
+                }
+                // Hidden show-off shortcut: ⌘⌥⌃M summons the morning planner from
+                // anywhere (raises the window first — see `summon_morning`).
+                if let Err(e) = handle.global_shortcut().register("Super+Alt+Control+KeyM") {
+                    eprintln!("[buddy] could not register the morning (⌘⌥⌃M) shortcut: {e}");
                 }
             }
 
