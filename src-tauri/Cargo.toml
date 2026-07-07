@@ -1,6 +1,6 @@
 [package]
 name = "buddy"
-version = "0.3.6"
+version = "0.3.7"
 description = "Buddy — a calm day companion that lives on the right edge of your screen."
 authors = ["Whale"]
 edition = "2021"
