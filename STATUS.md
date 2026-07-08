@@ -1,6 +1,60 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-08. Branch `main`. Latest **released Mac** version: **`0.3.17`** (cut LOCALLY — `pnpm tauri build` + `gh release create`, `.env` creds). iOS is on **TestFlight `0.1.0 (13)`** (`cd ios && set -a && source ../.env && set +a && fastlane beta`). `AUTO_RELEASE_MAC` stays **OFF**. **🔴 Mac⇄iPhone sync is UNSOLVED — "Sent to today!" reverts and today items get OVERWRITTEN (data loss). Do this first next session.** See the 2026-07-08 summary below._
+_Last updated: 2026-07-08 (evening). Branch `main`. Latest **released Mac** version: **`0.3.17`** (cut LOCALLY — `pnpm tauri build` + `gh release create`, `.env` creds). iOS is on **TestFlight `0.1.0 (13)`** (`cd ios && set -a && source ../.env && set +a && fastlane beta`). `AUTO_RELEASE_MAC` stays **OFF**. **🔴 Mac⇄iPhone sync is UNSOLVED — the full-review plan below is the work queue; Slice 2 is #1.**_
+
+## THE PLAN — full adversarially-verified review, 2026-07-08 (evening)
+
+Four specialist review agents (security / stability / design / docs) swept everything published
+and live, then an adversarial agent re-verified every claim in code (most confirmed, 4 downgraded,
+1 refuted, 4 new finds). PR #80 (Future rows read-only + one shared icon gutter) shipped from the
+same session. This section replaces all older "open issues" lists.
+
+### 1 — 🔴 Sync Slice 2: deterministic merge (IN PROGRESS, branch `fix/sync-slice2`)
+The revert + overwrite data loss. `merge(a,b)==merge(b,a)` on BOTH platforms: stop using per-pass
+`savedAt` as primary; canonical order + content-based winners; tombstone every removal;
+unknown-field pass-through (Swift needs an unknown-fields Codable bag). MUST also fix, same seam:
+- iOS never rolls over on foreground — only in `init` (TodayView.swift:127) → yesterday-dated blob fights the Mac all morning.
+- Swift merge lacks the Mac's lossless carry-history branch (BuddyMerge.swift ~69) → older device's day list dropped.
+- "Already archived" rollover branch drops live items with no carry-forward (index.html ~1322 + BuddyStore ~355), both platforms.
+- contentKey asymmetry: iOS hashes the full wire (incl. `pinned`, `historyDays`); Mac projects a subset (index.html ~995) → phantom pushes.
+- Mac `deleteDeferred` (~2069) writes no tombstone → deleted Future rows resurrect via sync (iOS does this right).
+- Sync adopt wipes `restartStash` (+`doneWordBag`) — not carried by `hydratedToWire` (~1003) / `applyHydrated` (~775) → "Restore your last list" unrecoverable.
+- Verify on two real devices (human-gated; browser + unit vectors first — SAME test vectors on both platforms).
+
+### 2 — Data-safety batch (small fixes, big trust)
+- iOS: corrupt/unreadable store file → default empty state is auto-SAVED 0.25s later, wiping the file. Set the bad file aside as `.corrupt`, add a `.bak` layer (BuddyStore ~408).
+- iOS: `adopt()` runs on every 1.5s poll pass with no `editingId` guard → mid-typing clobber (SyncEngine ~98; Mac guards at index.html ~1022).
+- After-merge clamp can orphan a "Sent to today!" row: if the linked today item is deduped/capped away, `sentTid` dangles (index.html ~840 vs ~1424). Reconcile sent rows after clamp.
+- Mac `save_state`: fsync file + dir before/after rename (lib.rs ~599) — power cut can zero primary AND recovery.
+- `fileSave()` fire-and-forgets the durable write with no `.catch` (~667); tray Quit `app.exit(0)` skips the 250ms save debounce → flush-then-quit.
+
+### 3 — Legibility batch (RULE 1 violations, one token-compliance PR)
+- Update banner: hardcoded `text-black`/`bg-black` on `.bcard`, which turns red at lvl2 → black-on-red (index.html ~290–303).
+- `#syncError` is red-on-red at lvl2 (inline `color:var(--red)` in the settings sheet, ~407). iOS SettingsView:87 same bug + wrong red (#e5474c vs token #e5484d).
+- History segmented pill hardcodes `bg-white text-[#1a1a1a]` instead of `--sel-bg`/`--sel-ink` (~2083); iOS mirrors it (incl. a literal `lvl2 ? .white : .white` no-op).
+- iOS morning Buddy! pill misses the lvl1 red — theme already exposes selBg/selInk (MorningView ~178).
+
+### 4 — Confirmed bugs & burrs (fix opportunistically)
+- Mac polls Supabase every 1.5s ALL DAY while the drawer is tucked (visibilityState never trips; ~57k req/device/day) — pause when tucked (index.html ~3258).
+- Bug-report screenshot captures `#drawer` including an open pairing QR = uploads the raw syncKey. Blank `#syncQR` before capture (~3115).
+- iOS Done-tab "Today" undo is a NO-OP (`restoreHistoryTask(text:)` dupe-guard matches the done item itself; Mac uses `restoreItem(liveId)`) (HistoryView ~149).
+- Stored-XSS hardening: history `weekday` from a synced blob hits `innerHTML` raw (~1731) + `csp:null` in tauri.conf.json. Escape it + set a real CSP. (MED: needs the victim's syncKey.)
+- Global plain-Backquote shortcut steals ` system-wide in release builds (lib.rs ~746) — move to a chord.
+- Updater: after a failed install the banner never re-checks that session (`if(shown) return`, ~2420).
+
+### 5 — Hygiene sweep (docs + dead code, one PR)
+- DELETE stale docs: README-MAC.md, MORNING-REPORT.md, PLAN.md, BETA-SETUP.md, SYNC-HANDOFF.md (leaks live Supabase URL/key/org — values live in `.supabase-buddy.secret`), PARITY-PLAN.md, RELEASE.md, HANDOFF.md, DATA-SAFETY-PLAN.md (real task text), ios/_review/.
+- RELEASE-UPDATER.md:142 re-publishes the Apple Key ID + Team ID its own scrub command was written to remove — placeholder them.
+- README fixes: sync is live not "not wired up yet"; XcodeGen link → yonaskolb/XcodeGen; "Report a bug" opens a mail draft (endpoint never deployed — BUG_ENDPOINT is still REPLACE-AFTER-DEPLOY).
+- Dead code to DELETE: edge-tab subsystem (+`renderDots`), `renderSkipped()`, `#morningUndone`+`renderMorningUndone`/`toggleUndone`, `.todaybadge`, `--chrome-hover`, `.donezo-leaving`, iOS TaskRowView.swift, EscalationTheme.focusFill.
+- `.gitignore`: add `*.p8`/`AuthKey_*`; consider un-ignoring pnpm-lock.yaml (public repo).
+- styleguide.html badge says v0.2.x; Proposals live only on unmerged `feat/styleguide-proposals`.
+- Close draft PR #61 (superseded). Typography drift (four 14px trackings, Skip 15 vs 16) → fold into the token-system PR.
+
+### Consciously NOT fixing
+Bug-report endpoint hardening (never deployed — harden if/when deploying); done-word cross-device
+divergence (cosmetic); positional history-id collision (deterministic archival makes it moot);
+"infinite CAS loop" (REFUTED — the contentKey noop guard catches it after one round).
 
 ## Session summary — 2026-07-08 — morning-window rebuild, sync convergence attempt (STILL BROKEN), many releases
 
@@ -310,36 +364,6 @@ A long build session. Shipped **6 public releases** (0.2.32 → 0.2.37). The aut
 - Installed `/Applications/Buddy.app` was observed as `0.2.21`; confirm after the next release/update that it actually advances.
 - GitHub Actions/version bump ran, but release artifacts were not built or published in this session.
 - Automatic release workflow has been added but is gated until GitHub signing secrets and `AUTO_RELEASE_MAC=true` are configured.
-
-## Current implementation state
-
-### Mac app
-- Durable state file exists and is the primary source of truth:
-  `~/Library/Application Support/fyi.whale.buddy/buddy-state.json`.
-- New recovery file path after PR #33:
-  `~/Library/Application Support/fyi.whale.buddy/buddy-state.recovery.json`.
-- Auto-updater is wired to GitHub Releases via `RELEASE-UPDATER.md`.
-- Released version is **`0.2.37`** (signed + notarized + published). Auto-release pipeline is live and verified.
-
-### iOS companion
-- Main now includes the iOS parity work from PR #32.
-- Separate local branch `feat/sync-live` still exists and contains later sync/live work that is not on `main`.
-
-### Sync
-- The earlier sync architecture remains: client-side merge with a dumb compare-and-swap store.
-- Local branch `feat/sync-live` should be reviewed before starting new sync work; it may contain unmerged live Supabase/iOS sync progress.
-
-## Next recommended milestone
-
-Confirm the 0.2.37 native polish on-device (Fade+Drift feel, 30pt top padding, real weather fetch). Tune the one token/number per item if needed and ship a follow-up. Then the app is in a solid resting state.
-
-## Next likely work
-1. **On-device confirm of 0.2.37:** does the weather icon show your real local conditions? Does the top gap match top/bottom? Does Fade+Drift feel right on each panel? Tune `MENUBAR` and `--t-drift` (in `dist/index.html`) if needed → ship.
-2. **Workflow reminder:** say "ship it" for a public release, "just land it" for repo-only (`[skip release]`). Releases are fully automatic on merge to `main`.
-3. Optional: decouple the Done view further or add an "always show everything" mode (currently fixed 14-day display, ~1yr storage).
-4. Optional: precise weather location via native CoreLocation (Rust) — only if IP location proves wrong (e.g. on VPN).
-5. Review local branch `feat/sync-live` before doing more sync work (unmerged live Supabase/iOS sync).
-6. Later launch-page concept: `https://joi.software/` as inspiration ("The daily planner to keep distracted minds on track" — simple product landing, iOS CTA, calm timeline/to-do/habit story). Not now.
 
 ## Useful commands
 

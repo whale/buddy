@@ -521,6 +521,8 @@ let cursor = 0;                  // keyboard cursor index (0..items.length, last
 let kbActive = false;           // true once a key has been used → cursor ring shows
 const SOFT_CAP = 5, HARD_CAP = 6, RED = '#e5484d';
 const ICON_RIGHT = '1.25rem';   // universal right padding: row action icons align to the sheet ✕
+const HIST_ICON_RIGHT  = '-0.75rem'; // same gutter from inside a px-8 history group (1.25rem − the group's 2rem side padding)
+const HIST_ICON_RIGHT2 = '1.5rem';   // second icon slot: 36px left of the first (32px icon + 4px gap)
 
 /* prefers-reduced-motion — live (matchMedia updates if the user flips it). */
 const RM = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -2050,7 +2052,7 @@ function renderPast(){
       if(day.today){
         const u=document.createElement('button'); u.title='Restore to list';
         u.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity'; u.style.color='var(--ink-dim)';
-        u.style.right=ICON_RIGHT; u.innerHTML=UNDO; muteIconPointerEvents(u);
+        u.style.right=HIST_ICON_RIGHT; u.innerHTML=UNDO; muteIconPointerEvents(u);
         u.addEventListener('mousedown',e=>e.preventDefault());
         u.addEventListener('click',()=>restoreItem(it.liveId));
         r.appendChild(u);
@@ -2110,8 +2112,8 @@ function histLoadMore(){
   histBody.appendChild(more);
 }
 // FUTURE: a manual holding pen. Parked tasks DON'T auto-return — you pull each
-// into today with + (capped) or drop it with ×. Click the text to edit, exactly
-// like a live task (empty deletes it). Newest-parked on top; no date grouping.
+// into today with + (capped) or drop it with ×. Rows are read-only (edit a task
+// after pulling it into today). Newest-parked on top; no date grouping.
 function renderFuture(){
   if(!state.deferred || !state.deferred.length){ histBody.appendChild(histEmpty('Nothing in Future yet.')); return; }
   const full = activeCount()>=HARD_CAP;            // today maxed → hide every +
@@ -2119,22 +2121,16 @@ function renderFuture(){
   state.deferred.slice().reverse().forEach(d=>{
     if(d.sent){ grp.appendChild(buildSentFutureRow(d)); return; }   // "Sent to today!" confirmation row
     const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(full?' pr-[44px]':' pr-[72px]');
-    // Editable text — adaptive ink so it stays legible on the red (lvl2) background.
+    // Read-only text — adaptive ink so it stays legible on the red (lvl2) background.
     const t=document.createElement('div');
-    t.className='tracking-[-0.36px] flex-1 min-w-0 outline-none cursor-text leading-[1.3]';
+    t.className='tracking-[-0.36px] flex-1 min-w-0 leading-[1.3]';
     t.style.cssText='font-size:18px;color:var(--ink)';
     t.textContent=d.text; r.appendChild(t);
-    // Click the text to edit — like the list: editable on mousedown, Enter/blur ends,
-    // emptying it deletes the parked task.
-    t.addEventListener('mousedown',()=>{ t.contentEditable='true'; });
-    t.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); t.blur(); } });
-    t.addEventListener('blur',()=>{ t.contentEditable='false'; const v=t.textContent.trim();
-      if(v){ if(v!==d.text){ d.text=v; save(); } }
-      else { state.deferred=state.deferred.filter(x=>x.id!==d.id); save(); render(); } });
     // + (left of ×): add to today. Hidden when today is full — same cap as everywhere.
     if(!full){
       const add=document.createElement('button'); add.title='Add to today';
-      add.className='absolute right-9 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
+      add.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
+      add.style.right=HIST_ICON_RIGHT2;
       add.style.color='var(--ink-dim)'; add.innerHTML=PLUS; muteIconPointerEvents(add);
       add.addEventListener('mousedown',e=>e.preventDefault());
       add.addEventListener('click',()=>addDeferredToToday(d.id));
@@ -2142,7 +2138,8 @@ function renderFuture(){
     }
     // × : remove for good.
     const del=document.createElement('button'); del.title='Remove';
-    del.className='absolute right-0 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
+    del.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
+    del.style.right=HIST_ICON_RIGHT;
     del.style.color='var(--ink-dim)'; del.innerHTML=XICON; muteIconPointerEvents(del);
     del.addEventListener('mousedown',e=>e.preventDefault());
     del.addEventListener('click',()=>deleteDeferred(d.id));
@@ -2165,7 +2162,8 @@ function buildSentFutureRow(d){
   ttl.textContent=d.text;
   lab.append(tag, ttl); r.appendChild(lab);
   const undo=document.createElement('button'); undo.title='Undo — back to Future';
-  undo.className='absolute right-0 top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
+  undo.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
+  undo.style.right=HIST_ICON_RIGHT;
   undo.style.color='var(--ink-dim)'; undo.innerHTML=UNDO; muteIconPointerEvents(undo);
   undo.addEventListener('mousedown',e=>e.preventDefault());
   undo.addEventListener('click',()=>unsendDeferred(d.id));
