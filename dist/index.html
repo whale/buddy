@@ -2131,6 +2131,9 @@ function toggleUndone(){
 // app so the user can tab away to a meeting and back; comes to front but never locks
 // on top. OFF = back to the quiet edge-drawer. No-op in the browser.
 function morningMode(on){ if(!NATIVE) return; try{ window.__TAURI__.core.invoke('set_morning_mode',{on}); }catch(_){} }
+// Called at the START of the morning→drawer leave: drop the opaque white backing so the
+// planner fade reveals the desktop (the rest of the window revert happens on morningMode(false)).
+function morningTranslucent(){ if(!NATIVE) return; try{ window.__TAURI__.core.invoke('morning_translucent'); }catch(_){} }
 function showMorning(){ T('showMorning'); clearTimeout(shrinkTimer); clearTimeout(closeTimer); clearTimeout(openTimer); undoneAdded=false; undoneIds=[]; morning.classList.remove('morning-leaving','hidden'); render(); nativeFit('full'); morningMode(true); }
 // Morning → drawer handoff. The planner fades + shrinks out (~.5s linear) while the
 // drawer slides in from the right (its existing ease-out curve), arriving just as
@@ -2142,6 +2145,7 @@ function leaveMorningToDrawer(tuckMs){
   const FADE=reduce?0:500, SLIDE_AT=reduce?0:250;
   nativeFocus();
   clearTimeout(closeTimer); clearTimeout(openTimer); clearTimeout(shrinkTimer);
+  morningTranslucent();                        // window → translucent NOW so the fade reveals the desktop, not flat white
   if(!reduce) morning.classList.add('morning-leaving');
   // Slide the drawer in over the still-full-screen window (no native resize yet).
   setTimeout(()=>{ drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }, SLIDE_AT);
@@ -2427,11 +2431,11 @@ function moveCursor(delta){
 function cursoredItem(){ return cursor<state.items.length ? state.items[cursor] : null; }
 
 document.addEventListener('keydown', e=>{
-  // Show-off hotkey ⌘⌥⌃M — toggle the morning planner. In the native app this is a
-  // GLOBAL shortcut that raises the window first (see the buddy://morning-toggle
+  // Show-off hotkey ⌘⌥⌃M — ALWAYS bring the morning planner forward. In the native app
+  // this is a GLOBAL shortcut that raises the window first (see the buddy://morning-toggle
   // listener); this keydown is the browser-preview fallback only.
   if(!NATIVE && e.metaKey && e.altKey && e.ctrlKey && e.code==='KeyM'){
-    e.preventDefault(); if(morningUp()) leaveMorningToDrawer(state.pinned?null:1600); else showMorning(); return;
+    e.preventDefault(); showMorning(); return;
   }
 
   // Morning overlay owns its own keys (Enter/Esc) — don't double-handle.
@@ -3059,7 +3063,7 @@ if(NATIVE){
   ev.listen('buddy://hide',   ()=>{ if(morningUp()||state.pinned) return; clearTimeout(openTimer); closeDrawer(); });
   // ⌘⌥⌃M: raise, then show/hide morning. Hiding uses leaveMorningToDrawer (NOT skip)
   // so a peek-and-close does NOT mark the day planned — the auto-morning can still fire.
-  ev.listen('buddy://morning-toggle', ()=>{ if(morningUp()) leaveMorningToDrawer(state.pinned?null:1600); else showMorning(); });
+  ev.listen('buddy://morning-toggle', ()=> showMorning());   // ⌘⌥⌃M ALWAYS brings the morning planner forward (not a hide-toggle)
   ev.listen('buddy://toggle', ()=>{ if(morningUp()) return;
     drawer.classList.contains('translate-x-full') ? openDrawer() : closeDrawer(); });
   ev.listen('buddy://report-bug', ()=> reportBug());
