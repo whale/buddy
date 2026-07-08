@@ -124,7 +124,12 @@ struct TodayView: View {
             sync?.syncOnForeground()
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { sync?.syncOnForeground() }   // pull + go live on foreground
+            if phase == .active {
+                // Roll the day over BEFORE syncing — a phone suspended overnight must not
+                // push a yesterday-dated blob and drag the other device back a day.
+                store.performRolloverIfNeeded()
+                sync?.syncOnForeground()                        // pull + go live on foreground
+            }
             else { sync?.pauseSync() }                          // stop polling in the background
         }
     }
@@ -349,6 +354,7 @@ struct TodayView: View {
         if let newId {
             editText = ""
             editingId = newId
+            store.isEditing = true          // sync adopt() defers while a row edit is in flight
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { focusedField = newId }
         }
     }
@@ -356,6 +362,7 @@ struct TodayView: View {
     private func startEdit(task: BuddyTask) {
         editText = task.text            // keep the existing text (don't blank the row)
         editingId = task.id
+        store.isEditing = true          // sync adopt() defers while a row edit is in flight
         // Focus AFTER the TextField exists in the hierarchy. Setting @FocusState synchronously
         // (before the row swaps from label → field) silently fails to attach — the field shows
         // but the keyboard/cursor never lands, and the empty focus binding can bounce editingId
@@ -368,6 +375,7 @@ struct TodayView: View {
         let text = editText
         editingId = nil
         focusedField = nil
+        store.isEditing = false         // edit committed — the next sync pass may adopt again
         store.commitEdit(id: id, text: text)
     }
 

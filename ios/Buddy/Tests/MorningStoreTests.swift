@@ -62,6 +62,9 @@ final class MorningStoreTests: XCTestCase {
         XCTAssertEqual(s.today.items.count, BuddyStore.hardCap)  // carry the full list (6), not 5
     }
 
+    // Slice 2: the already-archived branch no longer DROPS the live items (that was
+    // data loss when the other device rolled the day first) — it merges them into the
+    // existing record and still carries the unfinished ones forward, like the Mac.
     func testRolloverIsIdempotentAcrossDuplicateDates() {
         let s = BuddyStore()
         s.today = TodayState(date: "2020-01-01", items: [task("a", "x")], morningDone: true)
@@ -69,7 +72,28 @@ final class MorningStoreTests: XCTestCase {
                          items: [DayItem(id: "h-2020-01-01-0", text: "x", done: false)])]  // already archived
         _ = s.performRolloverIfNeeded()
         XCTAssertEqual(s.history.filter { $0.date == "2020-01-01" }.count, 1)  // no double-archive
-        XCTAssertEqual(s.today.items.count, 0)                                 // live items dropped, day advanced
+        // unfinished "x" carries forward into the fresh day (fresh id, not dropped)
+        XCTAssertEqual(s.today.items.map { $0.text }, ["x"])
+        XCTAssertEqual(s.today.date, BuddyStore.localDate())
+    }
+
+    // Slice 2: already-archived + live items that DIFFER from the record → the live list
+    // merges into the record (done-wins, union by positional id) instead of vanishing.
+    func testRolloverMergesLiveItemsIntoExistingRecord() {
+        let s = BuddyStore()
+        s.today = TodayState(date: "2020-01-01", items: [
+            task("a", "x", .done),          // live copy finished x → done-wins over the record
+            task("b", "y")                  // live-only second task → appended to the record
+        ], morningDone: true)
+        s.history = [Day(date: "2020-01-01", weekday: "Wednesday",
+                         items: [DayItem(id: "h-2020-01-01-0", text: "x", done: false)])]
+        _ = s.performRolloverIfNeeded()
+        let rec = s.history.first { $0.date == "2020-01-01" }
+        XCTAssertEqual(rec?.items.count, 2)
+        XCTAssertEqual(rec?.items.first { $0.id == "h-2020-01-01-0" }?.done, true)   // done-wins
+        XCTAssertEqual(rec?.items.first { $0.id == "h-2020-01-01-1" }?.text, "y")    // live-only kept
+        // and the unfinished "y" carries forward
+        XCTAssertEqual(s.today.items.map { $0.text }, ["y"])
     }
 
     func testEmptyYesterdayArchivesNothingButStillShowsMorning() {
