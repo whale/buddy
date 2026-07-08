@@ -485,6 +485,10 @@ let state = {
   // --- sync merge foundation (step 2, no network yet) ---
   tombstones:{},                     // { [itemId]: deletedAt } — deletes persist so a stale push can't resurrect them
   erasedAt:null,                     // top-level "erase all" timestamp — lets a real wipe propagate over a merge
+  savedAt:0,                         // LAST USER MUTATION time (ms). NOT stamped at serialize — a device that
+                                     // merely re-serialized (sync adopt, render) must not claim "newer" in merge().
+  extras:{},                         // unknown TOP-LEVEL wire fields from a newer peer — preserved verbatim so
+                                     // shipping Mac/iPhone on different versions never silently drops new fields
   histOpen:false,
   histTab:'future',                  // 'future' (pushed-forward) | 'past' (completed)
 };
@@ -638,16 +642,21 @@ let saveTimer=null;
 function lsGet(k){ try{ return localStorage.getItem(k); }catch{ return memoryStore?memoryStore[k]:null; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch{ (memoryStore||(memoryStore={}))[k]=v; } }
 
-/* Serialise only the persisted slice (drop transient histOpen). */
+/* Serialise only the persisted slice (drop transient histOpen).
+   Items/deferred/settings are SPREAD, not rebuilt — unknown fields a newer peer
+   added ride through untouched (version-skew safety). Known fields are normalised
+   after the spread so they always win. savedAt is state.savedAt (last USER
+   mutation), never Date.now() — re-serialising must not claim "newer". */
 function serialize(){
   return JSON.stringify({
+    ...(state.extras||{}),           // unknown top-level fields from a newer peer, passed through
     version:1,
-    savedAt: Date.now(),
-    today:   { date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({id:i.id,text:i.text,state:i.state,src:i.src??null,doneAt:i.doneAt??null,doneWord:i.doneWord??null,v:i.v||1})) },
+    savedAt: state.savedAt||0,
+    today:   { ...state.today, date:state.today.date, morningDone:!!state.today.morningDone, items:state.today.items.map(i=>({...i, id:i.id,text:i.text,state:i.state,src:i.src??null,doneAt:i.doneAt??null,doneWord:i.doneWord??null,v:i.v||1})) },
     doneWordBag: Array.isArray(state.doneWordBag) ? state.doneWordBag : [],
     history: state.history,
-    deferred:(state.deferred||[]).map(d=>{ const o={id:d.id,text:d.text,wake:d.wake}; if(d.sent){o.sent=true; o.sentTid=d.sentTid||null;} return o; }),
-    settings:{ celebrate: Math.max(0,Math.min(100, state.settings.celebrate??100)), reserveSpace: !!state.settings.reserveSpace },
+    deferred:(state.deferred||[]).map(d=>{ const o={...d, id:d.id,text:d.text,wake:d.wake,v:d.v||1}; if(d.sent){o.sent=true; o.sentTid=d.sentTid||null;} else { delete o.sent; delete o.sentTid; } return o; }),
+    settings:{ ...state.settings, celebrate: Math.max(0,Math.min(100, state.settings.celebrate??100)), reserveSpace: !!state.settings.reserveSpace },
     pinned:  !!state.pinned,
     tombstones: state.tombstones||{},
     erasedAt:   (typeof state.erasedAt==='number') ? state.erasedAt : null,
@@ -676,7 +685,11 @@ function writeNow(){
   catch(e){ (memoryStore||(memoryStore={}))[STORAGE_KEY]=blob; console.warn('[buddy] localStorage write failed — relying on the file mirror', e); }
   fileSave(blob);                // durable record regardless of localStorage state
 }
-function save(){ if(saveSuppressed) return; clearTimeout(saveTimer); saveTimer=setTimeout(writeNow,250);
+function save(){ if(saveSuppressed) return;
+  // Stamp "last user mutation" — merge() scalar conflicts key off this. Adopting a
+  // pulled snapshot re-renders (render ends in save()) but must NOT claim newer.
+  if(!applyingRemote) state.savedAt = Date.now();
+  clearTimeout(saveTimer); saveTimer=setTimeout(writeNow,250);
   // opt-in: debounced push to other devices — but NOT while adopting a pulled snapshot
   // (that write is the RESULT of a sync, not a new local edit → would loop).
   if(!applyingRemote && typeof scheduleSync==='function') scheduleSync(); }
@@ -711,6 +724,8 @@ function freshBoot(){
   state.tombstones={};
   state.erasedAt=null;
   state.doneWordBag=[];
+  state.savedAt=0;                 // never mutated yet → any peer wins scalar conflicts
+  state.extras={};
 }
 function parseRaw(raw){ if(raw==null) return null; try{ const b=JSON.parse(raw); return (b&&typeof b==='object')?b:null; }catch{ return null; } }
 
@@ -718,25 +733,32 @@ function parseRaw(raw){ if(raw==null) return null; try{ const b=JSON.parse(raw);
    validated INDEPENDENTLY, so a malformed `today` can never discard valid
    `history`/`deferred`/`settings`. Returns null only if the blob isn't a Buddy
    blob at all. `hadToday` tells the caller whether today was usable or reset. */
+const KNOWN_WIRE_KEYS = ['version','savedAt','today','doneWordBag','history','deferred','settings','pinned','tombstones','erasedAt','restartStash'];
 function hydrate(blob){
   if(!blob) return null;
   const looksLikeBuddy = blob.version===1 || isValidToday(blob.today) || Array.isArray(blob.history);
   if(!looksLikeBuddy) return null;
+  // Known fields are normalised; UNKNOWN fields (a newer peer's additions) are kept
+  // via the spreads + the top-level `extras` bag, so version skew never drops data.
   const today = isValidToday(blob.today)
-    ? { date:blob.today.date, morningDone:!!blob.today.morningDone, items:blob.today.items.map(i=>({
+    ? { ...blob.today, date:blob.today.date, morningDone:!!blob.today.morningDone, items:blob.today.items.map(i=>({
+        ...i,
         id:i.id||nid(), text:String(i.text||''),
         state:(i.state==='done')?i.state:'neutral',   // legacy 'focused' → neutral ("now" removed)
         src:i.src??null, doneAt:(typeof i.doneAt==='number'?i.doneAt:null),
         doneWord:(typeof i.doneWord==='string'?i.doneWord:null),
         v:(typeof i.v==='number'&&i.v>0)?i.v:1 })) }   // legacy items pre-v default to 1
     : null;
+  const extras={};
+  for(const k of Object.keys(blob)) if(!KNOWN_WIRE_KEYS.includes(k)) extras[k]=blob[k];
   return {
     today,
     hadToday: !!today,
     doneWordBag: Array.isArray(blob.doneWordBag) ? blob.doneWordBag.filter(w=>typeof w==='string') : [],
     history: Array.isArray(blob.history) ? blob.history.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items)) : [],
-    deferred: Array.isArray(blob.deferred) ? blob.deferred.filter(d=>d&&typeof d.text==='string').map(d=>{ const o={id:d.id||nid(),text:String(d.text),wake:String(d.wake||'')}; if(d.sent){o.sent=true; o.sentTid=d.sentTid||null;} return o; }) : [],
-    settings: { celebrate: (blob.settings && typeof blob.settings.celebrate==='number') ? Math.max(0,Math.min(100,blob.settings.celebrate)) : (blob.settings && blob.settings.confetti===false ? 0 : 100),
+    deferred: Array.isArray(blob.deferred) ? blob.deferred.filter(d=>d&&typeof d.text==='string').map(d=>{ const o={...d, id:d.id||nid(),text:String(d.text),wake:String(d.wake||''),v:(typeof d.v==='number'&&d.v>0)?d.v:1}; if(d.sent){o.sent=true; o.sentTid=d.sentTid||null;} else { delete o.sent; delete o.sentTid; } return o; }) : [],
+    settings: { ...(blob.settings&&typeof blob.settings==='object'?blob.settings:{}),
+                celebrate: (blob.settings && typeof blob.settings.celebrate==='number') ? Math.max(0,Math.min(100,blob.settings.celebrate)) : (blob.settings && blob.settings.confetti===false ? 0 : 100),
                 reserveSpace: !!(blob.settings && blob.settings.reserveSpace) },
     pinned: !!blob.pinned,
     tombstones: (blob.tombstones && typeof blob.tombstones==='object' && !Array.isArray(blob.tombstones)) ? blob.tombstones : {},
@@ -745,6 +767,7 @@ function hydrate(blob){
     restartStash: (blob.restartStash && Array.isArray(blob.restartStash.texts))
       ? { texts: blob.restartStash.texts.map(t=>String(t||'').trim()).filter(Boolean), date: (typeof blob.restartStash.date==='string'?blob.restartStash.date:null) }
       : null,
+    extras,
   };
 }
 /* Empty-over-full guard (DURABILITY). True when `cand` would LOSE today's tasks
@@ -771,6 +794,8 @@ function applyHydrated(h){
   state.erasedAt   = (typeof h.erasedAt==='number') ? h.erasedAt : null;
   state.doneWordBag = Array.isArray(h.doneWordBag) ? h.doneWordBag : (state.doneWordBag||[]);  // sync/merge paths omit the bag → keep what we have
   restartStash     = h.restartStash || null;   // persisted set-aside list (Restart Buddy)
+  state.savedAt    = (typeof h.savedAt==='number') ? h.savedAt : 0;   // adopt the merged stamp — do NOT re-stamp
+  state.extras     = h.extras || {};
 }
 
 /* ====================================================================
@@ -807,11 +832,26 @@ function mergeTombstones(a, b){
   return out;
 }
 // Pick the surviving version of one today-item present on both sides.
+// FULLY deterministic: every tie falls through to a content compare, so
+// pick(x,y) === pick(y,x) — merge() must be symmetric or two devices each
+// "win" locally and never converge (the 0.3.17 revert/overwrite bug).
+// Tiebreaks compare the PROJECTED wire form (_ckItem/_ckDef — the fields both
+// platforms share), NOT the raw local object: Mac and iPhone must order the same
+// two candidates identically or they pick different winners and never converge.
 function pickItem(x, y){
   const vx = x.v|0, vy = y.v|0;
-  if(vy > vx) return y;
-  if(vx > vy) return x;
-  return (y.doneAt||0) > (x.doneAt||0) ? y : x;   // tie on v → newer completion wins, else keep x
+  if(vx !== vy) return vy > vx ? y : x;                 // higher v = more edits wins
+  const dx = x.doneAt||0, dy = y.doneAt||0;
+  if(dx !== dy) return dy > dx ? y : x;                 // tie on v → newer completion wins
+  return canonicalJSON(_ckItem(x)) <= canonicalJSON(_ckItem(y)) ? x : y;   // full tie → stable content order
+}
+// Same idea for a deferred (Future) row present on both sides. Deferred rows carry
+// their own `v` (bumped on send / unsend) — without it, "Sent to today!" set on one
+// device lost to the other device's stale copy on the very next pass (the revert bug).
+function pickDeferred(x, y){
+  const vx = x.v|0, vy = y.v|0;
+  if(vx !== vy) return vy > vx ? y : x;
+  return canonicalJSON(_ckDef(x)) <= canonicalJSON(_ckDef(y)) ? x : y;
 }
 function mergeItems(primary, secondary, tombstones){
   const sec = new Map((secondary||[]).filter(i=>i&&i.id).map(i=>[i.id,i]));
@@ -863,14 +903,34 @@ function todayToHistoryRecord(today){
     items: today.items.map((it,i)=>({ id:`h-${today.date}-${i}`, text:it.text, done: it.state==='done' })),
   };
 }
+// Natural sort key for the positional per-day ids (h-<date>-<i>) so merged records
+// keep planner order even past index 9; foreign ids sort lexicographically after.
+function histIdKey(id){
+  const m=/^h-(.+)-(\d+)$/.exec(id||'');
+  return m ? { d:m[1], i:+m[2], raw:null } : { d:'', i:0, raw:String(id||'') };
+}
+function histIdCompare(a,b){
+  const ka=histIdKey(a), kb=histIdKey(b);
+  if(ka.raw!==null || kb.raw!==null){ const ra=ka.raw??'', rb=kb.raw??''; return ra<rb?-1:ra>rb?1:0; }
+  if(ka.d!==kb.d) return ka.d<kb.d?-1:1;
+  return ka.i-kb.i;
+}
+// Merge two same-date records SYMMETRICALLY: union by id, done-wins, text conflicts
+// resolved by stable content order, output sorted by id (not by argument order).
 function mergeHistRecord(x, y){
   const items = new Map();
   for(const it of [...(x.items||[]), ...(y.items||[])]){
     if(!it||!it.id) continue;
     const p = items.get(it.id);
-    items.set(it.id, p ? { ...p, done: !!(p.done||it.done) } : it);   // done-wins
+    if(!p){ items.set(it.id, it); continue; }
+    const done = !!(p.done||it.done);                                  // done-wins
+    const ck = h => canonicalJSON({id:h.id,text:h.text,done:!!h.done}); // projected: both platforms share these fields
+    const base = ck(p) <= ck(it) ? p : it;                             // stable text winner
+    items.set(it.id, { ...base, done });
   }
-  return { date:x.date, weekday:x.weekday||y.weekday, items:[...items.values()] };
+  const wx=x.weekday||'', wy=y.weekday||'';
+  const weekday = (wx&&wy) ? (wx<=wy?wx:wy) : (wx||wy);
+  return { date:x.date, weekday, items:[...items.values()].sort((p,q)=>histIdCompare(p.id,q.id)) };
 }
 function mergeHistory(a, b){
   const byDate = new Map();
@@ -881,16 +941,21 @@ function mergeHistory(a, b){
   }
   return [...byDate.values()].sort((x,y)=> x.date<y.date?1:x.date>y.date?-1:0);  // newest first (unshift order)
 }
+// Union by id with per-row conflict resolution (pickDeferred). Args are (newer, older)
+// so first-seen order = the newer save's order — deterministic because both devices
+// agree on who's newer (savedAt = last user mutation, content tie-break).
 function mergeDeferred(a, b, tombstones){
   const byId = new Map();
   for(const d of [...(a||[]), ...(b||[])]){
-    if(d&&d.id && !(d.id in tombstones)) byId.set(d.id, d);
+    if(!d||!d.id || (d.id in tombstones)) continue;
+    const prev = byId.get(d.id);
+    byId.set(d.id, prev ? pickDeferred(prev, d) : d);
   }
   return [...byId.values()];
 }
 // A source saved before the latest erase is pre-erase → its items/history are void.
 function voidPreErase(src){
-  return { ...src, today: src.today ? { ...src.today, items:[] } : null, history:[], deferred:[] };
+  return { ...src, today: src.today ? { ...src.today, items:[] } : null, history:[], deferred:[], restartStash:null };
 }
 function merge(a, b){
   if(!a) return b || null;
@@ -898,38 +963,57 @@ function merge(a, b){
   const erasedAt = Math.max(a.erasedAt||0, b.erasedAt||0) || null;
   const va = (erasedAt && (a.savedAt||0) < erasedAt) ? voidPreErase(a) : a;
   const vb = (erasedAt && (b.savedAt||0) < erasedAt) ? voidPreErase(b) : b;
-  const newer = (va.savedAt||0) >= (vb.savedAt||0) ? va : vb;
+  // "Newer" = the side the USER last touched (savedAt is stamped on mutation, not
+  // serialize). Ties fall through to a content compare so BOTH devices agree who's
+  // newer — merge(a,b) must equal merge(b,a) or the two sides never converge.
+  const sa=(va.savedAt||0), sb=(vb.savedAt||0);
+  const newer = sa!==sb ? (sa>sb?va:vb) : (blobContentKey(va)>=blobContentKey(vb)?va:vb);
   const older = newer===va ? vb : va;
   const tombstones = mergeTombstones(va.tombstones, vb.tombstones);
 
   let today, carryHistory=[];
   if(va.today && vb.today && va.today.date === vb.today.date){
     today = {
+      ...older.today, ...newer.today,               // unknown today-level fields ride through (newer wins per key)
       date: va.today.date,
       morningDone: !!(va.today.morningDone || vb.today.morningDone),
       items: clampActiveItems(mergeItems(newer.today.items, older.today.items, tombstones)),
     };
   } else {
-    today = newer.today || older.today || null;   // different/missing days → newer day wins live
-    // Lossless daily merge: if the older snapshot still has yesterday's live list,
-    // archive it instead of dropping it. This is the recovery path for an empty
-    // new-day save racing with the durable backup from the night before.
+    // Different/missing days: the CALENDAR-LATER day is live (not the newer save's —
+    // a device suspended overnight can have the fresher savedAt but yesterday's date).
+    const ta=va.today, tb=vb.today;
+    today = (ta&&tb) ? (ta.date>=tb.date?ta:tb) : (ta||tb||null);
+    // Lossless daily merge: archive the earlier-dated live list instead of dropping it.
     const liveDate = today && today.date;
-    const oldLive = older && older.today;
-    if(oldLive && oldLive.items && oldLive.items.length && oldLive.date && (!liveDate || oldLive.date < liveDate)){
+    const oldLive = (ta&&tb) ? (today===ta?tb:ta) : null;
+    if(oldLive && oldLive.items && oldLive.items.length && oldLive.date && oldLive.date < liveDate){
       const rec = todayToHistoryRecord(oldLive);
       if(rec) carryHistory.push(rec);
     }
   }
 
+  // Deferred: union keyed by id, conflicts resolved by per-row v (send/unsend bump it).
+  let deferred = mergeDeferred(newer.deferred, older.deferred, tombstones);
+  // Reconcile "Sent to today!" rows whose linked Today copy did not survive the merge
+  // (deduped, capped, or unsent-with-tombstone on the other device): a sent row without
+  // its live counterpart is a lie — flip it back to a plain, sendable row. Runs LAST so
+  // it is the final word on both devices → deterministic.
+  const liveIds = new Set(((today&&today.items)||[]).map(i=>i&&i.id));
+  deferred = deferred.map(d => (d.sent && (!d.sentTid || !liveIds.has(d.sentTid)))
+    ? (({sent, sentTid, ...rest}) => rest)(d)
+    : d);
+
   return {
     today, hadToday: !!today,
     history: mergeHistory([...(va.history||[]), ...carryHistory], vb.history),
-    deferred: mergeDeferred(va.deferred, vb.deferred, tombstones),
+    deferred,
     settings: newer.settings,
     pinned: newer.pinned,
     tombstones, erasedAt,
     savedAt: Math.max(a.savedAt||0, b.savedAt||0),
+    restartStash: newer.restartStash || older.restartStash || null,
+    extras: { ...(older.extras||{}), ...(newer.extras||{}) },   // union; newer wins per key
   };
 }
 
@@ -986,6 +1070,9 @@ function canonicalJSON(v){
 //       `sentTid` only when `sent`; exclude iOS-only `settings.historyDays`).
 const _ckBySortId=(a,b)=>((a&&a.id)||'')<((b&&b.id)||'')?-1:((a&&a.id)||'')>((b&&b.id)||'')?1:0;
 function _ckItem(i){ const o={id:i.id,text:i.text,state:i.state,v:i.v||1}; if(i.doneAt!=null) o.doneAt=Math.round(i.doneAt); return o; }
+// Deferred v is EXCLUDED from the key (like restartStash below): an older peer strips it,
+// and v never changes without sent/sentTid changing too — so including it would only
+// version-churn against old builds, never detect a real change the other fields miss.
 function _ckDef(d){ const o={id:d.id,text:d.text,wake:d.wake||''}; if(d.sent){ o.sent=true; if(d.sentTid!=null) o.sentTid=d.sentTid; } return o; }
 function blobContentKey(b){
   if(!b) return '';
@@ -993,8 +1080,14 @@ function blobContentKey(b){
   // excluded so it never forces a sync or ping-pongs versions between Mac and phone.
   const items=((b.today&&b.today.items)||[]).map(_ckItem).sort(_ckBySortId);
   const def=((b.deferred)||[]).map(_ckDef).sort(_ckBySortId);
-  const hist=(b.history||[]).slice().sort((x,y)=>((x&&x.date)||'')<((y&&y.date)||'')?1:((x&&x.date)||'')>((y&&y.date)||'')?-1:0);
+  // History records are PROJECTED to the shared fields (like items/deferred) so an
+  // unknown record-level field never enters the change key and churns versions.
+  const hist=(b.history||[]).map(r=>({date:r.date,weekday:r.weekday||'',items:(r.items||[]).map(i=>({id:i.id,text:i.text,done:!!i.done}))}))
+    .sort((x,y)=>(x.date||'')<(y.date||'')?1:(x.date||'')>(y.date||'')?-1:0);
   const s=b.settings||{};
+  // restartStash is DELIBERATELY excluded: an older peer strips fields it doesn't know,
+  // and a stripped-vs-present stash in the key would push-loop forever against that peer.
+  // The stash never changes without today's items changing too, so it always rides along.
   return canonicalJSON({ td:b.today&&b.today.date, m:!!(b.today&&b.today.morningDone),
     t:items, h:hist, d:def, tomb:b.tombstones||{}, e:b.erasedAt??null,
     s:{ celebrate:s.celebrate, reserveSpace:!!s.reserveSpace } });
@@ -1002,11 +1095,13 @@ function blobContentKey(b){
 // Map a merged hydrated result (merge() output) back to a wire blob for push/apply.
 function hydratedToWire(h){
   if(!h) return null;
-  return { version:1, savedAt:(typeof h.savedAt==='number'?h.savedAt:Date.now()),
+  return { ...(h.extras||{}),                        // unknown peer fields ride the wire untouched
+    version:1, savedAt:(typeof h.savedAt==='number'?h.savedAt:0),
     today: h.today || { date:localDate(), items:[], morningDone:false },
     history: h.history||[], deferred: h.deferred||[], settings: h.settings,
     pinned: !!h.pinned, tombstones: h.tombstones||{},
-    erasedAt:(typeof h.erasedAt==='number')?h.erasedAt:null };
+    erasedAt:(typeof h.erasedAt==='number')?h.erasedAt:null,
+    restartStash: h.restartStash||null };
 }
 // Merge two wire blobs → merged wire blob (hydrate both, merge, re-wire).
 function mergeWire(aBlob, bBlob){
@@ -1320,7 +1415,12 @@ function maybeRollover(){
     state.today={ date:cur, items:[], morningDone:false };
     return true;                              // → caller shows morning
   } else if(state.today.items.length>0){
-    // Day already archived (idempotent) — drop the live items, advance the date.
+    // Day already archived (the other device rolled first, or a clock rewind) — MERGE
+    // the live items into the existing record instead of dropping them (done-wins,
+    // same positional ids as the peer's archive so the union dedupes cleanly).
+    const rec=state.history.find(h=>h.date===stored);
+    const live=todayToHistoryRecord(state.today);
+    if(rec && live){ const m=mergeHistRecord(rec, live); rec.items=m.items; rec.weekday=m.weekday; }
     state.today={ date:cur, items:[], morningDone:false };
     return true;
   } else {
@@ -1337,17 +1437,21 @@ function maybeRollover(){
    unfinished tasks into history. (Future/deferred tasks are a manual holding pen now
    — they no longer auto-return; you add them yourself from the Future tab.) */
 function rolloverAndCarry(){
-  const histBefore=state.history.length;
+  const prevDate=state.today.date;
+  const hadLive=state.today.items.length>0;
   const rolled=maybeRollover();
   if(rolled){
     restartStash=null;                        // a real new day re-plans; an old set-aside is stale
     state.deferred=(state.deferred||[]).filter(d=>!d.sent);   // "Sent to today!" rows persist only till tomorrow, then clear
     state.deferred.forEach(d=>{ delete d.sentTid; });
-    if(state.history.length>histBefore){
-      // Pre-fill the new planner with yesterday's UNFINISHED tasks (up to the cap),
-      // so the working set is never silently dropped on a new day.
-      state.history[0].items.filter(it=>!it.done).slice(0,HARD_CAP).forEach(it=>{
-        if(activeCount()<HARD_CAP) state.items.push(newItem(it.text));
+    // Pre-fill the new planner with the archived day's UNFINISHED tasks (up to the cap)
+    // so the working set is never silently dropped on a new day. Reads the record for
+    // prevDate (not "did history grow") so the already-archived branch — where the other
+    // device rolled the day first — carries forward too, instead of losing the tasks.
+    const rec = hadLive && prevDate ? state.history.find(h=>h.date===prevDate) : null;
+    if(rec){
+      rec.items.filter(it=>!it.done).slice(0,HARD_CAP).forEach(it=>{
+        if(activeCount()<HARD_CAP && !state.items.some(x=>x.text===it.text)) state.items.push(newItem(it.text));
       });
     }
   }
@@ -1411,7 +1515,7 @@ function yesterdayDate(){ const d=new Date(); d.setDate(d.getDate()-1); return l
    kept only as a record of when it was parked. */
 function sleepItem(id){
   const it=state.items.find(x=>x.id===id); if(!it) return;
-  state.deferred.push({ id:nid(), text:it.text, wake:tomorrowDate() });
+  state.deferred.push({ id:nid(), text:it.text, wake:tomorrowDate(), v:1 });
   tombstone(id);                                   // it leaves today under a new deferred id → tombstone the old one
   state.items=state.items.filter(x=>x.id!==id);
   save(); render();
@@ -1425,7 +1529,7 @@ function addDeferredToToday(id){
   // The parked row STAYS in Future, flipped to a "Sent to today!" confirmation (mirrors a
   // Today task going Donezo). `sentTid` links the Today copy so undo can pull it back. It
   // clears on tomorrow's rollover. Panel stays OPEN so the confirmation shows in place.
-  d.sent=true; d.sentTid=it.id;
+  d.sent=true; d.sentTid=it.id; d.v=(d.v|0)+1;   // v-bump: this edit must beat the peer's stale copy in merge
   save(); render();
 }
 // Undo a "Sent to today!" row — remove the Today copy (if still there) and return the
@@ -1433,7 +1537,7 @@ function addDeferredToToday(id){
 function unsendDeferred(id){
   const d=(state.deferred||[]).find(x=>x.id===id); if(!d||!d.sent) return;
   if(d.sentTid){ tombstone(d.sentTid); state.items=state.items.filter(x=>x.id!==d.sentTid); }
-  d.sent=false; d.sentTid=null;
+  delete d.sent; delete d.sentTid; d.v=(d.v|0)+1;   // v-bump: undo must beat the peer's sent:true copy
   save(); render();
 }
 
@@ -1453,6 +1557,8 @@ function openDrawer(){ if(morningUp()) return;
   } else {
     drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday);
   }
+  // Catch up immediately on reveal — the idle poll is gated off while tucked.
+  if(typeof syncNow==='function' && typeof syncStore!=='undefined' && syncStore) syncNow('open');
 }
 // Bring Buddy to the front + make it key so its icons receive hover/clicks even
 // when it reveals over another app (otherwise the foreground app keeps the mouse).
@@ -2066,7 +2172,8 @@ function buildSentFutureRow(d){
   r.appendChild(undo);
   return r;
 }
-function deleteDeferred(id){ state.deferred=state.deferred.filter(d=>d.id!==id); save(); render(); }
+// Tombstone the id — without it a synced peer's copy resurrects the row on the next pass.
+function deleteDeferred(id){ tombstone(id); state.deferred=state.deferred.filter(d=>d.id!==id); save(); render(); }
 
 // Sticky header of the OPEN history panel: a [ Future | Past ] segmented toggle.
 function renderHistHeader(){
@@ -2943,6 +3050,83 @@ window.__buddy = {
       const doneKept=m14.today.items.some(i=>i.id==='dn' && i.state==='done');
       ok('merge dedupes same-title active tasks to one', bills===1, 'bills='+bills);
       ok('merge keeps done items through the clamp', doneKept, 'items='+JSON.stringify(m14.today.items.map(i=>i.id+':'+i.state)));
+
+      // ===== Slice 2: DETERMINISTIC merge — merge(a,b) must EQUAL merge(b,a) =====
+      // 15. Full symmetry (content AND order) across every fixture pair above, including
+      // equal savedAt (content tie-break) and clamp pressure. Asymmetry here is exactly
+      // the 0.3.17 bug: each device "wins" locally and they never converge.
+      const eq=(x,y)=>canonicalJSON(x)===canonicalJSON(y);
+      const pairs=[[A,B],[bigA,bigB],[dupA,dupB],
+        [snap({savedAt:1000,today:{date:'d',items:[item('s1','same-stamp A',null,1)]}}),
+         snap({savedAt:1000,today:{date:'d',items:[item('s2','same-stamp B',null,1)]}})]];
+      ok('merge is fully symmetric: merge(a,b) === merge(b,a) for all fixtures',
+         pairs.every(([p,q])=>eq(merge(p,q),merge(q,p))),
+         pairs.map(([p,q])=>eq(merge(p,q),merge(q,p))).join(','));
+
+      // 16. "Sent to today!" survives a stale peer (THE revert bug). Device A sent a
+      // Future row to today (deferred v=2 + the new today item); device B still holds
+      // the plain v=1 row. Both merge directions must keep sent:true + the today copy.
+      const defA=snap({savedAt:1000,today:{date:'d',items:[item('n1','sent task',null,1)]},
+        deferred:[{id:'d1',text:'sent task',wake:'',sent:true,sentTid:'n1',v:2}]});
+      const defB=snap({savedAt:5000,today:{date:'d',items:[]},
+        deferred:[{id:'d1',text:'sent task',wake:'',v:1}]});
+      for(const m16 of [merge(defA,defB), merge(defB,defA)]){
+        const row=m16.deferred.find(d=>d.id==='d1');
+        ok('sent flag beats a stale peer copy (v-conflict, either direction)',
+           row && row.sent===true && row.sentTid==='n1' && m16.today.items.some(i=>i.id==='n1'),
+           JSON.stringify(row));
+      }
+
+      // 17. Undo (unsend) beats the peer's sent copy: v=3 plain row + tombstoned today id.
+      const unA=snap({savedAt:1000,tombstones:{n2:900},today:{date:'d',items:[]},
+        deferred:[{id:'d2',text:'undone',wake:'',v:3}]});
+      const unB=snap({savedAt:5000,today:{date:'d',items:[item('n2','undone',null,1)]},
+        deferred:[{id:'d2',text:'undone',wake:'',sent:true,sentTid:'n2',v:2}]});
+      const m17=merge(unB,unA);
+      const d2=m17.deferred.find(d=>d.id==='d2');
+      ok('unsend (higher v + tombstone) wins over the peer sent copy',
+         d2 && !d2.sent && !m17.today.items.some(i=>i.id==='n2'), JSON.stringify(d2));
+
+      // 18. A sent row whose Today copy did NOT survive the merge reconciles back to plain
+      // (no dangling sentTid → no stuck "Sent to today!" and no undo on a ghost id).
+      const orA=snap({savedAt:2000,today:{date:'d',items:[]},
+        deferred:[{id:'d3',text:'orphan',wake:'',sent:true,sentTid:'ghost',v:2}]});
+      const orB=snap({savedAt:1000,today:{date:'d',items:[]}, deferred:[]});
+      const m18=merge(orA,orB);
+      const d3=m18.deferred.find(d=>d.id==='d3');
+      ok('orphaned sent row reconciles to a plain sendable row', d3 && !d3.sent && !('sentTid' in d3), JSON.stringify(d3));
+
+      // 19. The CALENDAR-later day is live even when the earlier day has the newer
+      // savedAt (a device suspended overnight edits late, then syncs in the morning).
+      const dayA=snap({savedAt:1000,today:{date:'2026-06-23',morningDone:false,items:[]}});
+      const dayB=snap({savedAt:9000,today:{date:'2026-06-22',morningDone:true,items:[item('y2','late edit',null,3)]}});
+      const m19=merge(dayA,dayB);
+      ok('calendar-later day wins live over a newer-saved earlier day',
+         m19.today.date==='2026-06-23' && m19.history.some(h=>h.date==='2026-06-22'&&h.items.some(i=>i.text==='late edit')),
+         'live='+m19.today.date);
+
+      // 20. restartStash survives the merge (sync adopt used to null it → the set-aside
+      // plan was unrecoverable the moment sync was on).
+      const rsA=snap({savedAt:2000}); rsA.restartStash={texts:['stashed plan'],date:'2026-06-19'};
+      const m20=merge(rsA, snap({savedAt:1000}));
+      ok('restartStash survives a merge', m20.restartStash && m20.restartStash.texts[0]==='stashed plan',
+         JSON.stringify(m20.restartStash));
+
+      // 21. Unknown fields (a NEWER app version's additions) pass through mergeWire
+      // untouched — top-level, per-item, and per-deferred. Version-skew safety.
+      const wireA={version:1,savedAt:2000,zzNewTopLevel:{keep:true},
+        today:{date:'d',morningDone:false,zzToday:1,items:[{id:'u1',text:'t',state:'neutral',v:1,zzItem:'ride'}]},
+        history:[],deferred:[{id:'ud1',text:'p',wake:'',v:1,zzDef:7}],
+        settings:{celebrate:100,reserveSpace:false,historyDays:14},pinned:false,tombstones:{},erasedAt:null};
+      const wireB={version:1,savedAt:1000,today:{date:'d',morningDone:false,items:[]},history:[],deferred:[],settings:{celebrate:100,reserveSpace:false},pinned:false,tombstones:{},erasedAt:null};
+      const w21=mergeWire(wireA,wireB);
+      ok('unknown fields pass through the wire (skew safety)',
+         w21.zzNewTopLevel && w21.zzNewTopLevel.keep===true
+         && w21.today.zzToday===1
+         && (w21.today.items.find(i=>i.id==='u1')||{}).zzItem==='ride'
+         && (w21.deferred.find(d=>d.id==='ud1')||{}).zzDef===7
+         && w21.settings.historyDays===14,
+         canonicalJSON({top:w21.zzNewTopLevel,td:w21.today.zzToday,it:(w21.today.items[0]||{}).zzItem,df:(w21.deferred[0]||{}).zzDef,hd:w21.settings&&w21.settings.historyDays}));
     }catch(e){ ok('mergeTest ran without throwing', false, e&&e.message); }
     const failed=R.filter(r=>!r.pass);
     return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
@@ -3255,7 +3439,12 @@ window.addEventListener('focus', ()=>{ if(syncStore) syncNow('focus'); });
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && syncStore) syncNow('focus'); });
 // LIVE sync: poll every 1.5s while visible so the OTHER device's edits show up within ~1.5s
 // (syncNow no-ops when nothing changed, so this is cheap and never flickers the UI).
-setInterval(()=>{ if(syncStore && document.visibilityState==='visible') syncNow('poll'); }, 1500);
+// Poll only while the user can SEE Buddy (drawer revealed / morning up). A tucked
+// 2px sliver still counts as document-visible, so without this gate the 1.5s poll
+// ran ~57k Supabase requests a day while nobody was looking. openDrawer() kicks a
+// catch-up sync on reveal, so a freshly opened drawer is current within one pass.
+function buddyUiShowing(){ return morningUp() || !drawer.classList.contains('translate-x-full'); }
+setInterval(()=>{ if(syncStore && document.visibilityState==='visible' && buddyUiShowing()) syncNow('poll'); }, 1500);
 </script>
 </body>
 </html>
