@@ -125,6 +125,29 @@
   }
   .cta{ background:var(--sel-bg); color:var(--sel-ink); }
 
+  /* Update banner — RULE 1: token-driven so it stays legible when .lvl2 turns the
+     .bcard red (the hardcoded blacks shipped black-on-red). Install pill follows the
+     #buddyBtn hover idiom: lvl0 pure-black pill lightens, red/white pills OKLCH-darken. */
+  #updateTitle{ color:var(--ink); }
+  #updateSub{ color:var(--ink-dim); }
+  #updateProgress{ background:var(--line); }
+  #updateBar{ background:var(--ink); }
+  #updateInstall{ background:var(--sel-bg); color:var(--sel-ink); transition:box-shadow .15s ease, background-color .15s ease; }
+  @media (hover:hover) and (pointer:fine){
+    #updateInstall:hover{ box-shadow:inset 0 0 0 999px rgba(255,255,255,.16); }
+    .lvl1 #updateInstall:hover, .lvl2 #updateInstall:hover{ box-shadow:none; background-color:var(--cta-hover); }
+  }
+
+  /* Sync error — inline red text vanished on the lvl2 red sheet; white + semibold there. */
+  #syncError{ color:var(--red); }
+  .lvl2 #syncError{ color:#fff; font-weight:600; }
+
+  /* History segmented control, selected tab. Deliberate exception to --sel-bg (a black
+     pill would break the segmented idiom at lvl0): the pill stays white, the LABEL
+     follows escalation like the selected chrome icon — black → red (lvl1 and lvl2). */
+  .seg-sel{ background:#fff; color:#000; }
+  .lvl1 .seg-sel, .lvl2 .seg-sel{ color:var(--red); }
+
   /* Row action glyphs (check, sleep, remove) — SOLID grey, never alpha. A translucent
      stroke seams against the card border/divider; a solid colour reads clean. */
   .icon-ink{ color:#8c8c8c; }
@@ -290,17 +313,17 @@
   <div id="updateBanner" class="bcard w-[400px] shrink-0 bg-white rounded-[24px] overflow-hidden hidden">
     <div class="flex items-center justify-between gap-3 px-6 py-4">
       <div class="flex items-center gap-3 min-w-0">
-        <span class="size-[34px] shrink-0 grid place-items-center rounded-full bg-black text-white">
+        <span class="cta size-[34px] shrink-0 grid place-items-center rounded-full">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
         </span>
         <div class="min-w-0">
-          <div id="updateTitle" class="text-[15px] font-semibold tracking-[-0.3px] text-black truncate">Update ready</div>
-          <div id="updateSub" class="text-[14px] text-black/45 tracking-[-0.26px] truncate">A new version of Buddy is available</div>
+          <div id="updateTitle" class="text-[15px] font-semibold tracking-[-0.3px] truncate">Update ready</div>
+          <div id="updateSub" class="text-[14px] tracking-[-0.26px] truncate">A new version of Buddy is available</div>
         </div>
       </div>
-      <button id="updateInstall" class="pressable shrink-0 px-4 py-2 rounded-full bg-black text-white text-[14px] font-medium tracking-[-0.28px] hover:bg-black/85">Install</button>
+      <button id="updateInstall" class="pressable shrink-0 px-4 py-2 rounded-full text-[14px] font-medium tracking-[-0.28px]">Install</button>
     </div>
-    <div id="updateProgress" class="h-[3px] bg-black/10 hidden"><div id="updateBar" class="h-full bg-black w-0 transition-[width] duration-300"></div></div>
+    <div id="updateProgress" class="h-[3px] hidden"><div id="updateBar" class="h-full w-0 transition-[width] duration-300"></div></div>
   </div>
   <!-- Card 1: Buddy pill + date -->
   <div class="bcard w-[400px] shrink-0 bg-white rounded-[24px] overflow-hidden">
@@ -405,7 +428,7 @@
             </div>
           </div>
 
-          <p id="syncError" class="hidden text-[13px] leading-snug mb-1" style="color:var(--red)"></p>
+          <p id="syncError" class="hidden text-[13px] leading-snug mb-1"></p>
         </div>
         <button id="exportBtn" class="pressable w-full px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] ihover flex items-center justify-between gap-3 text-left">
           <span>Export my done tasks</span>
@@ -2185,7 +2208,7 @@ function renderHistHeader(){
     const b=document.createElement('button');
     const active=state.histTab===tab;
     b.className='px-4 grid place-items-center rounded-full text-[15px] tracking-[-0.3px] transition-colors '+
-      (active?'bg-white text-[#1a1a1a] shadow-sm':'');
+      (active?'seg-sel shadow-sm':'');
     b.style.minHeight='38px';                        // generous tap target (was ~22px — fiddly to hit)
     if(!active) b.style.color='var(--chrome-ink)';
     b.textContent=label;
