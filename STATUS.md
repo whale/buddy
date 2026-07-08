@@ -1,6 +1,24 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-08 (evening). Branch `main`. Latest **released Mac** version: **`0.3.17`** (cut LOCALLY — `pnpm tauri build` + `gh release create`, `.env` creds). iOS is on **TestFlight `0.1.0 (13)`** (`cd ios && set -a && source ../.env && set +a && fastlane beta`). `AUTO_RELEASE_MAC` stays **OFF**. **🔴 Mac⇄iPhone sync is UNSOLVED — the full-review plan below is the work queue; Slice 2 is #1.**_
+_Last updated: 2026-07-08 (night). Branch `main`. Latest **released Mac**: **`0.3.19`** (via `gh workflow run "Release Mac app"` — CI CAN cut from main; `AUTO_RELEASE_MAC` stays OFF). iOS on **TestFlight `0.1.0 (15)`** (`cd ios && set -a && source ../.env && set +a && fastlane beta`). **✅ Sync SOLVED — user: "seamless. NICE!"** Work queue = the unfinished parts of THE PLAN below (batches 4–5)._
+
+## Session summary — 2026-07-08 (evening/night) — Slice 2 shipped, field-report batch, self-diagnosis capability
+
+Mac `0.3.18` + `0.3.19` released; iOS TestFlight builds `14` + `15`. PRs #80–#82 merged; draft #61 closed.
+
+**Shipped + verified:**
+- **Sync Slice 2 (PR #81)** — fully deterministic symmetric merge on BOTH platforms (`merge(a,b)===merge(b,a)`): savedAt = last user mutation; deferred rows carry `v`; projected-wire tiebreaks (Swift `CanonicalJSON` byte-parity-tested vs the Mac's JS); calendar-later day wins live; sent-row reconcile; unknown-field pass-through (version-skew safe); restartStash rides the wire; iOS foreground rollover; corrupt-store set-aside + .bak on iOS. **User confirmed cross-device sync feels seamless.**
+- **Field-report batch (PR #82)** after live testing: banner sits on ONE PLANE (drop-shadow on the drawer column, box-shadow off `.bcard` — verified in WebKit, the native engine; the shadowed banner the user saw was 0.3.18 rendering the 0.3.19 offer); sync-liveness wedges fixed (leaked edit-guard self-heals — WebKit fires no blur on re-render removal, which silently blocked ALL adopts + rollover until relaunch; fetches abort at 10s + 60s watchdog); iOS add/edit focus no longer deletes a just-added task on silent @FocusState detach; **iOS morning view DISABLED** (gate commented in TodayView ~line 115, code kept; morningDone untouched so the Mac morning still shows); same-title dedupe for parked Future rows (field state had 'Warren Logo' ×3 — heals on next sync); lvl1/lvl2 legibility tokens (banner, sync error, tab pill, iOS Buddy! pill).
+- **Self-diagnosis + self-testing (RULE 3 in CLAUDE.md):** `pnpm diag` — privacy-safe JSONL event log on both platforms (NEVER task text), Rust `append_event`, 1MB rotation — READ IT AT SESSION START. `pnpm sync:live` — two-device live harness against the real backend with a throwaway syncKey; reproduces future→today/undo/dedupe/convergence end-to-end in ~14s, no human needed.
+- Tests at wrap: Mac mergeTest 27/27 · syncTest 15/15 · smokeTest 38/38 · ui:smoke · sync:live; iOS 70/70; cargo check clean.
+
+**Open (next session):**
+1. **Confirm on-device:** next update banner renders flat (first post-fix banner appears when 0.3.20 ships); diagnostics log starts populating (check `pnpm diag`).
+2. **THE PLAN batch 4** (burrs): QR-in-bug-screenshot syncKey leak; weekday XSS escape + CSP; global Backquote shortcut; iOS Done-tab "Today" undo no-op; updater no-recheck-after-failed-install.
+3. **THE PLAN batch 5** (hygiene): delete 9 stale docs (SYNC-HANDOFF/RELEASE-UPDATER/DATA-SAFETY leak repo-public details), README fixes, dead-code removal (edge-tab subsystem, renderSkipped, morningUndone, iOS TaskRowView…), .gitignore `*.p8`.
+4. Deferred: two-window morning split; token-system PR (memory `buddy-token-system-todo`).
+
+---
 
 ## THE PLAN — full adversarially-verified review, 2026-07-08 (evening)
 
