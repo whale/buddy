@@ -187,6 +187,30 @@ fn morning_window_chrome(win: &tauri::WebviewWindow, on: bool) {
     }
 }
 
+/// Make the morning window translucent again at the START of the leave transition, so the
+/// planner fade reveals the desktop instead of a flat white window. (During morning the
+/// window is opaque white to hide the un-painted titlebar strip; if we keep that through
+/// the fade, morning doesn't fade away — it just abruptly shrinks. Decorations/level are
+/// reverted later by set_morning_mode(false).)
+#[tauri::command]
+fn morning_translucent(app: AppHandle) {
+    #[cfg(target_os = "macos")]
+    if let Some(win) = app.get_webview_window("main") {
+        if let Ok(ptr) = win.ns_window() {
+            if !ptr.is_null() {
+                use objc2_app_kit::{NSColor, NSWindow};
+                unsafe {
+                    if let Some(ns) = (ptr as *const NSWindow).as_ref() {
+                        ns.setHasShadow(false);
+                        ns.setOpaque(false);
+                        ns.setBackgroundColor(Some(&NSColor::clearColor()));
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The running version, baked in from Cargo.toml at compile time.
 #[tauri::command]
 fn app_version() -> String {
@@ -653,7 +677,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, set_reserve, set_morning_mode, check_for_update, install_update, load_state, load_recovery_state, save_state])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, set_reserve, set_morning_mode, morning_translucent, check_for_update, install_update, load_state, load_recovery_state, save_state])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).
