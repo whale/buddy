@@ -24,6 +24,7 @@ struct TodayView: View {
     // Inline editing
     @State private var editingId: String? = nil
     @State private var editText: String   = ""
+    @State private var focusRetry = 0        // re-attach attempts after a silent @FocusState detach
     @FocusState private var focusedField: String?
 
     // Adaptive row fitting (see RowFit) — recomputed when the list or its size changes.
@@ -112,7 +113,13 @@ struct TodayView: View {
             MorningView(store: store, onDone: { showMorning = false })
         }
         .task {
-            showMorning = forceMorning || store.needsMorning
+            // iOS MORNING VIEW DISABLED (2026-07-08, user decision): the morning is a
+            // Mac ritual for now — on the phone its text fields fought the 1.5s sync
+            // adopt (tap → cursor jitter → focus lost). The phone just shows the list;
+            // morningDone stays untouched so the MAC's morning still appears (it would
+            // OR-merge across sync). Re-enable by restoring the gate below.
+            // showMorning = forceMorning || store.needsMorning
+            showMorning = forceMorning
             if forceCelebration { showCelebration = true }
             #if DEBUG
             if ScreenshotHarness.activeFixture == nil { weather.refresh() }   // no network under a fixture (deterministic shots)
@@ -269,7 +276,20 @@ struct TodayView: View {
                 .focused($focusedField, equals: task.id)
                 .onSubmit { commitEdit(id: task.id) }
                 .onChange(of: focusedField) { _, v in
-                    if v != task.id && editingId == task.id { commitEdit(id: task.id) }
+                    guard v != task.id && editingId == task.id else { return }
+                    // A re-render (fit recompute, theme change) can silently DETACH
+                    // @FocusState — that's not the user dismissing the keyboard. On an
+                    // empty edit, committing here would DELETE the just-added task (the
+                    // "add burps and reverts" field report) — re-attach instead, twice,
+                    // before giving up. Non-empty edits commit like a normal blur.
+                    if editText.trimmingCharacters(in: .whitespaces).isEmpty && focusRetry < 2 {
+                        focusRetry += 1
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                            if editingId == task.id { focusedField = task.id }
+                        }
+                    } else {
+                        commitEdit(id: task.id)
+                    }
                 }
                 .padding(.horizontal, 32).padding(.vertical, fit.vpad)
                 .frame(maxWidth: .infinity, maxHeight: fillH, alignment: .leading)
@@ -354,6 +374,7 @@ struct TodayView: View {
         if let newId {
             editText = ""
             editingId = newId
+            focusRetry = 0
             store.isEditing = true          // sync adopt() defers while a row edit is in flight
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { focusedField = newId }
         }
@@ -362,6 +383,7 @@ struct TodayView: View {
     private func startEdit(task: BuddyTask) {
         editText = task.text            // keep the existing text (don't blank the row)
         editingId = task.id
+        focusRetry = 0
         store.isEditing = true          // sync adopt() defers while a row edit is in flight
         // Focus AFTER the TextField exists in the hierarchy. Setting @FocusState synchronously
         // (before the row swaps from label → field) silently fails to attach — the field shows

@@ -176,9 +176,9 @@ struct MorningView: View {
             Button { finish() } label: {
                 Text("Buddy!")
                     .font(.geist(18, .medium)).tracking(-0.36)
-                    .foregroundStyle(theme.level == .lvl2 ? Color(hex: "#e5484d") : .white)
+                    .foregroundStyle(theme.selInk)   // was a lvl2-only ternary — missed the lvl1 red pill
                     .padding(.horizontal, 28).padding(.vertical, 13)
-                    .background(Capsule().fill(theme.level == .lvl2 ? Color.white : Color.black))
+                    .background(Capsule().fill(theme.selBg))
             }
             .buttonStyle(.plain)
         }

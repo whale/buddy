@@ -300,7 +300,7 @@ final class BuddyStore {
     /// be called on the main actor (mutates @Observable state the UI reads). Fires no celebration.
     /// Deferred while a row edit is in flight (isEditing) — the next pass re-merges.
     func adopt(_ merged: SyncSnapshot) {
-        guard !isEditing else { return }     // never clobber an in-progress edit (Mac applyWire parity)
+        guard !isEditing else { BuddyDiag.log("adopt-deferred-editing"); return }   // never clobber an in-progress edit (Mac applyWire parity)
         applyingRemote = true
         defer { applyingRemote = false }
         if let t = merged.today { today = t }

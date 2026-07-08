@@ -9,7 +9,9 @@
     "dev": "tauri dev",
     "build": "tauri build",
     "icons": "python3 src-tauri/gen-icons.py",
-    "ui:smoke": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-ui-smoke.spec.js --reporter=line"
+    "ui:smoke": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-ui-smoke.spec.js --reporter=line",
+    "sync:live": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-two-device.spec.js --reporter=line",
+    "diag": "scripts/buddy-diag.sh"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

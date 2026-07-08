@@ -515,6 +515,38 @@ fn recovery_state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join("buddy-state.recovery.json"))
 }
 
+// ============ Diagnostics event log (privacy-safe JSONL) ============
+// trace() only hits stderr, which evaporates for the installed app — so field
+// incidents were undiagnosable after the fact. The webview batches structured
+// events (NO task text, ever — names/counts/versions/timings only) and appends
+// them here. Rotates at ~1 MB: current → .1, old .1 dropped. Read it with
+// `scripts/buddy-diag.sh` or directly at
+// ~/Library/Application Support/fyi.whale.buddy/buddy-events.jsonl
+fn events_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join("buddy-events.jsonl"))
+}
+
+#[tauri::command]
+fn append_event(app: AppHandle, lines: String) -> Result<(), String> {
+    use std::io::Write;
+    let path = events_file(&app).ok_or("no app data dir")?;
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    // Rotate before writing so the current file stays bounded.
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() > 1_000_000 {
+            let _ = std::fs::rename(&path, path.with_extension("jsonl.1"));
+        }
+    }
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    writeln!(f, "{lines}").map_err(|e| e.to_string())
+}
+
 fn state_has_array_items(v: &serde_json::Value, path: &[&str]) -> bool {
     let mut cur = v;
     for key in path {
@@ -692,7 +724,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, set_reserve, set_morning_mode, morning_translucent, check_for_update, install_update, load_state, load_recovery_state, save_state])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, set_reserve, set_morning_mode, morning_translucent, check_for_update, install_update, load_state, load_recovery_state, save_state, append_event])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).

@@ -106,12 +106,18 @@ final class SyncEngine {
                 }
                 lastSyncedAt = Date()
                 lastError = nil
+                if !res.noop {
+                    BuddyDiag.log("sync", ["pushed": res.pushed, "pulled": res.pulled,
+                                           "v": res.version, "attempts": res.attempts])
+                }
             } else {
                 // Do NOT stamp a reassuring lastSyncedAt on failure — retries were exhausted.
                 lastError = "Sync failed (server conflict — will retry)"
+                BuddyDiag.log("sync-conflict")
             }
         } catch {
             lastError = error.localizedDescription
+            BuddyDiag.log("sync-error", ["err": String(error.localizedDescription.prefix(120))])
         }
     }
 }

@@ -114,6 +114,24 @@ enum BuddyMerge {
             }
             return d
         }
+        // Same-TITLE dedupe for plain (un-sent) rows, AFTER the reconcile so a reconciled
+        // orphan collapses into its twin: parking the same task on two devices mints two
+        // ids for one intent, and an id-keyed union keeps both forever (field report:
+        // 'Warren Logo' ×3). Deterministic winner: highest v, then stable content order.
+        // Mirrors the Mac exactly; runs LAST so it is the final word on both devices.
+        var bestByTitle = [String: DeferredTask]()
+        for d in deferred where d.sent != true {
+            let key = d.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if key.isEmpty { continue }
+            if let p = bestByTitle[key] { bestByTitle[key] = pickDeferred(p, d) }
+            else { bestByTitle[key] = d }
+        }
+        deferred = deferred.filter { d in
+            if d.sent == true { return true }
+            let key = d.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if key.isEmpty { return true }
+            return bestByTitle[key]?.id == d.id
+        }
 
         return SyncSnapshot(
             today: today,
