@@ -182,7 +182,8 @@ struct MorningView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, 32)     // align "Skip" with the task text above it (rows are inset 32)
+        .padding(.trailing, 12)
         .padding(.top, 4)
     }
 

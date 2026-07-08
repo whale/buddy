@@ -44,7 +44,9 @@ final class BuddyStore {
     init() {
         loadFromDisk()
         performRolloverIfNeeded()
-        wakeDeferred()
+        // NO auto-wake: Future is a MANUAL holding pen on the Mac (no auto-return). The old
+        // wakeDeferred() moved parked items into today on every launch (new id, no tombstone),
+        // which the Mac never does — injecting a sync divergence that ping-ponged forever.
         scheduleSave()
     }
 
@@ -150,13 +152,31 @@ final class BuddyStore {
         scheduleSave()
     }
 
-    /// Pull a parked (Future) task into today's list, then drop it from deferred.
-    /// Mirrors Mac's Future-tab restore.
+    /// Send a parked (Future) task to today — mirrors Mac's `addDeferredToToday`. The row
+    /// STAYS in Future flipped to "Sent to today!" (no delete, no tombstone); `sentTid` links
+    /// the Today copy for undo. Identical model on both platforms so sync converges.
     func wakeDeferredTask(id: String) {
         guard let idx = deferred.firstIndex(where: { $0.id == id }) else { return }
+        guard !(deferred[idx].sent ?? false) else { return }
         guard activeCount < Self.hardCap else { return }
-        today.items.append(BuddyTask(id: newId(), text: deferred[idx].text, state: .neutral))
-        deferred.remove(at: idx)
+        let newTid = newId()
+        today.items.append(BuddyTask(id: newTid, text: deferred[idx].text, state: .neutral))
+        deferred[idx].sent = true
+        deferred[idx].sentTid = newTid
+        scheduleSave()
+    }
+
+    /// Undo a "Sent to today!" row — remove the Today copy and return a plain, sendable row.
+    /// Mirrors Mac's `unsendDeferred`.
+    func unsendDeferred(id: String) {
+        guard let idx = deferred.firstIndex(where: { $0.id == id }) else { return }
+        guard deferred[idx].sent == true else { return }
+        if let tid = deferred[idx].sentTid {
+            tombstone(tid)
+            today.items.removeAll { $0.id == tid }
+        }
+        deferred[idx].sent = false
+        deferred[idx].sentTid = nil
         scheduleSave()
     }
 
@@ -188,7 +208,9 @@ final class BuddyStore {
     }
 
     /// Remove a parked (Future) task for good. Mirrors the Mac Future-tab × button.
+    /// Tombstone the id so a stale push from the other device can't resurrect it.
     func deleteDeferred(id: String) {
+        tombstone(id)
         deferred.removeAll { $0.id == id }
         scheduleSave()
     }
@@ -299,6 +321,11 @@ final class BuddyStore {
         let stored = today.date
         guard stored != cur else { return false }
 
+        // A new day: "Sent to today!" rows have served their purpose — clear them (Mac parity,
+        // matching rolloverAndCarry's `deferred.filter(d=>!d.sent)`).
+        deferred = deferred.filter { !($0.sent ?? false) }
+        for i in deferred.indices { deferred[i].sentTid = nil }
+
         // Archive today's tasks into history — but only once per day. If this date is
         // already in history (a second rollover this run, or a record merged in from
         // another device), don't duplicate it. Closes the double-midnight loss path.
@@ -334,21 +361,7 @@ final class BuddyStore {
         return true
     }
 
-    // MARK: - Wake deferred tasks
-    // Mirrors Mac's `wakeDeferred()`.
-    private func wakeDeferred() {
-        let today = Self.localDate()
-        var keep: [DeferredTask] = []
-        for d in deferred {
-            if d.wake <= today && activeCount < Self.hardCap {
-                let task = BuddyTask(id: newId(), text: d.text, state: .neutral)
-                self.today.items.append(task)
-            } else {
-                keep.append(d)
-            }
-        }
-        deferred = keep
-    }
+    // (Removed auto-wakeDeferred: Future is a manual holding pen on both platforms now.)
 
     // MARK: - Persistence
 

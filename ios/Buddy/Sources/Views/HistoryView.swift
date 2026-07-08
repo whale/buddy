@@ -111,9 +111,13 @@ struct HistoryView: View {
         } else {
             group(header: "Future") {
                 ForEach(store.deferred) { d in
-                    plainRow(d.text,
-                             add: { store.wakeDeferredTask(id: d.id) },
-                             remove: { store.deleteDeferred(id: d.id) })
+                    if d.sent == true {
+                        sentRow(id: d.id, text: d.text)
+                    } else {
+                        plainRow(d.text,
+                                 add: { store.wakeDeferredTask(id: d.id) },
+                                 remove: { store.deleteDeferred(id: d.id) })
+                    }
                 }
             }
         }
@@ -143,6 +147,20 @@ struct HistoryView: View {
                 .strikethrough(true, color: theme.inkDim).foregroundStyle(theme.inkDim).lineLimit(1)
             Spacer(minLength: 8)
             rowIcon("undo") { store.restoreHistoryTask(text: text) }
+        }
+        .padding(.vertical, 5)
+    }
+
+    // Future tab — a parked task already sent to today: "Sent to today!" + grey text (NO
+    // strikethrough) + undo. Mirrors the Mac's buildSentFutureRow.
+    private func sentRow(id: String, text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("Sent to today!").font(.geist(18, .semibold)).tracking(-0.30)
+                .foregroundStyle(theme.ink).fixedSize(horizontal: true, vertical: false)
+            Text(text).font(.geist(18, .regular)).tracking(-0.36)
+                .foregroundStyle(theme.inkDim).lineLimit(1)
+            Spacer(minLength: 8)
+            rowIcon("undo") { store.unsendDeferred(id: id) }
         }
         .padding(.vertical, 5)
     }
