@@ -3059,27 +3059,11 @@ window.__buddy = {
 const NATIVE = !!(window.__TAURI__ && window.__TAURI__.window);
 function T(m){ try{ window.__TAURI__?.core?.invoke('trace',{msg:String(m)}); }catch(_){} }
 // Native reveal/toggle intents from Rust (cursor-edge monitor, tray, shortcut).
-// --- Morning window geometry memory (device-local; the size/position the user set) ---
-// Morning opens full-screen the first time, but if the user resizes/moves it we remember
-// that and restore it on the next open. Window geometry is Mac-only, so localStorage (not
-// the synced blob) — like `pinned`.
-const MORNING_WIN_KEY='buddy.morningWin';
-let winGeomProgrammatic=false;                    // true while nativeFit is moving the window itself
-function loadMorningWin(){ try{ const r=JSON.parse(localStorage.getItem(MORNING_WIN_KEY)||'null'); return (r && r.w>240 && r.h>240) ? r : null; }catch(_){ return null; } }
-async function saveMorningWin(){
-  if(!NATIVE) return;
-  try{ const win=window.__TAURI__.window.getCurrentWindow();
-    const sz=await win.innerSize(), p=await win.outerPosition();
-    localStorage.setItem(MORNING_WIN_KEY, JSON.stringify({x:p.x,y:p.y,w:sz.width,h:sz.height}));
-  }catch(_){}
-}
+// Morning window geometry memory retired (see nativeFit 'full'): the save raced the native
+// re-chrome and restored bad/tiny values. Clear any stale saved value so it can't linger.
+try{ localStorage.removeItem('buddy.morningWin'); }catch(_){}
 if(NATIVE){
   const ev=window.__TAURI__.event;
-  // Remember the morning window's size/position when the USER resizes or moves it
-  // (ignore our own nativeFit moves via the winGeomProgrammatic flag; only while morning is up).
-  const _win=window.__TAURI__.window.getCurrentWindow();
-  const _onGeom=()=>{ if(morningUp() && !winGeomProgrammatic) saveMorningWin(); };
-  _win.onResized(_onGeom); _win.onMoved(_onGeom);
   ev.listen('buddy://reveal', ()=>{ if(morningUp()||state.pinned) return; clearTimeout(closeTimer); openDrawer(); });
   ev.listen('buddy://hide',   ()=>{ if(morningUp()||state.pinned) return; clearTimeout(openTimer); closeDrawer(); });
   // ⌘⌥⌃M: raise, then show/hide morning. Hiding uses leaveMorningToDrawer (NOT skip)
@@ -3164,19 +3148,12 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
     const top=Math.round(MENUBAR*sf);     // clear the menu bar so the top panel gets the same breathing room as the bottom
     const h=sz.height - top;
     if(mode==='full'){
-      // Morning: restore the user's remembered window (size + position) if they've
-      // resized/moved it before; otherwise default to full size (fill the screen below
-      // the menu bar). Not always-on-top + a Dock icon (see set_morning_mode).
-      const saved=loadMorningWin();
-      winGeomProgrammatic=true;                 // suppress the save-on-resize this triggers
-      if(saved){
-        await win.setSize(new D.PhysicalSize(saved.w, saved.h));
-        await win.setPosition(new D.PhysicalPosition(saved.x, saved.y));
-      }else{
-        await win.setSize(new D.PhysicalSize(sz.width, sz.height - top));
-        await win.setPosition(new D.PhysicalPosition(p.x, p.y + top));
-      }
-      setTimeout(()=>{ winGeomProgrammatic=false; }, 350);
+      // Morning fills the screen below the menu bar (frontmost, not full-bleed). The old
+      // geometry-memory (restore last size/pos) kept restoring bad/tiny values because the
+      // save raced the native re-chrome in this shared-window setup — so it's retired here.
+      // Reliable per-window frame memory returns with the window split (macOS autosave).
+      await win.setSize(new D.PhysicalSize(sz.width, sz.height - top));
+      await win.setPosition(new D.PhysicalPosition(p.x, p.y + top));
       return;
     }
     const w=Math.round((mode==='drawer'?DRAWERW:SLIVER)*sf);
