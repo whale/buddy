@@ -49,6 +49,9 @@ targets:
         CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Optional: set to the deployed /api/bug-report endpoint so iOS users can
+        # file private GitHub issues without needing a GitHub account. Blank = email fallback.
+        BuddyBugReportEndpoint: ""
         UILaunchScreen:
           UIColorName: ""
         UIRequiredDeviceCapabilities:

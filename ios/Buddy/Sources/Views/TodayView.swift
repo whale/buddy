@@ -25,6 +25,7 @@ struct TodayView: View {
     @State private var editingId: String? = nil
     @State private var editText: String   = ""
     @State private var focusRetry = 0        // re-attach attempts after a silent @FocusState detach
+    @State private var editStartedAt: Date? = nil
     @FocusState private var focusedField: String?
 
     // Adaptive row fitting (see RowFit) — recomputed when the list or its size changes.
@@ -149,12 +150,13 @@ struct TodayView: View {
     // MARK: - Card 1 — date block (numeral · weekday/month · weather)
 
     private var headerCard: some View {
-        HStack(alignment: .center) {   // Figma 41:286: fixed 114h, items-center
+        HStack(alignment: .bottom) {   // Mac header parity: date cluster and weather sit on the same bottom edge
             HStack(alignment: .lastTextBaseline, spacing: 12) {
                 Text(dayNumber)
                     .font(.geist(62, .medium)).tracking(-1.24)
                     .foregroundStyle(theme.escalationText)
                     .fixedSize()
+                    .offset(y: -5)     // SwiftUI lacks CSS text-box-trim; lift the numeral to match Mac cap-height
                 VStack(alignment: .leading, spacing: 12) {   // gap-3 (Figma)
                     Text(weekday)
                         .font(.geist(24, .medium)).tracking(-0.48)
@@ -171,7 +173,8 @@ struct TodayView: View {
                 .frame(width: 50, height: 50)
         }
         .padding(.horizontal, 32)
-        .frame(height: 114)          // Figma fixed header height
+        .padding(.bottom, 32)
+        .frame(height: 114, alignment: .bottom)          // Figma fixed header height
         .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
     }
 
@@ -189,9 +192,19 @@ struct TodayView: View {
                 }
             }
             Spacer()
-            Text("Buddy")
-                .font(.geist(18, .regular)).tracking(-0.36)
-                .foregroundStyle(theme.chromeMuted)
+            Button {
+                withAnimation(.easeOut(duration: 0.28)) {
+                    showHistory = false
+                    showSettings = false
+                }
+            } label: {
+                Text("Buddy")
+                    .font(.geist(18, .regular)).tracking(-0.36)
+                    .foregroundStyle(theme.chromeMuted)
+                    .frame(minWidth: 80, minHeight: 44, alignment: .trailing)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 32)
         .padding(.top, 26)
@@ -255,7 +268,8 @@ struct TodayView: View {
     private func recomputeFit(_ size: CGSize) {
         let active = store.activeTasks.map(\.text)
         let next = RowFit.compute(active: active, doneCount: store.doneTasks.count,
-                                  height: size.height, width: size.width)
+                                  height: size.height, width: size.width,
+                                  includesAdd: !store.atHardCap)
         if next != fit { fit = next }
     }
 
@@ -282,7 +296,8 @@ struct TodayView: View {
                     // empty edit, committing here would DELETE the just-added task (the
                     // "add burps and reverts" field report) — re-attach instead, twice,
                     // before giving up. Non-empty edits commit like a normal blur.
-                    if editText.trimmingCharacters(in: .whitespaces).isEmpty && focusRetry < 2 {
+                    let justStarted = editStartedAt.map { Date().timeIntervalSince($0) < 0.5 } ?? false
+                    if focusRetry < 2 && (justStarted || editText.trimmingCharacters(in: .whitespaces).isEmpty) {
                         focusRetry += 1
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                             if editingId == task.id { focusedField = task.id }
@@ -354,7 +369,8 @@ struct TodayView: View {
         .tracking(-0.48)
         .foregroundStyle(theme.addInk)
         .padding(.horizontal, 32)
-        .padding(.vertical, fit.vpad)
+        .padding(.top, fit.vpad)
+        .padding(.bottom, fit.vpad + RowFit.addBottomExtra)
         .frame(maxWidth: .infinity, maxHeight: fit.scroll ? nil : .infinity, alignment: .leading)   // flex like the active rows
         .contentShape(Rectangle())
         .onTapGesture { addTask() }
@@ -375,6 +391,7 @@ struct TodayView: View {
             editText = ""
             editingId = newId
             focusRetry = 0
+            editStartedAt = Date()
             store.isEditing = true          // sync adopt() defers while a row edit is in flight
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { focusedField = newId }
         }
@@ -384,6 +401,7 @@ struct TodayView: View {
         editText = task.text            // keep the existing text (don't blank the row)
         editingId = task.id
         focusRetry = 0
+        editStartedAt = Date()
         store.isEditing = true          // sync adopt() defers while a row edit is in flight
         // Focus AFTER the TextField exists in the hierarchy. Setting @FocusState synchronously
         // (before the row swaps from label → field) silently fails to attach — the field shows
@@ -397,6 +415,7 @@ struct TodayView: View {
         let text = editText
         editingId = nil
         focusedField = nil
+        editStartedAt = nil
         store.isEditing = false         // edit committed — the next sync pass may adopt again
         store.commitEdit(id: id, text: text)
     }

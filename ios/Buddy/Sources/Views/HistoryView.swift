@@ -117,6 +117,7 @@ struct HistoryView: View {
                         sentRow(id: d.id, text: d.text)
                     } else {
                         plainRow(d.text,
+                                 canAdd: !store.atHardCap,
                                  add: { store.wakeDeferredTask(id: d.id) },
                                  remove: { store.deleteDeferred(id: d.id) })
                     }
@@ -168,14 +169,16 @@ struct HistoryView: View {
     }
 
     // Future tab row — + (bring to today) and × (remove for good).
-    private func plainRow(_ text: String, add: @escaping () -> Void, remove: @escaping () -> Void) -> some View {
+    private func plainRow(_ text: String, canAdd: Bool, add: @escaping () -> Void, remove: @escaping () -> Void) -> some View {
         HStack(spacing: 6) {
             Text(text).font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.ink).lineLimit(1)
             Spacer(minLength: 8)
-            Button(action: add) {
-                LucideIcon("plus", size: 18).foregroundStyle(theme.inkDim)
-                    .frame(width: 30, height: 26).contentShape(Rectangle())
-            }.buttonStyle(.plain)
+            if canAdd {
+                Button(action: add) {
+                    LucideIcon("plus", size: 18).foregroundStyle(theme.inkDim)
+                        .frame(width: 30, height: 26).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            }
             rowIcon("x", size: 18, action: remove)
         }
         .padding(.vertical, 5)

@@ -2488,6 +2488,11 @@ function doneCount(){
   return n;
 }
 function syncExportCount(){ const el=$('#exportCount'); if(el) el.textContent=String(doneCount()); }
+function flashExportStatus(text){
+  const el=$('#exportCount'); if(!el) return;
+  const prev=String(doneCount()); el.textContent=text;
+  setTimeout(()=>{ if(settingsOpen) el.textContent=prev; }, 1800);
+}
 function openSettings(){
   settingsOpen=true;
   settingsSheet.classList.remove('closing');
@@ -2530,7 +2535,7 @@ RM.addEventListener?.('change', ()=>{ if(settingsOpen) syncCelebrate(); });
 
 // Export: download all data as JSON (works in-browser; native file-save needs the fs plugin — follow-up)
 // Export my DONE tasks → a readable markdown log (download + clipboard on native).
-$('#exportBtn').addEventListener('click', e=>{ e.stopPropagation();
+$('#exportBtn').addEventListener('click', async e=>{ e.stopPropagation();
   try{
     const lines=['# Buddy — done tasks',''];
     const todayDone=state.today.items.filter(it=>it.state==='done');
@@ -2540,12 +2545,20 @@ $('#exportBtn').addEventListener('click', e=>{ e.stopPropagation();
       if(done.length){ lines.push('## '+(day.weekday||day.date)+' — '+day.date); done.forEach(it=>lines.push('- '+it.text)); lines.push(''); }
     });
     const data=lines.join('\n');
-    const blob=new Blob([data],{type:'text/markdown'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url;
-    a.download='buddy-done-'+new Date().toISOString().slice(0,10)+'.md';
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    if(window.__TAURI__){ navigator.clipboard?.writeText(data); }   // native fallback: also copy to clipboard
+    const filename='buddy-done-'+new Date().toISOString().slice(0,10)+'.md';
+    if(window.__TAURI__?.core){
+      const saved=await window.__TAURI__.core.invoke('export_done_tasks', { filename, markdown:data });
+      navigator.clipboard?.writeText(data);
+      flashExportStatus('Saved');
+      T('export saved '+saved);
+    } else {
+      const blob=new Blob([data],{type:'text/markdown'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a'); a.href=url;
+      a.download=filename;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      flashExportStatus('Saved');
+    }
   }catch(err){ console.warn('[buddy] export failed', err); }
 });
 // dev: restart the app (reloads the webview)
