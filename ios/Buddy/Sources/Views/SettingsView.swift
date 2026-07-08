@@ -84,7 +84,10 @@ struct SettingsView: View {
                                 syncPillRow { pill("Connect") { connect() }; Spacer() }
                             }
                             if let e = pairError {
-                                Text(e).font(.geist(14, .regular)).foregroundStyle(Color(red: 0.90, green: 0.28, blue: 0.30))
+                                // Token red (was a hand-rolled off-red); red-on-red is invisible on
+                                // the lvl2 sheet → white + semibold there (mirrors Mac #syncError).
+                                Text(e).font(.geist(14, theme.level == .lvl2 ? .semibold : .regular))
+                                    .foregroundStyle(theme.level == .lvl2 ? Color.white : Color(hex: "#e5484d"))
                             }
                         }
                     }

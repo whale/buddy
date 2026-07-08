@@ -48,10 +48,12 @@ struct HistoryView: View {
                 let active = tab == t
                 Text(t.rawValue)
                     .font(.geist(15, .regular)).tracking(-0.30)
-                    .foregroundStyle(active ? Color(hex: "#1a1a1a") : theme.chromeInk)
+                    // Selected label follows escalation like the selected chrome icon
+                    // (black → red at lvl1/lvl2); pill stays white — mirrors Mac .seg-sel.
+                    .foregroundStyle(active ? (theme.level == .lvl0 ? Color.black : Color(hex: "#e5484d")) : theme.chromeInk)
                     .padding(.horizontal, 16).frame(height: 38)
                     .background(
-                        Capsule().fill(active ? (theme.level == .lvl2 ? Color.white : Color.white) : .clear)
+                        Capsule().fill(active ? Color.white : .clear)
                             .shadow(color: active && theme.level != .lvl2 ? .black.opacity(0.08) : .clear, radius: 2, y: 1)
                     )
                     .contentShape(Capsule())
