@@ -1,6 +1,36 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-05. Branch `main`. Latest **released Mac** version: **`0.3.3`** (published via CI). iOS is on **TestFlight `0.1.0 (11)`**. `AUTO_RELEASE_MAC` stays **OFF** (a manual `gh workflow run "Release Mac app"` dispatch publishes anyway — workflow_dispatch bypasses the gate and checks out `ref: main`; no local build needed once code is on main). See the 2026-07-05 summary below._
+_Last updated: 2026-07-08. Branch `main`. Latest **released Mac** version: **`0.3.17`** (cut LOCALLY — `pnpm tauri build` + `gh release create`, `.env` creds). iOS is on **TestFlight `0.1.0 (13)`** (`cd ios && set -a && source ../.env && set +a && fastlane beta`). `AUTO_RELEASE_MAC` stays **OFF**. **🔴 Mac⇄iPhone sync is UNSOLVED — "Sent to today!" reverts and today items get OVERWRITTEN (data loss). Do this first next session.** See the 2026-07-08 summary below._
+
+## Session summary — 2026-07-08 — morning-window rebuild, sync convergence attempt (STILL BROKEN), many releases
+
+Very long session, Mac `0.3.4 → 0.3.17` + iOS TestFlight `0.1.0 (12)→(13)`. Every fix was verified where possible by running the app (`pnpm tauri dev` + `screencapture`); AppleScript keystrokes/Quartz are blocked in this harness, so tiling/drag and cross-device sync need the USER to confirm.
+
+**Shipped + verified (high confidence):**
+- **Morning is a real window** (0.3.12): decorated, resizable, shadow, min-size 432×600, on the SAME transparent drawer window via objc2 (`set_morning_mode`/`morning_window_chrome`). See memory `buddy-morning-real-window`.
+- **Morning goes behind other apps** (0.3.13): `setLevel(0)` for morning, `3` for drawer (`set_always_on_top(false)` doesn't reset the level).
+- **Morning opens full-screen + is tileable** (0.3.17): retired the buggy geometry-memory (its save raced the native re-chrome → off-screen/tiny windows); strip `CanJoinAllSpaces|FullScreenAuxiliary` during morning so Rectangle/Magnet/green-button treat it as normal (`collectionBehavior=Default`). Verified: 3456×2174 full frame + behaviour=0.
+- **App icon** = proper macOS squircle (0.3.10), regenerated from `ios/.../icon-1024.png` via `pnpm tauri icon` (may need a Finder icon-cache clear to SEE it). Memory `buddy-native-only-visual-bugs`.
+- **⌘⌥⌃M** always brings morning forward (global shortcut raises the window first) (0.3.14).
+- **Updater banner** now reveals the drawer so it's visible (0.3.15) — but "verified" was overstated (it was already visible with the drawer open; no manual "Check for Updates" button exists). Memory `buddy-updater-banner-in-drawer`.
+- **"Sent to today!" on Mac** (0.3.11) — verified in-browser.
+
+**🔴 STILL BROKEN — sync convergence (do FIRST next session):**
+- On Mac 0.3.17 + iPhone 13 (both have the parity code), sending a Future item to today **flashes "Sent to today!" then reverts**, AND the today items already there get **OVERWRITTEN / lost — DATA LOSS.** Slice 1 (align iPhone model + order-independent content-key, 0.3.16) was INSUFFICIENT exactly as the adversarial review warned: the merge is still **non-deterministic** (always-local-primary via per-pass `savedAt`; array-order/clamp survivor divergence). **Fix = the deterministic/symmetric merge (Slice 2) on BOTH platforms + unknown-field pass-through.** Full detail in memory `buddy-sync-convergence`.
+
+**Other open Buddy issues reported 2026-07-08:**
+- **Future items editable but broken** — clicking a Future row's text makes it contentEditable but you can't edit; user wants Future rows NOT editable. Remove the `mousedown→contentEditable` + blur handler in `renderFuture` (`dist/index.html` ~1977).
+- **Future tab +/× icons right-aligned wrong** — should line up with the history panel's `×` close button (top-right gutter). Fix the `pr-[72px]`/absolute-right offsets in `renderFuture`/`buildSentFutureRow`.
+
+**Deferred (deliberate):**
+- **Two-window split for morning** — the REAL architecture fix (dedicated opaque decorated window; drawer stays its own). Ends the morning-window regression treadmill + gives reliable frame memory (macOS autosave). Adversarial-reviewed, ranked plan in memory `buddy-morning-real-window` context / the review transcript.
+- **Sync Slice 2** (deterministic merge + unknown-field pass-through) — also the version-skew-safety the user wants (ship Mac/iPhone on different versions).
+- **iPhone drops `doneWord` + `historyDays` on sync** (pre-existing minor data loss).
+
+**Next session:** (1) FIX sync — Slice 2 deterministic merge (the revert + overwrite/data-loss); (2) remove Future-item editability + fix +/× alignment; (3) then the two-window morning split.
+
+---
+
 
 ## Session summary — 2026-07-05 — merge cap+dedupe fix, sync-UI tweak, 0.3.3 shipped via CI
 
