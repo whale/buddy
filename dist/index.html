@@ -1424,6 +1424,7 @@ function unsendDeferred(id){
 
 /* ----------------------- drawer open / close --------------------- */
 let openTimer=null, closeTimer=null, shrinkTimer=null;
+let updateBannerHold=false;   // while an "update ready" banner is up, keep the drawer open so it's actually SEEN
 // Both guard against the morning: while the full-screen planner is up, nothing
 // may resize the window back to a drawer/sliver (that was the "Restart" bug —
 // the morning would flash then get clipped to a sliver by a stray mouse-leave).
@@ -1441,7 +1442,7 @@ function openDrawer(){ if(morningUp()) return;
 // Bring Buddy to the front + make it key so its icons receive hover/clicks even
 // when it reveals over another app (otherwise the foreground app keeps the mouse).
 function nativeFocus(){ if(!NATIVE) return; try{ window.__TAURI__.window.getCurrentWindow().setFocus(); }catch(_){} }
-function closeDrawer(){ if(state.pinned || morningUp()) return; drawer.classList.add('translate-x-full');
+function closeDrawer(){ if(state.pinned || morningUp() || updateBannerHold) return; drawer.classList.add('translate-x-full');
   // Let the drawer finish sliding out (.24s) BEFORE shrinking the window to the
   // sliver — otherwise the 2px window clips the panel and it vanishes abruptly.
   if(NATIVE){ clearTimeout(shrinkTimer); shrinkTimer=setTimeout(()=>nativeFit('sliver'), 300); } }
@@ -2385,6 +2386,11 @@ $('#quitBtn')?.addEventListener('click', e=>{ e.stopPropagation();
     sub.textContent='A new version is available';
     banner.classList.remove('hidden');
     requestAnimationFrame(()=>banner.classList.add('banner-in'));
+    // The banner lives INSIDE the drawer, which is normally tucked off-screen — so reveal
+    // the drawer and HOLD it open, or the "update ready" banner is never actually seen.
+    updateBannerHold=true;
+    clearTimeout(closeTimer); clearTimeout(shrinkTimer);
+    if(NATIVE && !morningUp()) openDrawer();   // if morning is up, it reveals when morning leaves (hold keeps it open)
   }
   install.addEventListener('click', async ()=>{
     if(installing) return; installing=true;
