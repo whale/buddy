@@ -976,13 +976,28 @@ function canonicalJSON(v){
   if(v && typeof v==='object') return '{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+canonicalJSON(v[k])).join(',')+'}';
   return JSON.stringify(v===undefined?null:v);
 }
+// Project a blob to the CANONICAL shape both devices can agree on, so change-detection
+// ignores three sources of phantom "difference" that caused the Mac↔iPhone jitter:
+//   (a) object key order  → canonicalJSON sorts keys
+//   (b) ARRAY order of today/deferred/history → we sort by id/date (order is not synced;
+//       each device keeps its own local order, but they no longer fight over it)
+//   (c) fields the peer can't carry → project each record to the shared fields and treat
+//       null == absent (drop `doneWord`/`src` which iOS omits; `doneAt` only when set;
+//       `sentTid` only when `sent`; exclude iOS-only `settings.historyDays`).
+const _ckBySortId=(a,b)=>((a&&a.id)||'')<((b&&b.id)||'')?-1:((a&&a.id)||'')>((b&&b.id)||'')?1:0;
+function _ckItem(i){ const o={id:i.id,text:i.text,state:i.state,v:i.v||1}; if(i.doneAt!=null) o.doneAt=Math.round(i.doneAt); return o; }
+function _ckDef(d){ const o={id:d.id,text:d.text,wake:d.wake||''}; if(d.sent){ o.sent=true; if(d.sentTid!=null) o.sentTid=d.sentTid; } return o; }
 function blobContentKey(b){
   if(!b) return '';
   // `pinned` is DEVICE-LOCAL (a desktop window toggle iOS doesn't model) — deliberately
   // excluded so it never forces a sync or ping-pongs versions between Mac and phone.
+  const items=((b.today&&b.today.items)||[]).map(_ckItem).sort(_ckBySortId);
+  const def=((b.deferred)||[]).map(_ckDef).sort(_ckBySortId);
+  const hist=(b.history||[]).slice().sort((x,y)=>((x&&x.date)||'')<((y&&y.date)||'')?1:((x&&x.date)||'')>((y&&y.date)||'')?-1:0);
+  const s=b.settings||{};
   return canonicalJSON({ td:b.today&&b.today.date, m:!!(b.today&&b.today.morningDone),
-    t:(b.today&&b.today.items)||[], h:b.history||[], d:b.deferred||[],
-    tomb:b.tombstones||{}, e:b.erasedAt??null, s:b.settings||{} });
+    t:items, h:hist, d:def, tomb:b.tombstones||{}, e:b.erasedAt??null,
+    s:{ celebrate:s.celebrate, reserveSpace:!!s.reserveSpace } });
 }
 // Map a merged hydrated result (merge() output) back to a wire blob for push/apply.
 function hydratedToWire(h){
