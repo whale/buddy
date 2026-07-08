@@ -51,15 +51,15 @@
   /* ---- warning themes: whole view ----
      Red wash animates REAL background-color/color (they interpolate) — NOT
      --var swaps (those hard-cut in WebKit). ~200ms wash. §3.4 */
-  /* macOS-style elevation for floating containers: a hairline edge + a tight
-     key shadow + a soft wide ambient shadow (Apple's layered panel look). */
-  .bcard{ transition:background-color .2s ease, box-shadow .2s ease;
-    /* macOS panel shadow: a soft layered ramp — opacity rises gently as blur
-       grows, no hairline edge — so it fades out gradually instead of a hard line. */
-    box-shadow:
-      0 1px 4px rgba(0,0,0,.04),
-      0 6px 16px rgba(0,0,0,.06),
-      0 14px 34px rgba(0,0,0,.09); }
+  /* macOS-style elevation — ONE PLANE. The shadow lives on the WHOLE drawer column
+     (drop-shadow follows the union silhouette of all cards incl. the update banner),
+     so cards can never cast shadows on EACH OTHER — only onto the desktop behind.
+     Per-card box-shadow shipped the update banner visibly shadowing the card below it. */
+  .bcard{ transition:background-color .2s ease; }
+  #drawer{ filter:
+      drop-shadow(0 1px 4px rgba(0,0,0,.04))
+      drop-shadow(0 6px 16px rgba(0,0,0,.06))
+      drop-shadow(0 14px 34px rgba(0,0,0,.09)); }
 
   /* Settings sliders: thin grey track + a solid black draggable thumb. */
   .buddy-range{ -webkit-appearance:none; appearance:none; height:18px; background:transparent; }
@@ -1022,12 +1022,27 @@ function merge(a, b){
   let deferred = mergeDeferred(newer.deferred, older.deferred, tombstones);
   // Reconcile "Sent to today!" rows whose linked Today copy did not survive the merge
   // (deduped, capped, or unsent-with-tombstone on the other device): a sent row without
-  // its live counterpart is a lie — flip it back to a plain, sendable row. Runs LAST so
-  // it is the final word on both devices → deterministic.
+  // its live counterpart is a lie — flip it back to a plain, sendable row.
   const liveIds = new Set(((today&&today.items)||[]).map(i=>i&&i.id));
   deferred = deferred.map(d => (d.sent && (!d.sentTid || !liveIds.has(d.sentTid)))
     ? (({sent, sentTid, ...rest}) => rest)(d)
     : d);
+  // Same-TITLE dedupe for plain (un-sent) rows, AFTER the reconcile so a reconciled
+  // orphan collapses into its twin: parking the same task on two devices (or through a
+  // sync outage) mints two ids for one intent, and an id-keyed union keeps both forever
+  // (field report: 'Warren Logo' ×3). Deterministic winner: highest v, then stable
+  // content order. Runs LAST so it is the final word on both devices.
+  {
+    const best = new Map();   // title → winning row (plain rows only)
+    for(const d of deferred){
+      if(d.sent) continue;
+      const key = String(d.text||'').trim().toLowerCase();
+      if(!key) continue;
+      const p = best.get(key);
+      best.set(key, p ? pickDeferred(p, d) : d);
+    }
+    deferred = deferred.filter(d => d.sent || !String(d.text||'').trim() || best.get(String(d.text||'').trim().toLowerCase())===d);
+  }
 
   return {
     today, hadToday: !!today,
@@ -1134,12 +1149,26 @@ function mergeWire(aBlob, bBlob){
   const hb = bBlob ? hydrate(migrate(bBlob)) : null;
   return hydratedToWire(merge(ha, hb));
 }
+// True only while a REAL edit is in progress. editingId is normally cleared by the
+// contenteditable's blur handler — but WebKit does NOT fire blur when a re-render
+// removes the focused element, so a leaked editingId used to silently block every
+// sync adopt AND the midnight rollover until the app restarted (field report
+// 2026-07-08: "sent to today never appeared until I relaunched"). Heal the leak:
+// if nothing on screen is actually being edited, clear the stale guard.
+function editingActive(){
+  if(editingId === null) return false;
+  const el = document.activeElement;
+  if(el && el.isContentEditable) return true;
+  diag('edit-guard-healed', {id:String(editingId).slice(0,8)});
+  editingId = null;
+  return false;
+}
 // Adopt a merged wire blob as local truth.
 function applyWire(blob){
   // Never clobber an in-progress edit: render() would tear down the contenteditable
   // mid-type and the blur handler could tombstone a half-typed task. Defer — the next
   // sync pass re-merges and applies once the edit commits.
-  if(editingId !== null) return;
+  if(editingActive()){ diag('adopt-deferred-editing', {}); return; }
   const keepPinned = state.pinned;               // pinned is device-local — never adopt the remote's
   const h = hydrate(migrate(blob));
   if(!h) return;
@@ -1212,11 +1241,20 @@ function makeFakeCASStore(seed){
    contract as makeFakeCASStore + the buddy_cas.sql RPCs. Dumb transport only; all merge /
    conflict logic stays in syncOnce(). Mirror of ios SupabaseCASStore.swift. */
 function makeSupabaseCASStore(baseUrl, anonKey, device){
-  const rpc = (fn, body) => fetch(baseUrl.replace(/\/$/,'')+'/rest/v1/rpc/'+fn, {
-    method:'POST',
-    headers:{ apikey:anonKey, Authorization:'Bearer '+anonKey, 'Content-Type':'application/json' },
-    body: JSON.stringify(body),
-  }).then(async r => { if(!r.ok) throw new Error('rpc '+fn+' '+r.status+' '+(await r.text())); return r.json(); });
+  // 10s abort: a fetch with NO timeout can hang forever on a dropped connection
+  // (sleep/wake, network change) — and a hung pass wedges `syncing=true`, killing
+  // sync until relaunch (field report 2026-07-08). Abort → throw → normal retry path.
+  const rpc = (fn, body) => {
+    const ctl = new AbortController();
+    const t = setTimeout(()=>ctl.abort(new Error('rpc '+fn+' timeout')), 10000);
+    return fetch(baseUrl.replace(/\/$/,'')+'/rest/v1/rpc/'+fn, {
+      method:'POST',
+      headers:{ apikey:anonKey, Authorization:'Bearer '+anonKey, 'Content-Type':'application/json' },
+      body: JSON.stringify(body),
+      signal: ctl.signal,
+    }).then(async r => { if(!r.ok) throw new Error('rpc '+fn+' '+r.status+' '+(await r.text())); return r.json(); })
+      .finally(()=>clearTimeout(t));
+  };
   const row0 = rows => (Array.isArray(rows) && rows.length) ? rows[0] : null;
   return {
     async pull(key){
@@ -1266,19 +1304,26 @@ async function setSync(cfg){                        // Settings/pairing writes c
   if(syncStore) await syncNow('config');
   return !!syncStore;
 }
+let syncStartedAt = 0;
 async function syncNow(reason){
   if(!syncStore || !syncOwnerId) return null;
-  if(syncing){ syncPending = true; return null; }   // coalesce; re-arm after the in-flight pass
-  syncing = true;
+  if(syncing){
+    // Watchdog: the single-flight flag must never wedge sync permanently. Fetches
+    // now abort at 10s, so a pass older than 60s is a zombie — reset and proceed.
+    if(Date.now()-syncStartedAt > 60000){ diag('sync-watchdog-reset', {reason, stuckMs:Date.now()-syncStartedAt}); }
+    else { syncPending = true; return null; }       // coalesce; re-arm after the in-flight pass
+  }
+  syncing = true; syncStartedAt = Date.now();
   try{
     do{
       syncPending = false;
       const res = await syncOnce(syncStore, syncOwnerId);   // pull → merge → CAS push → retry
-      if(res && res.ok){ syncLastAt = Date.now(); syncLastError = null; T('sync '+reason+' ok pushed='+(!!res.pushed)+' v='+(res.version||0)); }
-      else { syncLastError = 'conflict'; T('sync '+reason+' not-ok'); }
+      if(res && res.ok){ syncLastAt = Date.now(); syncLastError = null;
+        diag('sync', {reason, pushed:!!res.pushed, noop:!!res.noop, pulled:!!res.pulled, v:res.version||0, attempts:res.attempts||0}); }
+      else { syncLastError = 'conflict'; diag('sync-conflict', {reason}); }
     } while(syncPending && syncStore);
     return true;
-  }catch(e){ syncLastError = (e&&e.message)||'error'; console.warn('[buddy] sync failed ('+reason+')', e); T('sync '+reason+' FAILED '+(e&&e.message)); return null; }
+  }catch(e){ syncLastError = (e&&e.message)||'error'; console.warn('[buddy] sync failed ('+reason+')', e); diag('sync-error', {reason, err:String(e&&e.message).slice(0,120)}); return null; }
   finally{ syncing = false; if(typeof renderSyncStatus==='function') renderSyncStatus(); }
 }
 function scheduleSync(){                             // debounced push after a local change
@@ -1419,7 +1464,7 @@ function load(){
    ROLLOVER  — compare stored today.date to the current local date
    ==================================================================== */
 function maybeRollover(){
-  if(editingId!==null) return false;          // never roll over mid-edit
+  if(editingActive()) return false;           // never roll over mid-edit (heals a leaked guard)
   const cur=localDate();
   const stored=state.today.date;
   if(stored===cur) return false;              // same day → restore verbatim, no morning
@@ -1437,6 +1482,7 @@ function maybeRollover(){
     };
     state.history.unshift(record);
     // history is kept forever until the user erases it (Settings → Erase all data)
+    diag('rollover', {branch:'archive', from:stored, items:record.items.length});
     state.today={ date:cur, items:[], morningDone:false };
     return true;                              // → caller shows morning
   } else if(state.today.items.length>0){
@@ -1446,6 +1492,7 @@ function maybeRollover(){
     const rec=state.history.find(h=>h.date===stored);
     const live=todayToHistoryRecord(state.today);
     if(rec && live){ const m=mergeHistRecord(rec, live); rec.items=m.items; rec.weekday=m.weekday; }
+    diag('rollover', {branch:'merge-existing', from:stored, items:state.today.items.length});
     state.today={ date:cur, items:[], morningDone:false };
     return true;
   } else {
@@ -2525,6 +2572,7 @@ $('#quitBtn')?.addEventListener('click', e=>{ e.stopPropagation();
   let shown=false;
   function show(ver){
     if(shown) return; shown=true;          // don't re-animate once the banner is up
+    diag('update-banner-shown', {ver:String(ver)});
     title.textContent='Buddy '+ver+' is ready';
     sub.textContent='A new version is available';
     banner.classList.remove('hidden');
@@ -2710,6 +2758,7 @@ window.__buddy = {
   get state(){ return state; },
   STORAGE_KEY,
   localDate,
+  diagEvents(){ return diagRing.slice(); },   // the in-memory diagnostics ring (tests + browser)
   // Read the raw persisted blob.
   read(){ return lsGet(STORAGE_KEY); },
   readBak(){ return lsGet(BAK_KEY); },
@@ -3148,6 +3197,24 @@ window.__buddy = {
          && (w21.deferred.find(d=>d.id==='ud1')||{}).zzDef===7
          && w21.settings.historyDays===14,
          canonicalJSON({top:w21.zzNewTopLevel,td:w21.today.zzToday,it:(w21.today.items[0]||{}).zzItem,df:(w21.deferred[0]||{}).zzDef,hd:w21.settings&&w21.settings.historyDays}));
+
+      // 22. Same-title deferred dedupe: two devices parking the same task mint two ids;
+      // the union must collapse to ONE deterministic winner (field: 'Warren Logo' ×3).
+      // Sent rows and blank titles are exempt; both merge directions agree.
+      const ddA=snap({savedAt:2000,deferred:[
+        {id:'w1',text:'Warren Logo',wake:'',v:1},{id:'r1',text:'Richie Email',wake:'',v:2}]});
+      const ddB=snap({savedAt:1000,deferred:[
+        {id:'w2',text:'Warren Logo',wake:'',v:2},{id:'r2',text:'Richie Email',wake:'',v:1},
+        {id:'s1',text:'Warren Logo',wake:'',sent:true,sentTid:'nope',v:3}]});
+      const m22a=merge(ddA,ddB), m22b=merge(ddB,ddA);
+      const titles=m=>m.deferred.filter(d=>!d.sent).map(d=>d.text).sort().join(',');
+      // s1's sent flag reconciles away (dangling sentTid) → it joins the dedupe as a
+      // plain v3 row and WINS the Warren Logo slot (highest v).
+      ok('deferred same-title dedupe: one winner per title, symmetric',
+         titles(m22a)==='Richie Email,Warren Logo'
+         && eq(m22a.deferred.map(d=>d.id).sort(), m22b.deferred.map(d=>d.id).sort())
+         && m22a.deferred.find(d=>!d.sent&&d.text==='Warren Logo').v===3,
+         titles(m22a)+' | ids '+m22a.deferred.map(d=>d.id).join(','));
     }catch(e){ ok('mergeTest ran without throwing', false, e&&e.message); }
     const failed=R.filter(r=>!r.pass);
     return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
@@ -3263,6 +3330,32 @@ window.__buddy = {
 /* ---- native (Tauri) window sizing: morning = full screen, daily = right-edge strip ---- */
 const NATIVE = !!(window.__TAURI__ && window.__TAURI__.window);
 function T(m){ try{ window.__TAURI__?.core?.invoke('trace',{msg:String(m)}); }catch(_){} }
+
+/* ---------------- diagnostics event log (privacy-safe) ----------------
+   Structured JSONL appended to buddy-events.jsonl in the app data dir so a
+   field incident can be diagnosed AFTER the fact (trace() only hits stderr,
+   which evaporates for the installed app). RULES: never log task text or any
+   user content — event names, counts, short id prefixes, versions, timings
+   only. Buffered + debounced so logging never adds I/O pressure. Browser
+   builds keep an in-memory ring (readable via __buddy.diagEvents()). */
+const DIAG_MAX_RING = 400;
+let diagRing = [], diagPending = [], diagFlushTimer = null;
+function diag(evt, data){
+  try{
+    const rec = { t: new Date().toISOString(), evt, ...(data||{}) };
+    diagRing.push(rec); if(diagRing.length > DIAG_MAX_RING) diagRing.shift();
+    if(!NATIVE) return;
+    diagPending.push(JSON.stringify(rec));
+    clearTimeout(diagFlushTimer);
+    diagFlushTimer = setTimeout(diagFlush, 2000);
+  }catch(_){}
+}
+function diagFlush(){
+  if(!NATIVE || !diagPending.length) return;
+  const lines = diagPending.join('\n'); diagPending = [];
+  try{ window.__TAURI__?.core?.invoke('append_event', { lines })?.catch?.(()=>{}); }catch(_){}
+}
+window.addEventListener('beforeunload', diagFlush);
 // Native reveal/toggle intents from Rust (cursor-edge monitor, tray, shortcut).
 // Morning window geometry memory retired (see nativeFit 'full'): the save raced the native
 // re-chrome and restored bad/tiny values. Clear any stale saved value so it can't linger.
@@ -3396,6 +3489,7 @@ function bootFinish(recovered){
   // Show the morning whenever today hasn't been planned yet (morningDone flag) —
   // even if slept tasks have woken into the list, so you still plan your three.
   T('boot done='+state.today.morningDone+' n='+state.today.items.length+' rolled='+rolled+' recovered='+recovered);
+  diag('boot', {items:state.today.items.length, hist:state.history.length, deferred:(state.deferred||[]).length, rolled:!!rolled, recovered:!!recovered});
   if(!state.today.morningDone) showMorning(); else settleNative();
   writeNow();                                // converge localStorage + file mirror to the chosen state
 }

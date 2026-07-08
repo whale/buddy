@@ -252,4 +252,26 @@ final class Slice2MergeTests: XCTestCase {
         let old = try JSONDecoder().decode(SyncWire.self, from: Data(legacy.utf8)).toSnapshot()
         XCTAssertEqual(old.deferred.first?.v, 1)
     }
+
+    // MARK: - 22. Same-title deferred dedupe (mirrors Mac mergeTest 22): two devices
+    // parking the same task mint two ids; the union collapses to ONE deterministic
+    // winner. A reconciled orphan (dangling sentTid) joins the dedupe and can win on v.
+    func testDeferredSameTitleDedupeIsDeterministicAndSymmetric() {
+        let a = snap(deferred: [DeferredTask(id: "w1", text: "Warren Logo", wake: "", v: 1),
+                                DeferredTask(id: "r1", text: "Richie Email", wake: "", v: 2)],
+                     savedAt: 2000)
+        let b = snap(deferred: [DeferredTask(id: "w2", text: "Warren Logo", wake: "", v: 2),
+                                DeferredTask(id: "r2", text: "Richie Email", wake: "", v: 1),
+                                DeferredTask(id: "s1", text: "Warren Logo", wake: "",
+                                             sent: true, sentTid: "nope", v: 3)],
+                     savedAt: 1000)
+        let m1 = BuddyMerge.merge(a, b)!
+        let m2 = BuddyMerge.merge(b, a)!
+        XCTAssertEqual(m1.deferred.map(\.id).sorted(), m2.deferred.map(\.id).sorted())
+        let plain = m1.deferred.filter { $0.sent != true }
+        XCTAssertEqual(plain.map(\.text).sorted(), ["Richie Email", "Warren Logo"])
+        // s1's sent flag reconciles away (dangling sentTid) → plain v3 wins the Warren slot.
+        XCTAssertEqual(plain.first { $0.text == "Warren Logo" }?.v, 3)
+        XCTAssertEqual(plain.first { $0.text == "Richie Email" }?.v, 2)
+    }
 }

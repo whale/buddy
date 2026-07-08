@@ -89,6 +89,26 @@ lockstep, building, then `gh release create` with the DMG, `Buddy.app.tar.gz`,
 and a `latest.json` manifest. The installed app auto-checks and shows an update
 banner. Repo is public (MIT).
 
+## 🩺 RULE 3 — Self-diagnose at session start; self-test before blaming the user's setup.
+
+Buddy has a **privacy-safe diagnostics log** and a **two-device live sync harness** so
+field reports can be traced and reproduced WITHOUT the user babysitting.
+
+1. **At every session start** (and whenever the user reports weirdness), read the
+   event log first: `pnpm diag errors` (or `pnpm diag 60`). It's structured JSONL at
+   `~/Library/Application Support/fyi.whale.buddy/buddy-events.jsonl` — sync passes,
+   conflicts, watchdog resets, healed edit-guards, rollover branches, banner shows.
+   **It never contains task text** (event names / counts / versions / timings only —
+   keep it that way; never log user content). iOS writes the same schema on-device
+   (`BuddyDiag.swift`); surface it via a future Settings → Export diagnostics.
+2. **Reproduce cross-device bugs yourself** with `pnpm sync:live` — it boots TWO
+   isolated browser "devices" paired on the real Supabase backend with a throwaway
+   syncKey and drives future→today, undo, dedupe, convergence end-to-end. Extend it
+   with the user's exact repro before touching the merge code.
+3. The state files are forensics: `buddy-state.json` (+ `.recovery`, localStorage
+   `.bak`) show ids (uppercase = iPhone-minted, lowercase = Mac), per-row `v`, and
+   tombstones — often enough to reconstruct what happened without any log.
+
 ## Foundation
 
 Buddy's design language follows the shared Foundation system — prefer its tokens
