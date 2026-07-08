@@ -96,7 +96,14 @@ final class SyncEngine {
         do {
             let res = try await BuddySync.syncOnce(store: cas, key: key, local: local)
             if res.ok {
-                if let merged = res.merged { store.adopt(merged) }
+                // Adopt ONLY when the pass actually changed something for us. On a noop
+                // pass where local already equals the remote content, re-adopting would
+                // rewrite state + disk every 1.5s poll for nothing (UI jitter, IO churn) —
+                // mirrors the Mac's "only re-apply when our local copy is behind remote".
+                if let merged = res.merged,
+                   !(res.noop && BuddySync.contentKey(local) == BuddySync.contentKey(merged)) {
+                    store.adopt(merged)
+                }
                 lastSyncedAt = Date()
                 lastError = nil
             } else {

@@ -23,6 +23,18 @@ final class BuddyStore {
     // --- sync merge foundation (step 2, no network yet) ---
     var tombstones: [String: Double] = [:]  // { itemId: deletedAt } — deletes persist across a merge
     var erasedAt: Double? = nil             // "erase all" barrier so a real wipe wins over stale pushes
+    // Unknown top-level wire fields from a newer peer (the Mac's doneWordBag / pinned /
+    // restartStash, future additions) — persisted + merged + pushed back untouched.
+    var extras: [String: JSONValue] = [:]
+    // "Last USER mutation" stamp (seconds) — merge() scalar conflicts key off this.
+    // Bumped ONLY on a genuine local mutation (mirrors the Mac's save()); adopting a
+    // pulled snapshot takes the merged max instead, so a device is never "newer" just
+    // because it re-serialised (the 0.3.17 always-newer bug).
+    private(set) var lastMutatedAt: Double = 0
+    // True while a row edit is in flight in the UI. adopt() defers while set — a remote
+    // apply mid-type would tear down the text field and could commit a half-typed task
+    // (mirrors the Mac's applyWire editingId guard). The next sync pass re-merges.
+    var isEditing = false
 
     // MARK: - Derived helpers
     var activeTasks: [BuddyTask] { today.items.filter { $0.isActive } }
@@ -163,6 +175,7 @@ final class BuddyStore {
         today.items.append(BuddyTask(id: newTid, text: deferred[idx].text, state: .neutral))
         deferred[idx].sent = true
         deferred[idx].sentTid = newTid
+        deferred[idx].v += 1               // send bumps the row's merge version (beats a stale peer copy)
         scheduleSave()
     }
 
@@ -175,8 +188,9 @@ final class BuddyStore {
             tombstone(tid)
             today.items.removeAll { $0.id == tid }
         }
-        deferred[idx].sent = false
+        deferred[idx].sent = nil           // cleared, not false — the wire omits an unset sent
         deferred[idx].sentTid = nil
+        deferred[idx].v += 1               // unsend also bumps — undo must beat the peer's sent copy
         scheduleSave()
     }
 
@@ -272,17 +286,21 @@ final class BuddyStore {
 
     // MARK: - Sync bridge (P1.5)
 
-    /// Build the mergeable snapshot the sync loop pushes. savedAt is stamped NOW (mirrors the
-    /// Mac's serialize()), so a genuine local change wins scalar (settings / today.date) conflicts.
+    /// Build the mergeable snapshot the sync loop pushes. savedAt is the LAST USER
+    /// MUTATION stamp — NEVER Date() — so an idle snapshot doesn't claim "newer" and
+    /// steamroll the other device's scalar fields (mirrors the Mac's serialize()).
     func snapshot() -> SyncSnapshot {
         SyncSnapshot(today: today, history: history, deferred: deferred, settings: settings,
-                     tombstones: tombstones, erasedAt: erasedAt, savedAt: Date().timeIntervalSince1970)
+                     tombstones: tombstones, erasedAt: erasedAt, savedAt: lastMutatedAt,
+                     extras: extras)
     }
 
     /// Replace local state from a merged snapshot (the result of a pull+merge). Persists directly
     /// and NEVER fires onLocalChange — adopting remote truth must not schedule another push. Must
     /// be called on the main actor (mutates @Observable state the UI reads). Fires no celebration.
+    /// Deferred while a row edit is in flight (isEditing) — the next pass re-merges.
     func adopt(_ merged: SyncSnapshot) {
+        guard !isEditing else { return }     // never clobber an in-progress edit (Mac applyWire parity)
         applyingRemote = true
         defer { applyingRemote = false }
         if let t = merged.today { today = t }
@@ -291,6 +309,8 @@ final class BuddyStore {
         if let s = merged.settings { settings = s }
         tombstones = merged.tombstones
         erasedAt   = merged.erasedAt
+        extras     = merged.extras
+        lastMutatedAt = merged.savedAt       // adopt the merged max — adopting must NOT claim newer
         saveToDisk()                         // persist without going through scheduleSave/dirty
     }
 
@@ -314,68 +334,84 @@ final class BuddyStore {
     }
 
     // MARK: - Rollover
-    // Mirrors Mac's `maybeRollover()` + the carry-over in `bootFinish()`.
+    // Mirrors the Mac's `maybeRollover()` + `rolloverAndCarry()` (dist/index.html).
     @discardableResult
     func performRolloverIfNeeded() -> Bool {
+        guard !isEditing else { return false }             // never roll over mid-edit (Mac parity)
         let cur = Self.localDate()
         let stored = today.date
-        guard stored != cur else { return false }
+        guard stored != cur else { return false }          // same day → restore verbatim
+        guard !stored.isEmpty else { today.date = cur; return false }
 
-        // A new day: "Sent to today!" rows have served their purpose — clear them (Mac parity,
-        // matching rolloverAndCarry's `deferred.filter(d=>!d.sent)`).
+        let hadLive = !today.items.isEmpty
+
+        if hadLive && !history.contains(where: { $0.date == stored }) {
+            // Archive today's list — stable per-day ids (h-<date>-<i>) match the Mac so
+            // cross-device history merges by id.
+            if let record = BuddyMerge.todayToHistoryRecord(today) {
+                history.insert(record, at: 0)
+            }
+            today = TodayState(date: cur, items: [])
+        } else if hadLive {
+            // Day already archived (the other device rolled first, or a clock rewind) —
+            // MERGE the live items into the existing record instead of dropping them
+            // (done-wins, same positional ids as the peer's archive so the union dedupes).
+            if let idx = history.firstIndex(where: { $0.date == stored }),
+               let live = BuddyMerge.todayToHistoryRecord(today) {
+                let m = BuddyMerge.mergeHistRecord(history[idx], live)
+                history[idx].items = m.items
+                history[idx].weekday = m.weekday
+            }
+            today = TodayState(date: cur, items: [])
+        } else {
+            // Empty/skipped day → advance the date AND reset morningDone (archive nothing).
+            today = TodayState(date: cur, items: [])
+        }
+
+        // A new day: "Sent to today!" rows have served their purpose — clear them
+        // (matches rolloverAndCarry's `deferred.filter(d=>!d.sent)` + sentTid wipe).
         deferred = deferred.filter { !($0.sent ?? false) }
         for i in deferred.indices { deferred[i].sentTid = nil }
 
-        // Archive today's tasks into history — but only once per day. If this date is
-        // already in history (a second rollover this run, or a record merged in from
-        // another device), don't duplicate it. Closes the double-midnight loss path.
-        if !today.items.isEmpty && !history.contains(where: { $0.date == stored }) {
-            let wd = weekdayName(for: stored)
-            let record = Day(
-                date: stored,
-                weekday: wd,
-                // Stable per-day ids (h-<date>-<i>) match the Mac so cross-device history merges by id.
-                items: today.items.enumerated().map { i, t in
-                    DayItem(id: "h-\(stored)-\(i)", text: t.text, done: t.state == .done)
+        // Carry the archived day's UNFINISHED tasks forward (first hardCap of them, deduped
+        // by text, fresh ids) — but only when there WERE live items pre-rollover. Reads the
+        // record for `stored` (not "did history grow") so the already-archived branch —
+        // where the other device rolled the day first — carries forward too.
+        if hadLive, let rec = history.first(where: { $0.date == stored }) {
+            for it in rec.items.filter({ !$0.done }).prefix(Self.hardCap) {
+                if activeCount < Self.hardCap && !today.items.contains(where: { $0.text == it.text }) {
+                    today.items.append(BuddyTask(id: newId(), text: it.text, state: .neutral))
                 }
-            )
-            history.insert(record, at: 0)
-
-            // Carry ALL unfinished tasks forward (up to the hard cap of 6, the full list).
-            let unfinished = record.items.filter { !$0.done }.prefix(Self.hardCap)
-            var carryItems: [BuddyTask] = []
-            for item in unfinished where carryItems.count < Self.hardCap {
-                carryItems.append(BuddyTask(id: newId(), text: item.text, state: .neutral))
             }
-            today = TodayState(date: cur, items: carryItems)
-            scheduleSave(immediate: true)
-            return true
         }
 
-        // Day already archived (idempotent) or nothing to archive — advance to a fresh day.
-        // NOTE (sync): this resets morningDone to false, which is correct for a genuinely new
-        // day. A sync-merged archive for `stored` could also land here while today still holds
-        // the old date — revisit when wiring live sync so a merge can't re-trigger the morning.
-        today = TodayState(date: cur, items: [])
         scheduleSave(immediate: true)
-        return true
+        return true                                        // → caller shows morning
     }
 
     // (Removed auto-wakeDeferred: Future is a manual holding pen on both platforms now.)
 
     // MARK: - Persistence
 
-    private static var storeURL: URL {
+    private static var storeDir: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let buddyDir = dir.appendingPathComponent("Buddy", isDirectory: true)
         try? FileManager.default.createDirectory(at: buddyDir, withIntermediateDirectories: true)
-        return buddyDir.appendingPathComponent("buddy.v1.json")
+        return buddyDir
     }
+    static var storeURL: URL   { storeDir.appendingPathComponent("buddy.v1.json") }
+    static var backupURL: URL  { storeDir.appendingPathComponent("buddy.v1.bak.json") }
+    /// An unreadable primary is MOVED here (kept for forensics) before anything can overwrite it.
+    static var corruptURL: URL { storeDir.appendingPathComponent("buddy.v1.corrupt.json") }
 
     private func scheduleSave(immediate: Bool = false) {
-        // A local mutation → signal the sync engine to schedule a debounced push. Suppressed
-        // while adopting a remote snapshot (that write is the RESULT of a pull, not a new edit).
-        if !applyingRemote { onLocalChange?() }
+        // A local mutation → stamp "last user mutation" (merge scalars key off it) and
+        // signal the sync engine to schedule a debounced push. Both suppressed while
+        // adopting a remote snapshot (that write is the RESULT of a pull, not a new edit).
+        if !applyingRemote {
+            lastMutatedAt = Date().timeIntervalSince1970
+            onLocalChange?()
+        }
         saveWorkItem?.cancel()
         if immediate {
             saveToDisk()
@@ -389,13 +425,14 @@ final class BuddyStore {
     private func saveToDisk() {
         let blob = PersistedBlob(
             version: 1,
-            savedAt: Date().timeIntervalSince1970,
+            savedAt: lastMutatedAt,   // last USER mutation — a re-save must not claim "newer"
             today: today,
             history: history,
             deferred: deferred,
             settings: settings,
             tombstones: tombstones,
-            erasedAt: erasedAt
+            erasedAt: erasedAt,
+            extras: extras
         )
         do {
             let data = try JSONEncoder().encode(blob)
@@ -405,19 +442,42 @@ final class BuddyStore {
         }
     }
 
+    /// Corruption guard: an unreadable primary is SET ASIDE (buddy.v1.corrupt.json) before
+    /// anything can overwrite it, then the backup is tried, then we fall back to a fresh
+    /// state. Every successful primary load refreshes the backup copy.
     private func loadFromDisk() {
-        guard let data = try? Data(contentsOf: Self.storeURL) else { return }
-        do {
-            let blob = try JSONDecoder().decode(PersistedBlob.self, from: data)
-            today    = blob.today ?? TodayState(date: Self.localDate(), items: [])
-            history  = (blob.history ?? []).map { var d = $0; d.backfillItemIds(); return d }   // legacy records get stable ids
-            deferred = blob.deferred ?? []
-            settings = blob.settings ?? .default
-            tombstones = blob.tombstones ?? [:]
-            erasedAt   = blob.erasedAt
-        } catch {
-            print("[BuddyStore] load failed: \(error)")
+        let fm = FileManager.default
+        guard let data = try? Data(contentsOf: Self.storeURL) else { return }   // first run — nothing on disk
+        if applyPersistedData(data) {
+            // Good primary → refresh the backup so a future corruption is recoverable.
+            try? fm.removeItem(at: Self.backupURL)
+            try? fm.copyItem(at: Self.storeURL, to: Self.backupURL)
+            return
         }
+        // Primary is unreadable. Move it aside FIRST — init()'s scheduleSave would
+        // otherwise overwrite the only copy of whatever it still contains.
+        print("[BuddyStore] primary store unreadable — setting it aside at \(Self.corruptURL.lastPathComponent)")
+        try? fm.removeItem(at: Self.corruptURL)
+        try? fm.moveItem(at: Self.storeURL, to: Self.corruptURL)
+        if let bak = try? Data(contentsOf: Self.backupURL), applyPersistedData(bak) {
+            print("[BuddyStore] recovered from backup \(Self.backupURL.lastPathComponent)")
+            return
+        }
+        print("[BuddyStore] no recoverable backup — starting fresh (original kept for forensics)")
+    }
+
+    /// Decode + apply one persisted blob. Returns false (leaving state untouched) on failure.
+    private func applyPersistedData(_ data: Data) -> Bool {
+        guard let blob = try? JSONDecoder().decode(PersistedBlob.self, from: data) else { return false }
+        today    = blob.today ?? TodayState(date: Self.localDate(), items: [])
+        history  = (blob.history ?? []).map { var d = $0; d.backfillItemIds(); return d }   // legacy records get stable ids
+        deferred = blob.deferred ?? []
+        settings = blob.settings ?? .default
+        tombstones = blob.tombstones ?? [:]
+        erasedAt   = blob.erasedAt
+        extras     = blob.extras ?? [:]
+        lastMutatedAt = blob.savedAt          // restore the "last user mutation" stamp
+        return true
     }
 
     // MARK: - ID generation (mirrors Mac's nid())
@@ -437,15 +497,6 @@ final class BuddyStore {
         let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date())!
         return Self.localDate(tomorrow)
     }
-
-    private func weekdayName(for dateString: String) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        guard let date = f.date(from: dateString) else { return "" }
-        let wf = DateFormatter()
-        wf.dateFormat = "EEEE"
-        return wf.string(from: date)
-    }
 }
 
 // MARK: - Serialised blob
@@ -453,11 +504,14 @@ final class BuddyStore {
 // All fields optional so partial/corrupted data doesn't crash load.
 private struct PersistedBlob: Codable {
     var version: Int
-    var savedAt: Double
+    var savedAt: Double          // last USER mutation (seconds) — restored into lastMutatedAt
     var today: TodayState?
     var history: [Day]?
     var deferred: [DeferredTask]?
     var settings: BuddySettings?
     var tombstones: [String: Double]?
     var erasedAt: Double?
+    // Unknown top-level wire fields (version-skew pass-through). Local-only file, so a
+    // plain nested key is fine here — the wire spreads them at the top level instead.
+    var extras: [String: JSONValue]?
 }
