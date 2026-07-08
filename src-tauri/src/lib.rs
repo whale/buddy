@@ -304,6 +304,40 @@ fn report_bug(screenshot: String, logs: String) -> Result<(), String> {
     Ok(())
 }
 
+
+/// Export completed tasks from the Mac app. Browser downloads can silently fail in
+/// the Tauri webview, so write the Markdown file directly to Downloads and return
+/// the path for a small in-app confirmation.
+#[tauri::command]
+fn export_done_tasks(filename: String, markdown: String) -> Result<String, String> {
+    let safe_name: String = filename
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '-' })
+        .collect();
+    let safe_name = if safe_name.ends_with(".md") && safe_name.len() > 3 {
+        safe_name
+    } else {
+        "buddy-done.md".to_string()
+    };
+
+    let base = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .map(|p| p.join("Downloads"))
+        .filter(|p| p.is_dir())
+        .unwrap_or_else(std::env::temp_dir);
+    let mut path = base.join(&safe_name);
+    if path.exists() {
+        let stem = safe_name.trim_end_matches(".md");
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        path = base.join(format!("{stem}-{ts}.md"));
+    }
+    std::fs::write(&path, markdown.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 // ============ "Reserve space when pinned" — Accessibility window nudging ============
 // When ON, a background loop watches other apps' on-screen windows and pushes any
 // that intrude into Buddy's right-edge column back out (shrink if wide, else slide
@@ -724,7 +758,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, set_reserve, set_morning_mode, morning_translucent, check_for_update, install_update, load_state, load_recovery_state, save_state, append_event])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, export_done_tasks, set_reserve, set_morning_mode, morning_translucent, check_for_update, install_update, load_state, load_recovery_state, save_state, append_event])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).

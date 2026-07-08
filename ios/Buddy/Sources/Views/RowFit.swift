@@ -14,14 +14,16 @@ enum RowFit {
     struct Result: Equatable { var font: CGFloat; var vpad: CGFloat; var scroll: Bool }
 
     static let padMax: CGFloat = 16, padMin: CGFloat = 8
+    static let addBottomExtra: CGFloat = 8
 
     /// - active: the active task texts (the big, possibly multi-line rows).
     /// - doneCount: compact Donezo rows sitting above (fixed 15pt) — reserve their space.
     /// - height/width: the list card's available size. width is the card width (gutters removed inside).
     /// - ceil/floor: font ceiling & legibility floor (main view 24, morning 22).
     static func compute(active: [String], doneCount: Int, height H: CGFloat, width cardW: CGFloat,
+                        includesAdd: Bool = true,
                         ceil: CGFloat = 24, floor: CGFloat = 16) -> Result {
-        guard H > 0, cardW > 0, !active.isEmpty else { return Result(font: ceil, vpad: padMax, scroll: false) }
+        guard H > 0, cardW > 0 else { return Result(font: ceil, vpad: padMax, scroll: false) }
         let innerW = max(40, cardW - 64)                 // 32pt gutter each side
         // Compact done rows: single line at 15pt + generous padding + divider. Overestimated
         // on purpose (safe — leaves the active rows a little extra headroom).
@@ -40,8 +42,10 @@ enum RowFit {
                                   options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
                 sum += r.height.rounded(.up) + 2 * p
             }
-            sum += uf.lineHeight + 2 * p        // the "Add +" row (one line)
-            sum += n * 1                        // hairline dividers
+            if includesAdd {
+                sum += uf.lineHeight + 2 * p + addBottomExtra  // the "Add +" row (one line) with extra bottom air
+            }
+            sum += max(0, n + (includesAdd ? 1 : 0) - 1) * 1   // hairline dividers between active/add rows
             return sum + 4                      // safety epsilon vs SwiftUI's own line metrics
         }
 

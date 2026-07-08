@@ -34,6 +34,11 @@ enum ScreenshotHarness {
         case "long":
             store.seedForScreenshot(tasks: MockData.longTasks)
             return (store, .none, false, false)
+        case "done-tight":
+            store.seedForScreenshot(tasks: (1...5).map { i in
+                BuddyTask(id: "dt\(i)", text: "Finished item \(i)", state: .done, doneAt: Date())
+            })
+            return (store, .none, false, false)
         case "long-morning":
             store.seedForScreenshot(tasks: MockData.longTasks, morningDone: false)
             return (store, .none, true, false)
@@ -45,6 +50,11 @@ enum ScreenshotHarness {
             return (store, .none, true, false)
         case "history":
             store.seedForScreenshot(tasks: MockData.normalTasks, history: recentHistory())
+            store.deferred = [DeferredTask(id: "f1", text: "Renew the domain", wake: "2026-07-05"),
+                              DeferredTask(id: "f2", text: "Plan Q3 offsite", wake: "2026-07-10")]
+            return (store, .history, false, false)
+        case "history-full":
+            store.seedForScreenshot(tasks: MockData.alarmTasks, history: recentHistory())
             store.deferred = [DeferredTask(id: "f1", text: "Renew the domain", wake: "2026-07-05"),
                               DeferredTask(id: "f2", text: "Plan Q3 offsite", wake: "2026-07-10")]
             return (store, .history, false, false)

@@ -42,6 +42,17 @@ final class CycleStoreTests: XCTestCase {
         XCTAssertNil(s.addTask())                          // no 7th active task
     }
 
+
+    func testWakeDeferredBlockedAtHardCap() {
+        let s = BuddyStore()
+        s.today = TodayState(date: BuddyStore.localDate(),
+                             items: (0..<6).map { neutral("t\($0)") }, morningDone: true)
+        s.deferred = [DeferredTask(id: "f1", text: "Future task", wake: "2026-07-09")]
+        s.wakeDeferredTask(id: "f1")
+        XCTAssertEqual(s.activeCount, BuddyStore.hardCap)
+        XCTAssertNil(s.deferred.first?.sent)
+    }
+
     // Check-off circle (parity item A): complete() marks done from any state.
     func testCompleteDirectlyMarksDone() {
         let s = BuddyStore()
