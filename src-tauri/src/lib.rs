@@ -150,7 +150,9 @@ fn set_morning_mode(app: AppHandle, on: bool) {
 /// morning content instead of sitting on a broken see-through title bar.
 #[cfg(target_os = "macos")]
 fn morning_window_chrome(win: &tauri::WebviewWindow, on: bool) {
-    use objc2_app_kit::{NSColor, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility};
+    use objc2_app_kit::{
+        NSColor, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask, NSWindowTitleVisibility,
+    };
     let Ok(ptr) = win.ns_window() else { return };
     if ptr.is_null() {
         return;
@@ -183,6 +185,19 @@ fn morning_window_chrome(win: &tauri::WebviewWindow, on: bool) {
         } else {
             ns.setOpaque(false);
             ns.setBackgroundColor(Some(&NSColor::clearColor()));
+        }
+        // Tiling tools (Rectangle/Magnet, the green-button tile menu) IGNORE windows flagged
+        // as auxiliary panels. The drawer needs CanJoinAllSpaces|FullScreenAuxiliary to float
+        // over full-screen apps, but that same flag makes morning un-tileable. Strip it during
+        // morning (→ a first-class window), restore it for the drawer.
+        if on {
+            ns.setCollectionBehavior(NSWindowCollectionBehavior::Default);
+        } else {
+            ns.setCollectionBehavior(
+                ns.collectionBehavior()
+                    | NSWindowCollectionBehavior::CanJoinAllSpaces
+                    | NSWindowCollectionBehavior::FullScreenAuxiliary,
+            );
         }
     }
 }
