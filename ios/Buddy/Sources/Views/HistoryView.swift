@@ -14,6 +14,7 @@ struct HistoryView: View {
     enum Tab: String, CaseIterable { case future = "Future", done = "Done" }
     @State private var tab: Tab = .future
     @State private var pastDaysShown = 7   // Mac PAST_PAGE — "Load more" pages a week at a time
+    @State private var openFutureRowID: String? = nil
 
     private var theme: EscalationTheme { EscalationTheme.from(activeCount: store.activeCount) }
 
@@ -111,16 +112,13 @@ struct HistoryView: View {
         if store.deferred.isEmpty {
             emptyState("Nothing in Future yet.")
         } else {
-            group(header: "Future") {
-                ForEach(store.deferred) { d in
-                    if d.sent == true {
-                        sentRow(id: d.id, text: d.text)
-                    } else {
-                        plainRow(d.text,
-                                 canAdd: !store.atHardCap,
-                                 add: { withoutAnimation { store.wakeDeferredTask(id: d.id) } },
-                                 remove: { store.deleteDeferred(id: d.id) })
-                    }
+            let rows = Array(store.deferred.reversed())
+            ForEach(Array(rows.enumerated()), id: \.element.id) { i, d in
+                if i > 0 { historyDivider }
+                if d.sent == true {
+                    sentFutureRow(id: d.id, text: d.text)
+                } else {
+                    futureRow(id: d.id, text: d.text)
                 }
             }
         }
@@ -154,34 +152,48 @@ struct HistoryView: View {
         .padding(.vertical, 5)
     }
 
-    // Future tab — a parked task already sent to today: "Sent to today!" + grey text (NO
-    // strikethrough) + undo. Mirrors the Mac's buildSentFutureRow.
-    private func sentRow(id: String, text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("Sent to today!").font(.geist(18, .semibold)).tracking(-0.30)
-                .foregroundStyle(theme.ink).fixedSize(horizontal: true, vertical: false)
-            Text(text).font(.geist(18, .regular)).tracking(-0.36)
-                .foregroundStyle(theme.inkDim).lineLimit(1)
-            Spacer(minLength: 8)
-            rowIcon("undo") { withoutAnimation { store.unsendDeferred(id: id) } }
-        }
-        .padding(.vertical, 5)
+    private var historyDivider: some View {
+        Rectangle().fill(theme.line).frame(height: 1)
     }
 
-    // Future tab row — + (bring to today) and × (remove for good).
-    private func plainRow(_ text: String, canAdd: Bool, add: @escaping () -> Void, remove: @escaping () -> Void) -> some View {
-        HStack(spacing: 6) {
-            Text(text).font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.ink).lineLimit(1)
-            Spacer(minLength: 8)
-            if canAdd {
-                Button(action: add) {
-                    LucideIcon("plus", size: 18).foregroundStyle(theme.inkDim)
-                        .frame(width: 30, height: 26).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-            }
-            rowIcon("x", size: 18, action: remove)
+    // Future rows use the Today row visual language, but fixed at 110pt and scrollable.
+    private func futureRow(id: String, text: String) -> some View {
+        SwipeableRow(
+            rowID: id,
+            openRowID: $openFutureRowID,
+            cardFill: theme.cardBackground,
+            onAdd: store.atHardCap ? nil : { withoutAnimation { store.wakeDeferredTask(id: id) } },
+            onDelete: { withoutAnimation { store.deleteDeferred(id: id) } }
+        ) {
+            Text(text)
+                .font(.geist(24, .medium)).tracking(-0.48).lineSpacing(2)
+                .foregroundStyle(theme.escalationText)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.horizontal, 32)
         }
-        .padding(.vertical, 5)
+        .frame(height: 110)
+    }
+
+    // A parked task already sent to today. Same fixed row, swipe to undo.
+    private func sentFutureRow(id: String, text: String) -> some View {
+        SwipeableRow(
+            rowID: id,
+            openRowID: $openFutureRowID,
+            cardFill: theme.cardBackground,
+            onRestore: { withoutAnimation { store.unsendDeferred(id: id) } }
+        ) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Sent to today!").font(.geist(18, .semibold)).tracking(-0.30)
+                    .foregroundStyle(theme.ink).fixedSize(horizontal: true, vertical: false)
+                Text(text).font(.geist(18, .regular)).tracking(-0.36)
+                    .foregroundStyle(theme.inkDim).lineLimit(1)
+                Spacer(minLength: 8)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .padding(.horizontal, 32)
+        }
+        .frame(height: 110)
     }
 
     // Rightmost row icon: glyph hugs the row's trailing edge so every surface's icons line up
