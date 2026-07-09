@@ -16,7 +16,8 @@ struct BuddyApp: App {
                 TodayView(store: cfg.store,
                           initialSheet: cfg.sheet,
                           forceMorning: cfg.forceMorning,
-                          forceCelebration: cfg.celebrate)
+                          forceCelebration: cfg.celebrate,
+                          initialEditingId: fixture == "editing" ? "m1" : nil)
             } else {
                 TodayView()
             }

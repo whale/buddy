@@ -34,6 +34,9 @@ enum ScreenshotHarness {
         case "long":
             store.seedForScreenshot(tasks: MockData.longTasks)
             return (store, .none, false, false)
+        case "editing":
+            store.seedForScreenshot(tasks: MockData.normalTasks)
+            return (store, .none, false, false)
         case "done-tight":
             store.seedForScreenshot(tasks: (1...5).map { i in
                 BuddyTask(id: "dt\(i)", text: "Finished item \(i)", state: .done, doneAt: Date())

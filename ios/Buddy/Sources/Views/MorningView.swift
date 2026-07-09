@@ -93,24 +93,27 @@ struct MorningView: View {
 
     private func recomputeFit(_ size: CGSize) {
         let active = store.activeTasks.map(\.text)
-        let showRestore = active.isEmpty && store.doneTasks.isEmpty && !store.lastListForRestore().isEmpty
+        let done = store.doneTasks.map(\.text)
+        let showRestore = active.isEmpty && done.isEmpty && !store.lastListForRestore().isEmpty
         // The restore row behaves like one active row for fitting when the list is empty.
         let texts = active.isEmpty && showRestore ? ["Restore your last list"] : active
-        let next = RowFit.compute(active: texts, doneCount: store.doneTasks.count,
+        let next = RowFit.compute(active: texts, done: done,
                                   height: size.height, width: size.width, ceil: 22)
         if next != fit { fit = next }
     }
 
     // Compact Donezo row (done-word + struck title), like the Mac's buildDonezoRow(morning).
     private func doneRow(_ task: BuddyTask) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(DoneWords.word(for: task.id)).font(.geist(15, .semibold)).tracking(-0.30)
+        let doneFont = RowFit.doneFont(for: fit.font)
+        let doneTracking = -0.02 * doneFont
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(DoneWords.word(for: task.id)).font(.geist(doneFont, .semibold)).tracking(doneTracking)
                 .foregroundStyle(theme.ink).fixedSize(horizontal: true, vertical: false)
-            Text(task.text).font(.geist(15, .regular)).tracking(-0.30)
+            Text(task.text).font(.geist(doneFont, .regular)).tracking(doneTracking)
                 .strikethrough(true, color: theme.inkDim).foregroundStyle(theme.inkDim).lineLimit(1)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 32).padding(.vertical, 18)
+        .padding(.horizontal, 32).padding(.vertical, RowFit.donePad(for: fit.vpad))
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture { store.restoreTask(id: task.id) }

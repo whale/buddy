@@ -16,25 +16,46 @@ enum RowFit {
     static let padMax: CGFloat = 16, padMin: CGFloat = 8
     static let addBottomExtra: CGFloat = 8
 
+    static func doneFont(for font: CGFloat) -> CGFloat {
+        max(11, min(15, font - 9))
+    }
+
+    static func donePad(for vpad: CGFloat) -> CGFloat {
+        max(6, min(16, vpad - 2))
+    }
+
     /// - active: the active task texts (the big, possibly multi-line rows).
-    /// - doneCount: compact Donezo rows sitting above (fixed 15pt) — reserve their space.
+    /// - done: compact Donezo texts sitting above. They still participate in the fit
+    ///   so a done-heavy list shrinks as one visual system instead of staying fixed.
     /// - height/width: the list card's available size. width is the card width (gutters removed inside).
     /// - ceil/floor: font ceiling & legibility floor (main view 24, morning 22).
-    static func compute(active: [String], doneCount: Int, height H: CGFloat, width cardW: CGFloat,
+    static func compute(active: [String], done: [String] = [], height H: CGFloat, width cardW: CGFloat,
                         includesAdd: Bool = true,
                         ceil: CGFloat = 24, floor: CGFloat = 16) -> Result {
         guard H > 0, cardW > 0 else { return Result(font: ceil, vpad: padMax, scroll: false) }
         let innerW = max(40, cardW - 64)                 // 32pt gutter each side
-        // Compact done rows: single line at 15pt + generous padding + divider. Overestimated
-        // on purpose (safe — leaves the active rows a little extra headroom).
-        let doneRowH: CGFloat = 15 * 1.3 + 2 * 16 + 1
-        let avail = H - CGFloat(doneCount) * doneRowH
+        let avail = H
         let n = CGFloat(active.count)
+        let doneN = CGFloat(done.count)
 
         func naturalTotal(_ f: CGFloat, _ p: CGFloat) -> CGFloat {
             guard let uf = UIFont(name: "Geist-Medium", size: f) else { return .greatestFiniteMagnitude }
             let para = NSMutableParagraphStyle(); para.lineSpacing = 2
             var sum: CGFloat = 0
+            let doneF = doneFont(for: f)
+            let doneP = donePad(for: p)
+            let doneUF = UIFont(name: "Geist-Regular", size: doneF) ?? .systemFont(ofSize: doneF)
+            let doneWordUF = UIFont(name: "Geist-SemiBold", size: doneF) ?? .boldSystemFont(ofSize: doneF)
+            for t in done {
+                let labelW: CGFloat = 74
+                let textW = max(40, innerW - labelW - 30)
+                let s = t.isEmpty ? "Untitled" : t
+                let r = NSAttributedString(string: s, attributes: [.font: doneUF])
+                    .boundingRect(with: CGSize(width: textW, height: .greatestFiniteMagnitude),
+                                  options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
+                let wordH = doneWordUF.lineHeight
+                sum += max(r.height.rounded(.up), wordH) + 2 * doneP
+            }
             for t in active {
                 let s = t.isEmpty ? "Untitled" : t
                 let r = NSAttributedString(string: s, attributes: [.font: uf, .paragraphStyle: para])
@@ -45,7 +66,7 @@ enum RowFit {
             if includesAdd {
                 sum += uf.lineHeight + 2 * p + addBottomExtra  // the "Add +" row (one line) with extra bottom air
             }
-            sum += max(0, n + (includesAdd ? 1 : 0) - 1) * 1   // hairline dividers between active/add rows
+            sum += max(0, doneN + n + (includesAdd ? 1 : 0) - 1) * 1   // hairline dividers between visible rows
             return sum + 4                      // safety epsilon vs SwiftUI's own line metrics
         }
 
