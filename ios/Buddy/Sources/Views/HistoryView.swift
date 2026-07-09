@@ -118,7 +118,7 @@ struct HistoryView: View {
                     } else {
                         plainRow(d.text,
                                  canAdd: !store.atHardCap,
-                                 add: { store.wakeDeferredTask(id: d.id) },
+                                 add: { withoutAnimation { store.wakeDeferredTask(id: d.id) } },
                                  remove: { store.deleteDeferred(id: d.id) })
                     }
                 }
@@ -163,7 +163,7 @@ struct HistoryView: View {
             Text(text).font(.geist(18, .regular)).tracking(-0.36)
                 .foregroundStyle(theme.inkDim).lineLimit(1)
             Spacer(minLength: 8)
-            rowIcon("undo") { store.unsendDeferred(id: id) }
+            rowIcon("undo") { withoutAnimation { store.unsendDeferred(id: id) } }
         }
         .padding(.vertical, 5)
     }
@@ -200,6 +200,12 @@ struct HistoryView: View {
             .foregroundStyle(theme.inkDim)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 28).padding(.vertical, 40)
+    }
+
+    private func withoutAnimation(_ action: () -> Void) {
+        var tx = Transaction(animation: nil)
+        tx.disablesAnimations = true
+        withTransaction(tx) { action() }
     }
 
     // Last N days from history that fall within the configured window, most-recent first.

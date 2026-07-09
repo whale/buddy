@@ -75,7 +75,7 @@ struct TodayView: View {
         ZStack {
             theme.screenBackground
                 .ignoresSafeArea()
-                .animation(.easeInOut(duration: 0.2), value: activeCount)
+                .animation((showHistory || showSettings) ? nil : .easeInOut(duration: 0.2), value: activeCount)
 
             VStack(spacing: 8) {          // gap-2 between the cards
                 headerCard                // date only
@@ -107,7 +107,7 @@ struct TodayView: View {
             .padding(.horizontal, 8)     // even side gutter
             .padding(.top, 8)            // small gutter below the status-bar safe area (no more)
             .ignoresSafeArea(.container, edges: .bottom)   // bottom bar runs off the bottom edge
-            .animation(.easeInOut(duration: 0.2), value: activeCount)
+            .animation((showHistory || showSettings) ? nil : .easeInOut(duration: 0.2), value: activeCount)
 
             if showCelebration {
                 CelebrationView(intensity: store.settings.celebrate) { showCelebration = false }
@@ -266,7 +266,7 @@ struct TodayView: View {
                     content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
             }
-            .animation(.easeOut(duration: 0.3), value: store.today.items)
+            .animation((showHistory || showSettings) ? nil : .easeOut(duration: 0.3), value: store.today.items)
             .onAppear { recomputeFit(geo.size) }
             .onChange(of: store.today.items) { _, _ in recomputeFit(geo.size) }
             .onChange(of: geo.size) { _, _ in recomputeFit(geo.size) }
