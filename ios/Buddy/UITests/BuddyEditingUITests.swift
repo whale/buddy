@@ -5,24 +5,29 @@ final class BuddyEditingUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func testTapTaskEntersEditingAndCommitsWithKeyboardDone() throws {
+    func testTapTaskEntersEditingKeepsKeyboardFocused() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-uiFixture", "lvl0"]
         app.launch()
 
         let original = "Write the iOS scaffold"
-        let edited = "Write the iOS scaffold updated"
         let task = app.staticTexts[original]
         XCTAssertTrue(task.waitForExistence(timeout: 3), "Expected seeded task row to be visible")
 
         task.tap()
 
-        let doneButton = app.toolbars.buttons["Done"].firstMatch
-        XCTAssertTrue(doneButton.waitForExistence(timeout: 3), "Tapping the row should keep it in edit mode and show the keyboard Done button")
+        let editor = app.descendants(matching: .any)["task-editor-m1"].firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "Tapping the row should swap it into the inline editor")
 
-        app.typeText(" updated")
-        doneButton.tap()
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3), "Tapping the row should raise the software keyboard")
 
-        XCTAssertTrue(app.staticTexts[edited].waitForExistence(timeout: 3), "Edited task should commit and remain visible")
+        let focused = NSPredicate(format: "hasKeyboardFocus == true")
+        XCTAssertTrue(focused.evaluate(with: editor), "The inline editor should own keyboard focus")
+
+        sleep(1)
+        XCTAssertTrue(editor.exists, "The editor should not flicker back into static text after focus settles")
+        XCTAssertTrue(keyboard.exists, "The software keyboard should remain visible after focus settles")
+        XCTAssertTrue(focused.evaluate(with: editor), "The inline editor should keep keyboard focus after focus settles")
     }
 }

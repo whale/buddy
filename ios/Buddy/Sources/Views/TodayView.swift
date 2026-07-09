@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - TodayView
 // The iPhone's main screen — a faithful port of the Mac's right-edge drawer:
@@ -24,8 +25,6 @@ struct TodayView: View {
     // Inline editing
     @State private var editingId: String? = nil
     @State private var editText: String   = ""
-    @State private var focusRetry = 0        // diagnostic count for silent @FocusState detach bounces
-    @FocusState private var focusedField: String?
 
     // Adaptive row fitting (see RowFit) — recomputed when the list or its size changes.
     @State private var fit = RowFit.Result(font: 24, vpad: 16, scroll: false)
@@ -98,11 +97,12 @@ struct TodayView: View {
                 // Drive the sheet transitions on open AND close (slide up / slide down).
                 .animation(.easeOut(duration: 0.3), value: showSettings)
                 .animation(.easeOut(duration: 0.3), value: showHistory)
-                // While editing, the keyboard covers the bottom bar anyway — hide it so the list
-                // reclaims that height for the row being typed.
-                if editingId == nil {
-                    bottomBar             // chrome icons + "Buddy" — bleeds off the bottom edge
-                }
+                // Keep the bottom bar mounted while editing. Removing it changes the list height
+                // at the same moment the keyboard tries to appear, which can make SwiftUI drop and
+                // reacquire focus on real devices (visible cursor flicker, keyboard not lifting).
+                bottomBar                 // chrome icons + "Buddy" — bleeds off the bottom edge
+                    .opacity(editingId == nil ? 1 : 0)
+                    .allowsHitTesting(editingId == nil)
             }
             .padding(.horizontal, 8)     // even side gutter
             .padding(.top, 8)            // small gutter below the status-bar safe area (no more)
@@ -132,9 +132,6 @@ struct TodayView: View {
             #else
             weather.refresh()
             #endif
-            if let initialEditingId {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { focusedField = initialEditingId }
-            }
             // Bring up the sync engine (inert until the user pairs) and pull once on launch.
             if sync == nil { sync = SyncEngine(store: store) }
             sync?.syncOnForeground()
@@ -297,32 +294,15 @@ struct TodayView: View {
         // Flex-fill rows to share the column when there's room; natural height when scrolling.
         let fillH: CGFloat? = fit.scroll ? nil : .infinity
         if editingId == task.id {
-            TextField("", text: $editText, axis: .vertical)
-                .font(.geist(fit.font, .medium)).tracking(-0.48)
-                .foregroundStyle(theme.escalationText)
-                .submitLabel(.done)
-                .focused($focusedField, equals: task.id)
-                .onSubmit { commitEdit(id: task.id) }
-                .toolbar {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("Done") { commitEdit(id: task.id) }
-                    }
-                }
-                .onChange(of: focusedField) { _, v in
-                    guard v != task.id && editingId == task.id else { return }
-                    // iOS can briefly detach @FocusState while the keyboard appears, the
-                    // row reflows, or sync/status changes cause a render. Treat that as
-                    // a focus bounce, not as "editing is done". The prior fix still
-                    // committed after two bounces / 0.5s, which is why the field visibly
-                    // jittered and reverted on real devices. Only Return/Done commits.
-                    focusRetry += 1
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                        if editingId == task.id { focusedField = task.id }
-                    }
-                }
-                .padding(.horizontal, 32).padding(.vertical, fit.vpad)
-                .frame(maxWidth: .infinity, maxHeight: fillH, alignment: .leading)
+            InlineTaskEditor(
+                text: $editText,
+                fontSize: fit.font,
+                textColor: UIColor(theme.escalationText),
+                accessibilityIdentifier: "task-editor-\(task.id)",
+                onCommit: { commitEdit(id: task.id) }
+            )
+            .padding(.horizontal, 32).padding(.vertical, fit.vpad)
+            .frame(maxWidth: .infinity, maxHeight: fillH, alignment: .leading)
         } else {
             SwipeableRow(
                 rowID: task.id,
@@ -407,29 +387,20 @@ struct TodayView: View {
         if let newId {
             editText = ""
             editingId = newId
-            focusRetry = 0
             store.isEditing = true          // sync adopt() defers while a row edit is in flight
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { focusedField = newId }
         }
     }
 
     private func startEdit(task: BuddyTask) {
         editText = task.text            // keep the existing text (don't blank the row)
         editingId = task.id
-        focusRetry = 0
         store.isEditing = true          // sync adopt() defers while a row edit is in flight
-        // Focus AFTER the TextField exists in the hierarchy. Setting @FocusState synchronously
-        // (before the row swaps from label → field) silently fails to attach — the field shows
-        // but the keyboard/cursor never lands, and the empty focus binding can bounce editingId
-        // back, blanking the row. The add-task path uses the same deferred-focus trick.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { focusedField = task.id }
     }
 
     private func commitEdit(id: String) {
         guard editingId == id else { return }
         let text = editText
         editingId = nil
-        focusedField = nil
         store.isEditing = false         // edit committed — the next sync pass may adopt again
         store.commitEdit(id: id, text: text)
     }
@@ -448,6 +419,86 @@ struct TodayView: View {
 
 // Kept in this file so the app target sees it even in release (harness uses a DEBUG-gated variant).
 enum InitialSheetKind { case none, history, settings }
+
+// MARK: - UIKit-backed inline editor
+// SwiftUI FocusState was unstable here on device: the row could flicker between focused
+// and unfocused while the keyboard was trying to rise. This tiny UIKit bridge gives the
+// task editor one native first-responder owner, so the keyboard has a stable anchor.
+private struct InlineTaskEditor: UIViewRepresentable {
+    @Binding var text: String
+    let fontSize: CGFloat
+    let textColor: UIColor
+    let accessibilityIdentifier: String
+    let onCommit: () -> Void
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.delegate = context.coordinator
+        context.coordinator.textView = view
+        view.backgroundColor = .clear
+        view.isScrollEnabled = false
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.returnKeyType = .done
+        view.autocorrectionType = .default
+        view.autocapitalizationType = .sentences
+        view.accessibilityIdentifier = accessibilityIdentifier
+
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        context.coordinator.parent = self
+        view.accessibilityIdentifier = accessibilityIdentifier
+        view.font = UIFont(name: "Geist-Medium", size: fontSize) ?? .systemFont(ofSize: fontSize, weight: .medium)
+        view.textColor = textColor
+        if !view.isFirstResponder && view.text != text { view.text = text }
+        if !view.isFirstResponder {
+            DispatchQueue.main.async {
+                view.becomeFirstResponder()
+                view.selectedRange = NSRange(location: view.text.utf16.count, length: 0)
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: InlineTaskEditor
+        weak var textView: UITextView?
+        private var hasCommitted = false
+
+        init(parent: InlineTaskEditor) {
+            self.parent = parent
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            commitCurrentText(textView)
+        }
+
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText replacement: String) -> Bool {
+            if replacement == "\n" {
+                commitCurrentText(textView)
+                textView.resignFirstResponder()
+                return false
+            }
+            return true
+        }
+
+        private func commitCurrentText(_ textView: UITextView) {
+            guard !hasCommitted else { return }
+            hasCommitted = true
+            parent.text = textView.text
+            parent.onCommit()
+        }
+    }
+}
 
 // MARK: - Previews
 #Preview("lvl0")  { TodayView(store: seeded(MockData.normalTasks)) }
