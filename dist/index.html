@@ -474,8 +474,8 @@
       <div id="morningList" class="max-h-[70vh] flex flex-col overflow-y-auto no-sb"></div>
     </div>
     <!-- footer -->
-    <div class="shrink-0 flex items-center justify-between px-3 pt-2">
-      <button id="skipToday" class="tap-target -ml-3 px-3 text-[15px] tracking-[-0.32px]">Skip</button>
+    <div class="shrink-0 flex items-center justify-between px-5 pt-2">
+      <button id="skipToday" class="tap-target px-3 text-[15px] tracking-[-0.32px]">Skip</button>
       <button id="buddyBtn" class="cta pressable rounded-full px-7 py-3 text-[18px] font-medium">Buddy!</button>
     </div>
   </div>
@@ -3444,10 +3444,11 @@ async function reportBug(){
 }
 const SLIVER=2;    // hidden width — just enough to keep the webview alive (no widget)
 const DRAWERW=452; // revealed/pinned window width — wider than the 416 drawer so the card's soft left (screen-facing) drop shadow has room to fade instead of being clipped by the window edge
-// Top inset so the window clears the menu bar AND leaves a small gap above the top
-// panel matching the drawer's 8px bottom padding. Tuned by eye (37 read as ~2x too
-// much); 30 gives roughly symmetric top/bottom breathing room.
+// Top inset so the window clears the menu bar. The bottom gap keeps the drawer's
+// lower rounded corners on-screen on displays where the monitor height includes
+// pixels under the Dock/screen edge.
 const MENUBAR=30;
+const BOTTOM_GAP=12;
 async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
   T('nativeFit('+mode+')');
   if(!NATIVE) return;
@@ -3456,14 +3457,15 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
     const win=W.getCurrentWindow(), mon=await W.currentMonitor();
     if(!mon || !D.PhysicalSize || !D.PhysicalPosition) return;
     const sz=mon.size, p=mon.position, sf=mon.scaleFactor;
-    const top=Math.round(MENUBAR*sf);     // clear the menu bar so the top panel gets the same breathing room as the bottom
-    const h=sz.height - top;
+    const top=Math.round(MENUBAR*sf);     // clear the menu bar
+    const bottom=Math.round(BOTTOM_GAP*sf);
+    const h=sz.height - top - bottom;
     if(mode==='full'){
       // Morning fills the screen below the menu bar (frontmost, not full-bleed). The old
       // geometry-memory (restore last size/pos) kept restoring bad/tiny values because the
       // save raced the native re-chrome in this shared-window setup — so it's retired here.
       // Reliable per-window frame memory returns with the window split (macOS autosave).
-      await win.setSize(new D.PhysicalSize(sz.width, sz.height - top));
+      await win.setSize(new D.PhysicalSize(sz.width, h));
       await win.setPosition(new D.PhysicalPosition(p.x, p.y + top));
       return;
     }
