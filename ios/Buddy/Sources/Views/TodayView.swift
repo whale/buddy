@@ -24,8 +24,7 @@ struct TodayView: View {
     // Inline editing
     @State private var editingId: String? = nil
     @State private var editText: String   = ""
-    @State private var focusRetry = 0        // re-attach attempts after a silent @FocusState detach
-    @State private var editStartedAt: Date? = nil
+    @State private var focusRetry = 0        // diagnostic count for silent @FocusState detach bounces
     @FocusState private var focusedField: String?
 
     // Adaptive row fitting (see RowFit) — recomputed when the list or its size changes.
@@ -46,18 +45,24 @@ struct TodayView: View {
     // are deterministic) and pre-fire the celebration overlay.
     private let forceMorning: Bool
     private let forceCelebration: Bool
+    private let initialEditingId: String?
 
     init(store: BuddyStore = BuddyStore(),
          debugActiveOverride: Int? = nil,
          initialSheet: InitialSheetKind = .none,
          forceMorning: Bool = false,
-         forceCelebration: Bool = false) {
+         forceCelebration: Bool = false,
+         initialEditingId: String? = nil) {
         _store = State(initialValue: store)
         _debugActiveOverride = State(initialValue: debugActiveOverride)
         _showHistory  = State(initialValue: initialSheet == .history)
         _showSettings = State(initialValue: initialSheet == .settings)
+        _editingId = State(initialValue: initialEditingId)
+        _editText = State(initialValue: store.today.items.first(where: { $0.id == initialEditingId })?.text ?? "")
+        if initialEditingId != nil { store.isEditing = true }
         self.forceMorning = forceMorning
         self.forceCelebration = forceCelebration
+        self.initialEditingId = initialEditingId
     }
 
     // MARK: Derived
@@ -127,6 +132,9 @@ struct TodayView: View {
             #else
             weather.refresh()
             #endif
+            if let initialEditingId {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { focusedField = initialEditingId }
+            }
             // Bring up the sync engine (inert until the user pairs) and pull once on launch.
             if sync == nil { sync = SyncEngine(store: store) }
             sync?.syncOnForeground()
@@ -150,31 +158,36 @@ struct TodayView: View {
     // MARK: - Card 1 — date block (numeral · weekday/month · weather)
 
     private var headerCard: some View {
-        HStack(alignment: .bottom) {   // Mac header parity: date cluster and weather sit on the same bottom edge
-            HStack(alignment: .lastTextBaseline, spacing: 12) {
+        HStack(alignment: .bottom) {
+            HStack(alignment: .bottom, spacing: 12) {
                 Text(dayNumber)
                     .font(.geist(62, .medium)).tracking(-1.24)
                     .foregroundStyle(theme.escalationText)
+                    .lineLimit(1)
                     .fixedSize()
-                    .offset(y: -5)     // SwiftUI lacks CSS text-box-trim; lift the numeral to match Mac cap-height
-                VStack(alignment: .leading, spacing: 12) {   // gap-3 (Figma)
+                VStack(alignment: .leading, spacing: 3) {
                     Text(weekday)
                         .font(.geist(24, .medium)).tracking(-0.48)
                         .foregroundStyle(theme.escalationText)
+                        .lineLimit(1)
                     Text(month)
                         .font(.geist(18, .regular)).tracking(-0.36)
                         .foregroundStyle(theme.chromeMuted)
+                        .lineLimit(1)
                 }
                 .fixedSize()
+                .padding(.bottom, 4)
             }
             Spacer()
             WeatherIcon(key: weather.iconKey, size: 50)
                 .foregroundStyle(theme.escalationText)
                 .frame(width: 50, height: 50)
+                .padding(.bottom, 4)
         }
-        .padding(.horizontal, 32)
-        .padding(.bottom, 32)
-        .frame(height: 114, alignment: .bottom)          // Figma fixed header height
+        .padding(.leading, 32)
+        .padding(.trailing, 26)
+        .padding(.vertical, 32)
+        .frame(height: 114, alignment: .bottom)
         .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
     }
 
@@ -267,7 +280,8 @@ struct TodayView: View {
 
     private func recomputeFit(_ size: CGSize) {
         let active = store.activeTasks.map(\.text)
-        let next = RowFit.compute(active: active, doneCount: store.doneTasks.count,
+        let done = store.doneTasks.map(\.text)
+        let next = RowFit.compute(active: active, done: done,
                                   height: size.height, width: size.width,
                                   includesAdd: !store.atHardCap)
         if next != fit { fit = next }
@@ -289,21 +303,22 @@ struct TodayView: View {
                 .submitLabel(.done)
                 .focused($focusedField, equals: task.id)
                 .onSubmit { commitEdit(id: task.id) }
+                .toolbar {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") { commitEdit(id: task.id) }
+                    }
+                }
                 .onChange(of: focusedField) { _, v in
                     guard v != task.id && editingId == task.id else { return }
-                    // A re-render (fit recompute, theme change) can silently DETACH
-                    // @FocusState — that's not the user dismissing the keyboard. On an
-                    // empty edit, committing here would DELETE the just-added task (the
-                    // "add burps and reverts" field report) — re-attach instead, twice,
-                    // before giving up. Non-empty edits commit like a normal blur.
-                    let justStarted = editStartedAt.map { Date().timeIntervalSince($0) < 0.5 } ?? false
-                    if focusRetry < 2 && (justStarted || editText.trimmingCharacters(in: .whitespaces).isEmpty) {
-                        focusRetry += 1
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                            if editingId == task.id { focusedField = task.id }
-                        }
-                    } else {
-                        commitEdit(id: task.id)
+                    // iOS can briefly detach @FocusState while the keyboard appears, the
+                    // row reflows, or sync/status changes cause a render. Treat that as
+                    // a focus bounce, not as "editing is done". The prior fix still
+                    // committed after two bounces / 0.5s, which is why the field visibly
+                    // jittered and reverted on real devices. Only Return/Done commits.
+                    focusRetry += 1
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                        if editingId == task.id { focusedField = task.id }
                     }
                 }
                 .padding(.horizontal, 32).padding(.vertical, fit.vpad)
@@ -333,15 +348,17 @@ struct TodayView: View {
     private func doneRowView(task: BuddyTask) -> some View {
         // Compact done row with a STABLE revert icon on the right (no swipe). Its right edge
         // sits at the row's 32pt trailing gutter — same as the weather icon's right edge.
+        let doneFont = RowFit.doneFont(for: fit.font)
+        let doneTracking = -0.02 * doneFont
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(DoneWords.word(for: task.id))
-                .font(.geist(15, .semibold))
-                .tracking(-0.30)
+                .font(.geist(doneFont, .semibold))
+                .tracking(doneTracking)
                 .foregroundStyle(theme.ink)
                 .fixedSize(horizontal: true, vertical: false)
             Text(task.text)
-                .font(.geist(15, .regular))
-                .tracking(-0.30)
+                .font(.geist(doneFont, .regular))
+                .tracking(doneTracking)
                 .strikethrough(true, color: theme.inkDim)
                 .foregroundStyle(theme.inkDim)
                 .lineLimit(1)
@@ -355,7 +372,7 @@ struct TodayView: View {
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 32)
-        .padding(.vertical, 16)
+        .padding(.vertical, RowFit.donePad(for: fit.vpad))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -391,7 +408,6 @@ struct TodayView: View {
             editText = ""
             editingId = newId
             focusRetry = 0
-            editStartedAt = Date()
             store.isEditing = true          // sync adopt() defers while a row edit is in flight
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { focusedField = newId }
         }
@@ -401,7 +417,6 @@ struct TodayView: View {
         editText = task.text            // keep the existing text (don't blank the row)
         editingId = task.id
         focusRetry = 0
-        editStartedAt = Date()
         store.isEditing = true          // sync adopt() defers while a row edit is in flight
         // Focus AFTER the TextField exists in the hierarchy. Setting @FocusState synchronously
         // (before the row swaps from label → field) silently fails to attach — the field shows
@@ -415,7 +430,6 @@ struct TodayView: View {
         let text = editText
         editingId = nil
         focusedField = nil
-        editStartedAt = nil
         store.isEditing = false         // edit committed — the next sync pass may adopt again
         store.commitEdit(id: id, text: text)
     }
