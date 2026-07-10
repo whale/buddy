@@ -41,8 +41,8 @@ struct SettingsView: View {
                         HStack(spacing: 12) {
                             Text("👍🏼").font(.system(size: 20))
                             BuddySlider(value: $celebrate,
-                                        track: theme.level == .lvl2 ? Color.white.opacity(0.30) : Color.black.opacity(0.15),
-                                        thumb: theme.level == .lvl2 ? .white : .black)
+                                        track: theme.sliderTrack,
+                                        thumb: theme.sliderThumb)
                                 .disabled(reducedMotion)
                                 .onChange(of: celebrate) { _, v in store.settings.celebrate = Int(v) }
                             Text("🦜").font(.system(size: 20))
@@ -85,10 +85,10 @@ struct SettingsView: View {
                                 syncPillRow { pill("Connect") { connect() }; Spacer() }
                             }
                             if let e = pairError {
-                                // Token red (was a hand-rolled off-red); red-on-red is invisible on
-                                // the lvl2 sheet → white + semibold there (mirrors Mac #syncError).
+                                // Token red; red-on-red is invisible on the lvl2 sheet →
+                                // white + semibold there (mirrors Mac #syncError).
                                 Text(e).font(.geist(14, theme.level == .lvl2 ? .semibold : .regular))
-                                    .foregroundStyle(theme.level == .lvl2 ? Color.white : Color(hex: "#e5484d"))
+                                    .foregroundStyle(theme.errorText)
                             }
                         }
                     }
@@ -137,7 +137,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Buddy \(appVersion)")
                             .font(.geist(14, .regular)).tracking(-0.26)
-                            .foregroundStyle(theme.level == .lvl2 ? Color.white.opacity(0.4) : Color.black.opacity(0.3))
+                            .foregroundStyle(theme.sheetGhost)
                         Spacer()
                     }
                     .padding(.horizontal, 32).padding(.top, 20).padding(.bottom, 28)

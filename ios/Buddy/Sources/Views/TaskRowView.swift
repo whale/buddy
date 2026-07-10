@@ -5,8 +5,8 @@ import SwiftUI
 // so it's legible at all three escalation levels — never hardcodes colours.
 //
 // Active row:  task number + task text, coloured by escalation theme
-// Done row:    struck-through title in inkDim (neutral, NOT escalation-coloured —
-//              done work isn't pressure; it should never turn red at lvl1)
+// Done row:    struck-through title in inkDim — which follows THE PATTERN
+//              (2026-07-10): black → red at lvl1 → white at lvl2, like everything else
 struct TaskRowView: View {
     let task: BuddyTask
     let index: Int              // 1-based position in the active list (for the number badge)
@@ -41,8 +41,8 @@ struct TaskRowView: View {
     }
 
     // MARK: Done / Donezo row
-    // Intentionally neutral — uses inkDim (adaptive) NOT escalationText.
-    // The done work section communicates calm completion, not pressure.
+    // Uses inkDim, which follows THE PATTERN like everything else
+    // (black-dim → red-dim at lvl1 → white-dim at lvl2).
     private var doneRow: some View {
         HStack(alignment: .top, spacing: 10) {
             // Checkmark placeholder where the number would be

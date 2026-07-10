@@ -52,19 +52,20 @@ struct MorningView: View {
         }
     }
 
-    // Big date block — numeral (left) · weekday/month · weather (right). Mirrors the drawer.
+    // Big date block — numeral (left) · weekday/month · weather (right). Mirrors the drawer:
+    // baseline-aligned (numeral baseline on the month line's baseline, icon bottom on it too).
     private var dateHeader: some View {
-        HStack(alignment: .bottom) {
-            HStack(alignment: .bottom, spacing: 12) {
+        HStack(alignment: .lastTextBaseline) {
+            HStack(alignment: .lastTextBaseline, spacing: 12) {
                 Text(dayNumber).font(.geist(62, .medium)).tracking(-1.24).foregroundStyle(theme.escalationText)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(weekday).font(.geist(24, .medium)).tracking(-0.48).foregroundStyle(theme.escalationText)
                     Text(month).font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.inkDim)
                 }
-                .padding(.bottom, 4)
             }
             Spacer()
             WeatherIcon(key: weather.iconKey, size: 34).foregroundStyle(theme.escalationText).frame(width: 50, height: 50)
+                .alignmentGuide(.lastTextBaseline) { d in d[.bottom] }   // icon bottom on the text baseline
         }
     }
 

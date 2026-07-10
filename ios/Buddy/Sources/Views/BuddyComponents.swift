@@ -73,6 +73,8 @@ extension EscalationTheme {
     var sheetTitle: Color { level == .lvl2 ? Color.white.opacity(0.92) : Color.black.opacity(0.8) }
     var sheetLabel: Color { level == .lvl2 ? Color.white.opacity(0.92) : Color.black.opacity(0.6) }
     var sheetFaint: Color { level == .lvl2 ? Color.white.opacity(0.5)  : Color.black.opacity(0.35) }
+    // Faintest sheet text (the version footer): black/30, white/40 on red.
+    var sheetGhost: Color { level == .lvl2 ? Color.white.opacity(0.4)  : Color.black.opacity(0.3) }
 }
 
 // MARK: - Swipeable row
@@ -83,7 +85,7 @@ extension EscalationTheme {
 struct SwipeableRow<Content: View>: View {
     var rowID: String                   // identity, so only one row stays open at a time
     @Binding var openRowID: String?     // shared: which row is currently open
-    var cardFill: Color                 // opaque row bg so the actions hide when closed
+    var theme: EscalationTheme          // card fill + tray/divider/glyph tokens (RULE 1)
     var onComplete: (() -> Void)? = nil
     var onAdd: (() -> Void)? = nil       // future rows: swipe → add to today
     var onSleep: (() -> Void)? = nil
@@ -97,10 +99,9 @@ struct SwipeableRow<Content: View>: View {
     @State private var offset: CGFloat = 0     // committed rest offset (0 or -openWidth)
     @State private var drag: CGFloat = 0       // live finger delta during a drag
     @State private var locked = false          // gesture committed to horizontal
+    @State private var decided = false         // direction chosen at first movement
 
     private let actionW: CGFloat = 58          // ≥ 44pt (Apple's min tap target)
-    private let actionBG = Color(hex: "#ececec")
-    private let dividerC = Color(hex: "#c9c9c9")
     private let settle   = Animation.easeOut(duration: 0.2)   // fast, no spring bounce (shadcn-ish)
 
     // Trailing actions, left→right: checkmark · calendar (move to Future) · X (remove).
@@ -122,12 +123,12 @@ struct SwipeableRow<Content: View>: View {
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
                 ForEach(Array(actions.enumerated()), id: \.offset) { i, act in
-                    if i > 0 { dividerC.frame(width: 1).frame(maxHeight: .infinity) }
+                    if i > 0 { theme.swipeDivider.frame(width: 1).frame(maxHeight: .infinity) }
                     Button { fire(act.run) } label: {
                         LucideIcon(act.icon, size: 22)
-                            .foregroundStyle(.black)
+                            .foregroundStyle(theme.glyph)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(actionBG)
+                            .background(theme.swipeActionBg)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -136,21 +137,30 @@ struct SwipeableRow<Content: View>: View {
             }
 
             // Content on top — opaque, so it hides the actions at rest; offset reveals them.
+            // simultaneousGesture (NOT highPriority): a highPriority drag swallows vertical
+            // drags, which made the Future list unscrollable. Direction is decided ONCE at
+            // first movement; a vertical start does nothing so the ScrollView scrolls.
             content()
-                .background(cardFill)
+                .background(theme.cardBackground)
                 .offset(x: x)
-                .highPriorityGesture(
+                .simultaneousGesture(
                     DragGesture(minimumDistance: 8)
                         .onChanged { v in
-                            if !locked && abs(v.translation.width) > abs(v.translation.height) { locked = true }
+                            if !decided {
+                                decided = true
+                                locked = abs(v.translation.width) > abs(v.translation.height)
+                            }
                             if locked { drag = v.translation.width }   // 1:1 with the finger, no animation
                         }
                         .onEnded { v in
-                            let willOpen = (offset + v.translation.width) < -openWidth * 0.5
-                            withAnimation(settle) { offset = willOpen ? -openWidth : 0; drag = 0 }
-                            if willOpen { openRowID = rowID }
-                            else if openRowID == rowID { openRowID = nil }
+                            if locked {
+                                let willOpen = (offset + v.translation.width) < -openWidth * 0.5
+                                withAnimation(settle) { offset = willOpen ? -openWidth : 0; drag = 0 }
+                                if willOpen { openRowID = rowID }
+                                else if openRowID == rowID { openRowID = nil }
+                            }
                             locked = false
+                            decided = false
                         }
                 )
                 .onTapGesture {

@@ -83,20 +83,19 @@ struct TodayView: View {
                 ZStack {
                     listCard
                     if showHistory {
-                        HistoryView(store: store, onClose: { withAnimation(.easeOut(duration: 0.28)) { showHistory = false } })
+                        HistoryView(store: store, onClose: { withAnimation(.easeIn(duration: 0.32)) { showHistory = false } })
                             .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
                             .transition(sheetTransition)
                     }
                     if showSettings {
-                        SettingsView(store: store, sync: sync, onClose: { withAnimation(.easeOut(duration: 0.28)) { showSettings = false } })
+                        SettingsView(store: store, sync: sync, onClose: { withAnimation(.easeIn(duration: 0.32)) { showSettings = false } })
                             .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
                             .transition(sheetTransition)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)   // fills the gap between header + bottom bar
-                // Drive the sheet transitions on open AND close (slide up / slide down).
-                .animation(.easeOut(duration: 0.3), value: showSettings)
-                .animation(.easeOut(duration: 0.3), value: showHistory)
+                // No blanket .animation here — the per-action withAnimation curves drive the
+                // slide (open .easeOut 0.42, close .easeIn 0.32) so direction stays distinct.
                 // Keep the bottom bar mounted while editing. Removing it changes the list height
                 // at the same moment the keyboard tries to appear, which can make SwiftUI drop and
                 // reacquire focus on real devices (visible cursor flicker, keyboard not lifting).
@@ -107,6 +106,9 @@ struct TodayView: View {
             .padding(.horizontal, 8)     // even side gutter
             .padding(.top, 8)            // small gutter below the status-bar safe area (no more)
             .ignoresSafeArea(.container, edges: .bottom)   // bottom bar runs off the bottom edge
+            // The keyboard must NOT shrink the layout: a rising keyboard changed geo.size,
+            // retriggered recomputeFit mid-add and made the whole list's font flash.
+            .ignoresSafeArea(.keyboard, edges: .bottom)
             .animation((showHistory || showSettings) ? nil : .easeInOut(duration: 0.2), value: activeCount)
 
             if showCelebration {
@@ -147,16 +149,19 @@ struct TodayView: View {
         }
     }
 
-    // Sheet in/out: just present (a quick fade), no slide.
+    // Sheet in/out: a vertical slide over the list card (the card stays put).
+    // Open animates .easeOut (fast → slow at the top), close .easeIn (slow → fast down).
     private var sheetTransition: AnyTransition {
-        .opacity
+        .move(edge: .bottom)
     }
 
     // MARK: - Card 1 — date block (numeral · weekday/month · weather)
 
+    // Baseline-aligned like the Mac (text-box-trim + items-end): the 62pt numeral's
+    // baseline sits on the month line's baseline; the weather icon's bottom rests on it too.
     private var headerCard: some View {
-        HStack(alignment: .bottom) {
-            HStack(alignment: .bottom, spacing: 12) {
+        HStack(alignment: .lastTextBaseline) {
+            HStack(alignment: .lastTextBaseline, spacing: 12) {
                 Text(dayNumber)
                     .font(.geist(62, .medium)).tracking(-1.24)
                     .foregroundStyle(theme.escalationText)
@@ -173,13 +178,12 @@ struct TodayView: View {
                         .lineLimit(1)
                 }
                 .fixedSize()
-                .padding(.bottom, 4)
             }
             Spacer()
             WeatherIcon(key: weather.iconKey, size: 50)
                 .foregroundStyle(theme.escalationText)
                 .frame(width: 50, height: 50)
-                .padding(.bottom, 4)
+                .alignmentGuide(.lastTextBaseline) { d in d[.bottom] }   // icon bottom on the text baseline
         }
         .padding(.leading, 32)
         .padding(.trailing, 26)
@@ -195,15 +199,17 @@ struct TodayView: View {
             HStack(spacing: 30) {    // Figma gap-35 between the 20px icons
                 // (Figma shows a pin here too, but it has no iPhone function — omitted for now.)
                 bottomChrome("calendar", selected: showHistory) {
-                    withAnimation(.easeOut(duration: 0.28)) { showHistory.toggle(); showSettings = false }
+                    if showHistory { withAnimation(.easeIn(duration: 0.32)) { showHistory = false } }
+                    else { withAnimation(.easeOut(duration: 0.42)) { showHistory = true; showSettings = false } }
                 }
                 bottomChrome("settings", selected: showSettings) {
-                    withAnimation(.easeOut(duration: 0.28)) { showSettings.toggle(); showHistory = false }
+                    if showSettings { withAnimation(.easeIn(duration: 0.32)) { showSettings = false } }
+                    else { withAnimation(.easeOut(duration: 0.42)) { showSettings = true; showHistory = false } }
                 }
             }
             Spacer()
             Button {
-                withAnimation(.easeOut(duration: 0.28)) {
+                withAnimation(.easeIn(duration: 0.32)) {
                     showHistory = false
                     showSettings = false
                 }
@@ -281,7 +287,12 @@ struct TodayView: View {
         let next = RowFit.compute(active: active, done: done,
                                   height: size.height, width: size.width,
                                   includesAdd: !store.atHardCap)
-        if next != fit { fit = next }
+        guard next != fit else { return }   // no-op when nothing changed — no redundant re-render
+        // Apply fit WITHOUT animation: the uniform font/vpad must snap, never ping-pong.
+        // (Row insert/remove keeps its own transition; only the fit values are exempt.)
+        var tx = Transaction()
+        tx.disablesAnimations = true
+        withTransaction(tx) { fit = next }
     }
 
     private var rowDivider: some View {
@@ -307,7 +318,7 @@ struct TodayView: View {
             SwipeableRow(
                 rowID: task.id,
                 openRowID: $openRowID,
-                cardFill: theme.cardBackground,
+                theme: theme,
                 onComplete: { handleComplete(task: task) },
                 onSleep:    { withAnimation { store.deferToTomorrow(id: task.id) } },
                 onDelete:   { withAnimation { store.deleteTask(id: task.id) } },
@@ -323,7 +334,7 @@ struct TodayView: View {
         }
     }
 
-    // MARK: - Done (Donezo) row — neutral + adaptive (ink / inkDim, never escalation red).
+    // MARK: - Done (Donezo) row — ink / inkDim, so it follows THE PATTERN (red at lvl1 too).
     @ViewBuilder
     private func doneRowView(task: BuddyTask) -> some View {
         // Compact done row with a STABLE revert icon on the right (no swipe). Its right edge
