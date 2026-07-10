@@ -142,6 +142,7 @@ struct SwipeableRow<Content: View>: View {
                     }
                     .buttonStyle(.plain)
                     .frame(width: actionW)
+                    .accessibilityIdentifier("swipe-\(act.icon)")   // UI tests tap tray actions by id
                 }
             }
 
@@ -151,9 +152,12 @@ struct SwipeableRow<Content: View>: View {
             // and the Future list stops scrolling — verified empirically via the
             // `-noSwipe` experiment switch (RULE 4). The UIKit recognizer begins ONLY on
             // horizontal movement, so vertical drags stay with the ScrollView.
+            // ORDER IS LOAD-BEARING: the pan-catcher overlay goes on BEFORE .offset so
+            // it slides WITH the content. Overlaid after .offset it stays on the row's
+            // layout frame, covers the revealed tray, and its tap handler eats every
+            // action-button tap (field report 2026-07-10: "swipe shows, doesn't act").
             let base = content()
                 .background(theme.cardBackground)
-                .offset(x: x)
             Group {
                 if ProcessInfo.processInfo.arguments.contains("-noSwipe") {
                     base.onTapGesture { if offset != 0 { close() } else { onTap?() } }
@@ -172,6 +176,7 @@ struct SwipeableRow<Content: View>: View {
                     )
                 }
             }
+            .offset(x: x)
         }
         .clipped()
         // Another row opened → close this one.
