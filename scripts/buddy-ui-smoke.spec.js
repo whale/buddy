@@ -77,3 +77,46 @@ test('Future uses Today-style fixed rows without an extra heading', async ({ pag
   expect(hoverActions.remove).toBeTruthy();
   expect(hoverActions.hoverRail).toBeTruthy();
 });
+
+test('Future follows red escalation states', async ({ page }) => {
+  await page.setViewportSize({ width: 452, height: 900 });
+  await page.goto('file://' + path.resolve(__dirname, '../dist/index.html'));
+  await page.waitForFunction(() => window.__buddy && window.__buddy.render);
+
+  const readFutureState = async (activeCount) => page.evaluate((activeCount) => {
+    window.__buddy.suppressSave();
+    const state = window.__buddy.state;
+    state.today = {
+      date: window.__buddy.localDate(),
+      morningDone: true,
+      items: Array.from({ length: activeCount }, (_, i) => ({
+        id: `t${i}`,
+        text: `Task ${i + 1}`,
+        state: 'neutral',
+      })),
+    };
+    state.deferred = [{ id: 'f1', text: 'Future task' }];
+    state.histOpen = true;
+    state.histTab = 'future';
+    document.querySelector('#morning').classList.add('hidden');
+    window.__buddy.render();
+
+    const row = document.querySelector('.future-row');
+    const title = document.querySelector('.future-title');
+    return {
+      rowBg: getComputedStyle(row).backgroundColor,
+      titleColor: getComputedStyle(title).color,
+      hasAdd: !!document.querySelector('[title="Add to today"]'),
+    };
+  }, activeCount);
+
+  const warning = await readFutureState(5);
+  expect(warning.titleColor).toBe('rgb(229, 72, 77)');
+  expect(warning.rowBg).toBe('rgb(255, 255, 255)');
+  expect(warning.hasAdd).toBeTruthy();
+
+  const full = await readFutureState(6);
+  expect(full.titleColor).toBe('rgb(255, 255, 255)');
+  expect(full.rowBg).toBe('rgb(229, 72, 77)');
+  expect(full.hasAdd).toBeFalsy();
+});

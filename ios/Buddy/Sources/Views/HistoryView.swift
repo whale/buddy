@@ -185,15 +185,23 @@ struct HistoryView: View {
         ) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("Sent to today!").font(.geist(18, .semibold)).tracking(-0.30)
-                    .foregroundStyle(theme.ink).fixedSize(horizontal: true, vertical: false)
+                    .foregroundStyle(theme.escalationText).fixedSize(horizontal: true, vertical: false)
                 Text(text).font(.geist(18, .regular)).tracking(-0.36)
-                    .foregroundStyle(theme.inkDim).lineLimit(1)
+                    .foregroundStyle(futureDimText).lineLimit(1)
                 Spacer(minLength: 8)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .padding(.horizontal, 32)
         }
         .frame(height: 110)
+    }
+
+    private var futureDimText: Color {
+        switch theme.level {
+        case .lvl0: return theme.inkDim
+        case .lvl1: return Color(hex: "#e5484d").opacity(0.65)
+        case .lvl2: return theme.inkDim
+        }
     }
 
     // Rightmost row icon: glyph hugs the row's trailing edge so every surface's icons line up

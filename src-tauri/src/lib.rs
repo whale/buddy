@@ -47,7 +47,12 @@ fn toggle_drawer(app: &AppHandle) {
 /// Show the morning planner (the ⌘⌥⌃M show-off shortcut). This is native now:
 /// Morning is its own standard resizable window, not a JS mode of the drawer.
 fn toggle_morning(app: &AppHandle) {
-    open_morning_window(app.clone());
+    let app_handle = app.clone();
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.run_on_main_thread(move || open_morning_window(app_handle));
+    } else {
+        open_morning_window(app.clone());
+    }
 }
 
 /// macOS: allow this (alwaysOnTop) window to be shown in the SAME Space as an app

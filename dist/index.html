@@ -169,6 +169,12 @@
     .row-neutral:hover{ background-color:var(--surface-hover) !important; }
   }
   .lvl2 .buddy-row{ background-color:var(--red) !important; }
+  /* Future rows are active work candidates, so they must join escalation too:
+     lvl1 = red text on white, lvl2 = white text on red. */
+  .lvl1 .future-title, .lvl1 .future-sent-main{ color:var(--red) !important; }
+  .lvl1 .future-sent-dim{ color:rgba(229,72,77,.65) !important; }
+  .lvl2 .future-title, .lvl2 .future-sent-main{ color:#fff !important; }
+  .lvl2 .future-sent-dim{ color:rgba(255,255,255,.6) !important; }
 
   /* ---- keyboard cursor ring: a transient nav cursor. Inset ring so it reads
      on any bg. ---- */
@@ -2227,7 +2233,7 @@ function renderFuture(){
 
 function buildFutureRow(d, full){
   const t=document.createElement('div');
-  t.className='flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2]';
+  t.className='future-title flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2]';
   t.style.cssText='font-size:24px;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden';
   t.textContent=d.text;
   const actions=[];
@@ -2242,10 +2248,10 @@ function buildFutureRow(d, full){
 function buildSentFutureRow(d){
   const lab=document.createElement('div'); lab.className='flex items-baseline gap-2 min-w-0 flex-1';
   const tag=document.createElement('span');
-  tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:18px;color:var(--ink)';
+  tag.className='future-sent-main font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:18px;color:var(--ink)';
   tag.textContent='Sent to today!';
   const ttl=document.createElement('span');
-  ttl.className='truncate'; ttl.style.cssText='font-size:18px;color:var(--ink-dim)';
+  ttl.className='future-sent-dim truncate'; ttl.style.cssText='font-size:18px;color:var(--ink-dim)';
   ttl.textContent=d.text;
   lab.append(tag, ttl);
   return makeFutureHoverRow(lab, [{title:'Undo — back to Future', icon:UNDO, run:()=>unsendDeferred(d.id)}]);
