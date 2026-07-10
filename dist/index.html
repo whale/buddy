@@ -243,8 +243,12 @@
   .stagger > *:nth-child(6){ animation-delay:250ms; }
   .stagger > *:nth-child(7){ animation-delay:300ms; }
 
-  /* ---- Confetti: 100 party-parrots, one-shot keyframe burst (§3.3) ---- */
+  /* ---- Confetti: physics burst (lab-tuned) + quiet pop (§3.3) ---- */
   #confetti{ position:fixed; inset:0; z-index:200; pointer-events:none; overflow:hidden; }
+  /* The dedicated full-screen overlay window renders ONLY the burst: hide the
+     whole app UI and stay transparent. */
+  body.confetti-surface > :not(#confetti){ display:none !important; }
+  body.confetti-surface, html:has(body.confetti-surface){ background:transparent !important; }
   .parrot{
     position:absolute; width:24px; height:24px; line-height:24px;
     font-size:22px; text-align:center; will-change:transform, opacity;
@@ -435,14 +439,16 @@
             </div>
           </div>
 
-          <!-- STATE 3: linked — synced; unlink or resync -->
+          <!-- STATE 3: linked — synced; unlink or resync. Buttons side by side,
+               the sync status on its own line BELOW (it wrapped awkwardly beside
+               the pills — field report 2026-07-10). -->
           <div id="syncLinked" class="hidden my-3">
             <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Your iPhone is linked — changes sync automatically.</p>
             <div class="flex items-center gap-2">
-              <button id="syncUnlinkBtn" class="pressable tap-target inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Unlink iPhone</button>
-              <button id="syncResyncBtn" class="pressable tap-target inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Resync</button>
-              <span id="syncStatus" class="ml-auto text-[14px] text-black/35">Off</span>
+              <button id="syncUnlinkBtn" class="pressable tap-target inline-flex items-center whitespace-nowrap px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Unlink iPhone</button>
+              <button id="syncResyncBtn" class="pressable tap-target inline-flex items-center whitespace-nowrap px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Resync</button>
             </div>
+            <div id="syncStatus" class="mt-2 text-[14px] text-black/35">Off</div>
           </div>
 
           <p id="syncError" class="hidden text-[13px] leading-snug mb-1"></p>
@@ -558,6 +564,7 @@ const touch   = it => { if(it) it.v=(it.v|0)+1; };
 const tombstone = id => { if(id){ (state.tombstones||(state.tombstones={}))[id]=Date.now(); } };
 let editingId = null;
 let futureCursor = -1;   // Tab-cursor over the Future panel's rows (−1 = none); reset when the panel opens
+let donezoCatchupTimer = null;   // re-render when a SYNC-adopted done item finishes its savor beat
 let cursor = 0;                  // keyboard cursor index (0..items.length, last = Add row)
 let kbActive = false;           // true once a key has been used → cursor ring shows
 const SOFT_CAP = 5, HARD_CAP = 6;   // escalation colours all live in the CSS tokens (--ink/--red)
@@ -1898,6 +1905,16 @@ function render(){
   }
   if(!state.histOpen && flipPrev) playFlip(todayWrap, flipPrev);
   prevHistOpen=state.histOpen;
+  // Donezo catch-up: isDonezo is TIME-based, but a done item adopted via SYNC
+  // has no scheduleDonezo timer on THIS device — without a re-render it froze
+  // as a struck row forever (field report 2026-07-10). Re-render when the
+  // youngest savoring item crosses the threshold.
+  clearTimeout(donezoCatchupTimer);
+  const savoring=(state.items||[]).filter(it=>it.state==='done' && it.doneAt && (Date.now()-it.doneAt) < DONEZO_DELAY);
+  if(savoring.length){
+    const soonest=Math.min(...savoring.map(it=>it.doneAt+DONEZO_DELAY-Date.now()));
+    donezoCatchupTimer=setTimeout(render, soonest+60);
+  }
   justAddedId=null;                // enter animation is one-shot, consumed above
   donezoEnterId=null;              // Donezo enter animation is one-shot too
   renderDots();
@@ -2537,6 +2554,8 @@ function clearConfetti(){
   clearTimeout(confettiTimer); confettiTimer=null;
   confettiEl.innerHTML='';
   celebParts=[]; if(celebRAF){ cancelAnimationFrame(celebRAF); celebRAF=null; }
+  // Overlay window: the burst is over — get out of the way (hidden, not closed).
+  if(IS_CONFETTI_WINDOW){ try{ window.__TAURI__.core.invoke('hide_confetti_window'); }catch(_){} }
 }
 
 /* Intensity 0..100 drives count, thumb↔parrot mix, and variety.
@@ -2582,7 +2601,18 @@ function quietPop(anchor){
 function fireConfetti(anchorEl){
   if(reduced()) return;                        // reduced-motion → no burst
   const lvl = state.settings.celebrate ?? 100; // 0..100
-  if(lvl <= 0){ quietPop(anchorEl); return; }  // "down to nothing" → the quiet pop
+  if(lvl <= 0){ quietPop(anchorEl); return; }  // "down to nothing" → the quiet pop (stays in the drawer)
+  // The BURST covers the WHOLE SCREEN, not the 452px drawer — natively it plays
+  // in a dedicated transparent click-through overlay window (field report
+  // 2026-07-10: "bottom right of the screen to top left of the screen").
+  if(NATIVE && !IS_CONFETTI_WINDOW){
+    diag('celebrate-fullscreen', {intensity:lvl});
+    try{ window.__TAURI__.core.invoke('celebrate_fullscreen', { intensity: lvl }); }catch(_){ burstNow(lvl); }
+    return;
+  }
+  burstNow(lvl);
+}
+function burstNow(lvl){
   clearConfetti();                             // single burst in flight
   const i=lvl/100;
   const count = Math.max(3, Math.round(i*i*CELEB.count));
@@ -2591,12 +2621,9 @@ function fireConfetti(anchorEl){
   const useGif = parrotMode==='gif';
   const rad = d => d*Math.PI/180;
   const now = performance.now();
-  const H = innerHeight, ox = 40, oy = H - 24;   // bottom-left launch (lab origin 'bl')
-  // The lab was tuned on a ~940px-wide stage; the drawer (452) and iPhone (390)
-  // are half that. Scale HORIZONTAL velocity to the panel width so the 6s
-  // cascade stays on screen — vertical arc, gravity and timing untouched, so
-  // the tuned feel survives the narrow stage. SAME rule on iOS.
-  const XS = Math.min(1, innerWidth/940);
+  // Bottom-RIGHT of the screen, flying up-LEFT — full lab speed, no width
+  // scaling (the squeeze is what turned the phone's burst into a "swirl").
+  const H = innerHeight, ox = innerWidth - 40, oy = H - 24;
   const frag=document.createDocumentFragment();
   for(let k=0;k<count;k++){
     const glyph = pool[Math.floor(Math.random()*pool.length)];
@@ -2609,7 +2636,7 @@ function fireConfetti(anchorEl){
     const a  = rad(CELEB.angle) + rad((Math.random()*2-1)*CELEB.spread);
     const sp = CELEB.speed * (1 + (Math.random()*2-1)*CELEB.speedJit);
     const life = CELEB.life * (1 - Math.random()*CELEB.fadeJit*0.5);
-    celebParts.push({ el, x:ox, y:oy, vx:Math.cos(a)*sp*XS, vy:-Math.sin(a)*sp,
+    celebParts.push({ el, x:ox, y:oy, vx:-Math.cos(a)*sp, vy:-Math.sin(a)*sp,
       rot:Math.random()*360, vr:(Math.random()*2-1)*CELEB.spin,
       born: now + Math.random()*CELEB.stagger, life,
       fadeAt: life*(0.55 + Math.random()*0.35) });
@@ -3630,6 +3657,7 @@ window.__buddy = {
 const NATIVE = !!(window.__TAURI__ && window.__TAURI__.window);
 const SURFACE = NATIVE ? (window.__TAURI__.window.getCurrentWindow().label || 'main') : (new URLSearchParams(location.search).get('surface') || 'main');
 const IS_MORNING_WINDOW = SURFACE === 'morning';
+const IS_CONFETTI_WINDOW = SURFACE === 'confetti';   // transparent full-screen burst overlay
 function T(m){ try{ window.__TAURI__?.core?.invoke('trace',{msg:String(m)}); }catch(_){} }
 
 /* ---------------- diagnostics event log (privacy-safe) ----------------
@@ -3666,8 +3694,13 @@ if(NATIVE){
   // DRAWER intents are for the MAIN window only. Tauri broadcasts reach every
   // window, and the morning window once obeyed buddy://hide → nativeFit('sliver')
   // → clamped to min-width 432 → a blank ghost window parked behind the drawer
-  // (field report 2026-07-10). The morning window listens ONLY for morning-open.
-  if(!IS_MORNING_WINDOW){
+  // (field report 2026-07-10). The morning window listens ONLY for morning-open;
+  // the confetti overlay ONLY for celebrate.
+  if(IS_CONFETTI_WINDOW){
+    ev.listen('buddy://celebrate', e=>{ burstNow(Math.max(1, +e.payload || 100)); });
+    // Boot happened AFTER the creating emit — pull the pending burst.
+    try{ window.__TAURI__.core.invoke('confetti_ready'); }catch(_){}
+  } else if(!IS_MORNING_WINDOW){
     ev.listen('buddy://reveal', ()=>{ if(morningUp()||state.pinned) return; clearTimeout(closeTimer); openDrawer(); });
     ev.listen('buddy://hide',   ()=>{ if(morningUp()||state.pinned) return; clearTimeout(openTimer); closeDrawer(); });
     // ⌘⌥⌃M: raise, then show/hide morning. Hiding uses leaveMorningToDrawer (NOT skip)
@@ -3757,7 +3790,7 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
   // The morning window sizes itself via fitMorningWindow ONLY. A stray drawer
   // fit here (leaked broadcast, shared code path) is how the ghost 432×full
   // window happened — refuse defensively.
-  if(IS_MORNING_WINDOW) return;
+  if(IS_MORNING_WINDOW || IS_CONFETTI_WINDOW) return;
   try{
     const W=window.__TAURI__.window, D=window.__TAURI__.dpi||W;
     const win=W.getCurrentWindow(), mon=await W.currentMonitor();
@@ -3827,6 +3860,13 @@ function bootFinish(recovered){
   writeNow();                                // converge localStorage + file mirror to the chosen state
 }
 function boot(){
+  // Confetti overlay: a pure renderer. NO load, NO sync, NO saves — it draws
+  // bursts on demand (buddy://celebrate) and hides itself. Everything below
+  // would make it a third writer/syncer.
+  if(IS_CONFETTI_WINDOW){
+    document.body.classList.add('native','confetti-surface');
+    return;
+  }
   cursor=0; kbActive=false; editingId=null;  // reset transient keyboard cursor on (re)boot
   if(NATIVE){
     document.body.classList.add('native');
