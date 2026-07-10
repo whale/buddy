@@ -1,6 +1,31 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-08 (night). Branch `main`. Latest **released Mac**: **`0.3.19`** (via `gh workflow run "Release Mac app"` — CI CAN cut from main; `AUTO_RELEASE_MAC` stays OFF). iOS on **TestFlight `0.1.0 (15)`** (`cd ios && set -a && source ../.env && set +a && fastlane beta`). **✅ Sync SOLVED — user: "seamless. NICE!"** Work queue = the unfinished parts of THE PLAN below (batches 4–5)._
+_Last updated: 2026-07-10. Branch `main`. Latest **released Mac**: **`0.3.27`** (signed/notarized GitHub release, updater manifest published). iOS uploaded to **TestFlight build `20`** and processing in App Store Connect. Sync was previously confirmed seamless; current focus is Mac/iOS polish regression cleanup and visual QA._
+
+
+## Session summary — 2026-07-10 — Future rows, red-state regression, Morning launch, releases
+
+**Shipped + verified:**
+- **Mac Future rows restored to desktop behavior:** Future rows are fixed at 110px, no extra `Future` heading, and actions are Mac hover-only (vertical `+` and `×` rail). iOS remains swipe-only for Future rows.
+- **Future red-state regression fixed:** at 5 active tasks (`lvl1`), Mac Future titles now turn Buddy red; at 6 active tasks (`lvl2`), Future rows are white-on-red and `+` is hidden. iOS Future sent rows now follow the same escalation colors.
+- **Morning window work continued:** Morning is a separate standard macOS window labeled `morning`; drawer remains `main`. Local app confirmed two Buddy windows after tray actions: a 2px drawer sliver and a standard Morning window at visible-screen size with an 8px inset. Raised Morning via AX after launch.
+- **Releases:** Mac **v0.3.27** published successfully: `https://github.com/whale/buddy/releases/tag/v0.3.27`. iOS **TestFlight build 20** uploaded successfully; Fastlane skipped waiting for App Store processing.
+
+**Verified this session:**
+- `pnpm ui:smoke` → **4/4 passed**, including new Future escalation regression test.
+- `xcodebuild test -project ios/Buddy.xcodeproj -scheme Buddy -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5'` → **73 tests passed**, **1 UI editing test passed**, **5 live Supabase tests skipped** because local Supabase was not running.
+- `cd src-tauri && cargo check` → passed.
+- GitHub Actions Mac release run `29067686269` → success, assets uploaded (`Buddy_0.3.27_universal.dmg`, `Buddy.app.tar.gz`, `latest.json`).
+- Local visual check: Playwright screenshot `/tmp/buddy-future-lvl1.png` confirmed Future text is red at warning state. Local `pnpm build` produced a usable `.app`; final updater signing failed locally because `TAURI_SIGNING_PRIVATE_KEY` is not present, expected because CI owns signing.
+
+**Still open / needs human confirmation:**
+- User should install/update to Mac `0.3.27` and confirm: Future hover icons, Future red state, Morning window resize/position behavior across displays, and whether the 8px visible-screen inset feels correct.
+- User should wait for TestFlight build `20` to finish processing, install it, and confirm Future swipe actions plus red-state colors on device.
+- Morning menu action may create/show the Morning window but not always raise it immediately in local automation. If the user still sees no Morning window, inspect existing Buddy windows before adding another geometry fix.
+
+**Next recommended milestone:** finish the Mac Morning-window behavior as boring native macOS: visible, frontmost when requested, resizable by edges, survives display switches, and does not fight the drawer.
+
+---
 
 ## Session summary — 2026-07-08 (evening/night) — Slice 2 shipped, field-report batch, self-diagnosis capability
 

@@ -1,38 +1,65 @@
 # Buddy — Next Session Handoff
 
-_Last updated: 2026-07-05 (sync branch merged to main, cutting 0.3.3)._
+_Last updated: 2026-07-10 (Mac 0.3.27 released; iOS TestFlight build 20 uploaded)._ 
 
-## Start here — `main`, clean, released `0.3.3`
+## Start here — `main`, clean, released Mac `0.3.27`
 
-The big sync branch is **merged and shipped**. `feat/ios-sync-live` (iOS companion + live
-Mac⇄iPhone sync, adaptive fit, merge cap/dedupe fix — 42 commits) merged to `main` (PR #62,
-squash) and released as **Mac `0.3.3`** via CI. iOS is on **TestFlight `0.1.0 (11)`**.
+Latest work is on `main` and released.
 
-- **Branch:** `main`, clean, synced with origin. No feature branch in progress.
-- **Released = `0.3.3`** (Latest) — signed/notarized, published by CI, `releases/latest`
-  resolves to v0.3.3 with DMG + `Buddy.app.tar.gz` + `latest.json`. The updater will offer it.
-- **Release flow (confirmed this session):** merge to `main` → bump bot sets the next patch →
-  `gh workflow run "Release Mac app"` builds + publishes from `main`. `AUTO_RELEASE_MAC` stays
-  **OFF**; the manual `workflow_dispatch` bypasses the gate. **CI can cut the signed release —
-  no local notarization needed** once code is on `main` (corrects the old "must build locally"
-  note; that only applied to releasing branch code like 0.3.2). Add `[skip release]` to a
-  commit/merge subject to stop the bump bot on docs-only changes.
-- **Full detail:** see `STATUS.md` (2026-07-05 summary) — it's the authoritative record.
+- **Branch:** `main`, clean after wrap commit.
+- **Latest code commit before wrap:** `1c6c896 chore: bump version [skip ci]` plus wrap commit.
+- **Mac release:** `v0.3.27`, signed/notarized, published by GitHub Actions. Release link: `https://github.com/whale/buddy/releases/tag/v0.3.27`.
+- **iOS:** TestFlight **build 20** uploaded successfully via `cd ios && fastlane beta`; App Store Connect may still need processing time before it appears to testers.
+- **Release flow:** merge/push to `main` → version-bump workflow increments patch → manually run `gh workflow run release-mac.yml --ref main`. Mac auto-release remains skipped unless explicitly dispatched. iOS TestFlight is local Fastlane, not GitHub Actions.
+
+## What changed most recently
+
+1. **Future rows on Mac:** fixed-height 110px Today-style rows, Mac hover actions (`+` and `×`) instead of swipe, no extra `Future` heading.
+2. **Future rows on iOS:** swipe actions are present for `+` / `×` / undo, fixed-height 110pt rows.
+3. **Red-state regression:** Future now participates in escalation. At 5 active tasks Future text is red; at 6 active tasks Future rows are white-on-red and `+` is hidden. iOS sent Future rows also follow this.
+4. **Morning window:** split into separate native `morning` window instead of mutating the drawer. Local automation confirmed a standard Morning window exists at visible-screen size with an 8px inset, but raising/focus behavior should be rechecked by the user.
+
+## Verified commands / evidence
+
+```bash
+pnpm ui:smoke
+# 4/4 passed, including Future red-state regression test
+
+xcodebuild test -project ios/Buddy.xcodeproj -scheme Buddy -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5'
+# 73 tests passed, 1 UI editing test passed, 5 live Supabase tests skipped
+
+cd src-tauri && cargo check
+# passed
+
+gh run view 29067686269 --json status,conclusion
+# Mac release v0.3.27 succeeded
+
+cd ios && fastlane beta
+# uploaded TestFlight build 20; skipped waiting for App Store processing
+```
+
+## User-facing review instructions
+
+1. On Mac, update to **0.3.27** and open Future with 5 active tasks: Future text should be red, but `+` should still be available.
+2. Add a 6th active task: Future rows should be red with white text, and all Future `+` actions should disappear.
+3. Hover Mac Future rows: a vertical action rail should appear with `+` and `×` for normal rows, undo for sent rows.
+4. Open Morning from the tray and by shortcut. Confirm it is a normal resizable Mac window, fits the visible screen, can be grabbed by edges, and behaves correctly after switching displays.
+5. When TestFlight build 20 appears, install it and confirm iOS Future uses swipe actions and the same red-state colors.
 
 ## Next 3–5 tasks
 
-1. **iPhone TestFlight distribution to the 2 friends.** Needs the user in App Store Connect;
-   a public TestFlight link requires an Apple beta review (~a day). User said they'll do this
-   later — walk them through it in numbered steps when they're ready.
-2. **On-device confirm 0.3.3 (Mac).** Settings → Check for Updates → install → confirm live
-   sync, adaptive row fitting (6 multi-line tasks, no scroll), and that merged lists no longer
-   exceed 6 or duplicate. Much was browser/simulator-verified only.
-3. **Close/prune stale PR + branches.** PR #61 (`fix/ios-visual-parity`, WIP) is **superseded**
-   by #62 (the iOS parity work is on main now) — close it. Prune stale local branches.
-4. **Design-token system** (still open, memory `buddy-token-system-todo`): OKLCH hover
-   (`--red-hover: oklch(from var(--red) calc(l-.05) calc(c+.05) h)`), type scale 16→15 / 13→14,
-   icon weights ≤20→1.8 / weather 1.4, de-inline all `style="color:…"`. Spec in the styleguide's
-   "⚐ Proposals" section (unmerged `feat/styleguide-proposals` — merge or fold into this PR).
+1. **Morning window final QA/fix:** if Morning does not raise reliably, inspect existing `main` and `morning` windows before changing geometry. Goal is boring-native behavior: frontmost when requested, manually resizable, visible after display changes.
+2. **On-device Future QA:** verify Mac hover and iOS swipe on real devices, especially sent-row undo and full-red `+` hiding.
+3. **Updater/TestFlight confirmation:** verify Mac update banner delivers 0.3.27, and TestFlight build 20 finishes processing and installs.
+4. **Regression sweep:** repeat lvl0/lvl1/lvl2 visual checks for Today, Future, Done, Settings, and Morning.
+5. **Then return to older hygiene queue:** QR-in-bug-screenshot syncKey leak, weekday escaping/CSP, Backquote shortcut chord, iOS Done-tab Today undo, and stale-doc cleanup.
+
+## Blockers / cautions
+
+- Do not edit `AGENTS.md` or `CLAUDE.md`.
+- Do not commit `.env`, App Store keys, `.p8`, private exports, app data, or generated archives/DMGs/IPAs.
+- Local `pnpm build` can end with updater-signing failure because `TAURI_SIGNING_PRIVATE_KEY` is not present locally. CI release has the signing secret and produced the signed/notarized build.
+- Live Supabase tests skip unless local Supabase is running.
 
 ---
 
