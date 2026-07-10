@@ -74,6 +74,11 @@ enum ScreenshotHarness {
         case "celebration":
             store.seedForScreenshot(tasks: MockData.normalTasks)
             return (store, .none, false, true)
+        case "celebration-quiet":
+            // celebrate == 0 → the minimum celebration (one yellow hand pops up)
+            store.seedForScreenshot(tasks: MockData.normalTasks)
+            store.settings.celebrate = 0
+            return (store, .none, false, true)
         default:
             store.seedForScreenshot(tasks: MockData.normalTasks)
             return (store, .none, false, false)

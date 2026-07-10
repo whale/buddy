@@ -1720,7 +1720,13 @@ function cycle(it){
   if(it.state!=='done'){ it.state='done'; it.doneAt=Date.now(); if(!it.doneWord) it.doneWord=pickDoneWord(); }
   else { if(activeCount()>=HARD_CAP) return; it.state='neutral'; delete it.doneAt; }   // done → restore (capped)
   touch(it);
-  if(was!=='done' && it.state==='done'){ fireConfetti(); scheduleDonezo(it.id); }
+  if(was!=='done' && it.state==='done'){
+    // Anchor the celebration (quiet pop) to the row's ✓ button — "floats up
+    // from where the check mark was checked".
+    const row=document.querySelector(`[data-tid="${it.id}"]`)?.closest('.buddy-row');
+    fireConfetti(row?.querySelector('button'));
+    scheduleDonezo(it.id);
+  }
   render();
 }
 
@@ -2513,7 +2519,6 @@ function addAndEdit(){
    - Skipped entirely under prefers-reduced-motion or settings.confetti=false.
    ==================================================================== */
 let PARROTS=[];                  // auto-populated with whichever parrot gifs exist in assets/
-let burstTotal=0;
 let parrotMode='emoji';          // 'gif' once at least one parrot gif loads
 let confettiTimer=null;
 
@@ -2531,54 +2536,108 @@ const PARROT_CANDIDATES=['parrot','parrotdad','aussieparrot','cowboyparrot','dea
 function clearConfetti(){
   clearTimeout(confettiTimer); confettiTimer=null;
   confettiEl.innerHTML='';
+  celebParts=[]; if(celebRAF){ cancelAnimationFrame(celebRAF); celebRAF=null; }
 }
 
-let endCount=0;
 /* Intensity 0..100 drives count, thumb↔parrot mix, and variety.
    Burst up and to the LEFT; a lone thumb just floats up. Wide per-item delay
    spread → a staccato pop/fade rather than all at once. */
-function fireConfetti(){
+/* Physics celebration — tuned in design/celebration-lab.html (preset "Whale ✦
+   picked", 2026-07-10). A real integrator (position += velocity; velocity.y +=
+   gravity; velocity ×= 1−drag·dt), NOT keyframes — so the arc has momentum
+   instead of "up then suddenly down". SAME constants on iOS
+   (CelebrationView.swift CelebPhysics) — change them together. */
+const CELEB = { speed:1400, speedJit:0.98, angle:43, spread:39, gravity:1500,
+                drag:0.6, spin:630, sizeMin:16, sizeMax:44, life:6.0,
+                fadeJit:0.77, stagger:440, count:120 };
+// Variety grows with intensity: parrots + yellow thumbs at the low end,
+// the full happy spread at full tilt.
+const CELEB_POOL = ['🦜','👍','😀','😄','😁','😆','😊','🥳','🤩','😎','🙌'];
+// The MINIMUM celebration (celebrate == 0): ONE random yellow hand quietly
+// floats up from where the ✓ was clicked. In fast (fade+rise), out slow.
+const QUIET = { rise:70, dur:1100, inPct:0.18, size:24, drift:6 };
+const QUIET_HANDS = ['👍','🤘','💪','✊','🤜'];
+let quietLastHand = -1;
+let celebParts = [], celebRAF = null, celebLastT = 0;
+
+function quietPop(anchor){
+  const r = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+  const x = r ? r.left + r.width/2 - QUIET.size/2 : innerWidth - 80;
+  const y = r ? r.top - QUIET.size : innerHeight * 0.6;
+  let i; do { i = Math.floor(Math.random()*QUIET_HANDS.length); } while(i===quietLastHand);
+  quietLastHand = i;
+  const el = document.createElement('span');
+  el.className='parrot'; el.style.animation='none';
+  el.textContent = QUIET_HANDS[i];
+  el.style.cssText += `;left:${x}px;top:${y}px;right:auto;bottom:auto;font-size:${QUIET.size}px;opacity:0;animation:none`;
+  confettiEl.appendChild(el);
+  const dx = (Math.random()*2-1) * QUIET.drift;
+  el.animate([
+    { transform:'translate(0,0)', opacity:0, offset:0 },
+    { transform:`translate(${dx*QUIET.inPct}px, ${-QUIET.rise*QUIET.inPct}px)`, opacity:1, offset:QUIET.inPct },
+    { transform:`translate(${dx}px, ${-QUIET.rise}px)`, opacity:0, offset:1 },
+  ], { duration:QUIET.dur, easing:'cubic-bezier(0.23, 1, 0.32, 1)' }).onfinish = ()=> el.remove();
+}
+
+function fireConfetti(anchorEl){
   if(reduced()) return;                        // reduced-motion → no burst
-  const lvl = state.settings.celebrate ?? 100; // 0..100 (left end = one thumb, never silent)
+  const lvl = state.settings.celebrate ?? 100; // 0..100
+  if(lvl <= 0){ quietPop(anchorEl); return; }  // "down to nothing" → the quiet pop
   clearConfetti();                             // single burst in flight
   const i=lvl/100;
-  const count=Math.max(1, Math.round(1 + i*i*199));   // 1 → ~200 (quadratic ramp)
-  const parrotRatio=i;                                // low → 👍🏼, high → 🦜
-  const useGif=parrotMode==='gif';
-  burstTotal=count; endCount=0;
-
+  const count = Math.max(3, Math.round(i*i*CELEB.count));
+  const kinds = Math.max(2, Math.round(2 + i*(CELEB_POOL.length-2)));
+  const pool = CELEB_POOL.slice(0, kinds);
+  const useGif = parrotMode==='gif';
+  const rad = d => d*Math.PI/180;
+  const now = performance.now();
+  const H = innerHeight, ox = 40, oy = H - 24;   // bottom-left launch (lab origin 'bl')
+  // The lab was tuned on a ~940px-wide stage; the drawer (452) and iPhone (390)
+  // are half that. Scale HORIZONTAL velocity to the panel width so the 6s
+  // cascade stays on screen — vertical arc, gravity and timing untouched, so
+  // the tuned feel survives the narrow stage. SAME rule on iOS.
+  const XS = Math.min(1, innerWidth/940);
   const frag=document.createDocumentFragment();
   for(let k=0;k<count;k++){
-    const parrot = Math.random() < parrotRatio;
+    const glyph = pool[Math.floor(Math.random()*pool.length)];
     let el;
-    if(parrot && useGif && PARROTS.length){ el=document.createElement('img'); el.src='assets/'+PARROTS[Math.floor(Math.random()*PARROTS.length)]; el.alt=''; }
-    else { el=document.createElement('span'); el.textContent = parrot ? '🦜' : '👍🏼'; }
-    el.className='parrot';
-    const dx   = count<=2 ? -(Math.random()*14) : -(10 + Math.random()*95);  // lone → floats up; many → flings left
-    const peak = -(40 + Math.random()*55);
-    const dy   = peak + (8 + Math.random()*32);
-    const rot  = (Math.random()*2-1)*260;
-    const delay= Math.random()*650;             // wide spread → staccato
-    const dur  = 1.1+Math.random()*0.9;
-    el.style.setProperty('--dx', dx+'vw');
-    el.style.setProperty('--peak', peak+'vh');
-    el.style.setProperty('--dy', dy+'vh');
-    el.style.setProperty('--rot', rot+'deg');
-    el.style.setProperty('--delay', delay+'ms');
-    el.style.setProperty('--dur', dur+'s');
+    if(glyph==='🦜' && useGif && PARROTS.length){ el=document.createElement('img'); el.src='assets/'+PARROTS[Math.floor(Math.random()*PARROTS.length)]; el.alt=''; }
+    else { el=document.createElement('span'); el.textContent=glyph; }
+    el.className='parrot'; el.style.animation='none';
+    const size = CELEB.sizeMin + Math.random()*(CELEB.sizeMax-CELEB.sizeMin);
+    el.style.cssText += `;left:0;top:0;right:auto;bottom:auto;font-size:${size}px;width:${size}px;height:${size}px;line-height:${size}px;opacity:0;animation:none`;
+    const a  = rad(CELEB.angle) + rad((Math.random()*2-1)*CELEB.spread);
+    const sp = CELEB.speed * (1 + (Math.random()*2-1)*CELEB.speedJit);
+    const life = CELEB.life * (1 - Math.random()*CELEB.fadeJit*0.5);
+    celebParts.push({ el, x:ox, y:oy, vx:Math.cos(a)*sp*XS, vy:-Math.sin(a)*sp,
+      rot:Math.random()*360, vr:(Math.random()*2-1)*CELEB.spin,
+      born: now + Math.random()*CELEB.stagger, life,
+      fadeAt: life*(0.55 + Math.random()*0.35) });
     frag.appendChild(el);
   }
   confettiEl.appendChild(frag);
-
-  // Cleanup: each item's animationend, plus a backstop past the widest delay+dur.
-  confettiEl.addEventListener('animationend', onBurstEnd);
-  confettiTimer=setTimeout(()=>{ confettiEl.removeEventListener('animationend', onBurstEnd); clearConfetti(); }, 3400);
+  celebLastT = now;
+  if(!celebRAF) celebRAF = requestAnimationFrame(celebTick);
+  clearTimeout(confettiTimer);
+  confettiTimer=setTimeout(clearConfetti, (CELEB.life + CELEB.stagger/1000 + 0.5)*1000);   // backstop
 }
-function onBurstEnd(){
-  if(++endCount>=burstTotal){
-    confettiEl.removeEventListener('animationend', onBurstEnd);
-    clearConfetti();
-  }
+function celebTick(now){
+  const dt = Math.min(0.033, (now - celebLastT)/1000); celebLastT = now;
+  const drag = Math.max(0, 1 - CELEB.drag*dt);
+  const H = innerHeight;
+  celebParts = celebParts.filter(p=>{
+    if(!p.el.isConnected) return false;
+    if(now < p.born) return true;
+    const t = (now - p.born)/1000;
+    if(t > p.life || p.y > H + 80){ p.el.remove(); return false; }
+    p.vy += CELEB.gravity*dt; p.vx *= drag; p.vy *= drag;
+    p.x += p.vx*dt; p.y += p.vy*dt; p.rot += p.vr*dt;
+    const alpha = t < p.fadeAt ? 1 : Math.max(0, 1 - (t - p.fadeAt)/(p.life - p.fadeAt));
+    p.el.style.opacity = alpha;
+    p.el.style.transform = `translate(${p.x}px, ${p.y}px) rotate(${p.rot}deg)`;
+    return true;
+  });
+  celebRAF = celebParts.length ? requestAnimationFrame(celebTick) : null;
 }
 
 /* ====================================================================
