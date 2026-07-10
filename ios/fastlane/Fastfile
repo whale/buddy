@@ -45,9 +45,40 @@ platform :ios do
       clean: true
     )
 
+    # WAIT for processing. "Uploaded" only means the transporter accepted the
+    # payload — ingestion can still silently drop the build (it then never
+    # appears in TestFlight and only the account holder gets an email). With
+    # waiting on, a green `fastlane beta` means the build is genuinely visible
+    # to testers; a swallowed build fails the lane instead (field report
+    # 2026-07-10: "you say it's pushed and I don't see anything").
     upload_to_testflight(
       api_key: api_key,
-      skip_waiting_for_build_processing: true
+      skip_waiting_for_build_processing: false,
+      distribute_external: false,
+      notify_external_testers: false
     )
+  end
+
+  desc "Show the latest TestFlight builds with their REAL visibility state. " \
+       "'Uploaded' ≠ 'visible': a build only reaches the TestFlight app once " \
+       "processing finishes AND internal state is IN_BETA_TESTING. Run this " \
+       "whenever a build 'doesn't show up'."
+  lane :status do
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_filepath: ENV.fetch("ASC_KEY_PATH"),
+      in_house: false
+    )
+    Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(hash: api_key)
+    app = Spaceship::ConnectAPI::App.find(APP_ID)
+    builds = app.get_builds(includes: "buildBetaDetail,preReleaseVersion",
+                            sort: "-uploadedDate", limit: 5)
+    builds.each do |b|
+      d = b.build_beta_detail
+      UI.important("build #{b.version} (v#{b.pre_release_version&.version}) " \
+        "uploaded #{b.uploaded_date} | processing: #{b.processing_state} | " \
+        "internal: #{d&.internal_build_state} | external: #{d&.external_build_state}")
+    end
   end
 end
