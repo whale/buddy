@@ -1,13 +1,14 @@
 # Buddy — Next Session Handoff
 
-_Last updated: 2026-07-10 (Mac 0.3.27 released; iOS TestFlight build 20 uploaded)._ 
+_Last updated: 2026-07-10 (Mac 0.3.27 released; iOS TestFlight build 20 uploaded; source version now 0.3.28 from docs-only bump)._ 
 
 ## Start here — `main`, clean, released Mac `0.3.27`
 
 Latest work is on `main` and released.
 
-- **Branch:** `main`, clean after wrap commit.
-- **Latest code commit before wrap:** `1c6c896 chore: bump version [skip ci]` plus wrap commit.
+- **Branch:** `main`, clean after final wrap correction.
+- **Latest functional release commit:** `1c6c896 chore: bump version [skip ci]` for Mac `0.3.27`.
+- **Current source version:** `0.3.28`, created by an accidental docs-only version bump after the wrap commit. This is **not a released Mac version** unless a later `release-mac.yml` run exists.
 - **Mac release:** `v0.3.27`, signed/notarized, published by GitHub Actions. Release link: `https://github.com/whale/buddy/releases/tag/v0.3.27`.
 - **iOS:** TestFlight **build 20** uploaded successfully via `cd ios && fastlane beta`; App Store Connect may still need processing time before it appears to testers.
 - **Release flow:** merge/push to `main` → version-bump workflow increments patch → manually run `gh workflow run release-mac.yml --ref main`. Mac auto-release remains skipped unless explicitly dispatched. iOS TestFlight is local Fastlane, not GitHub Actions.

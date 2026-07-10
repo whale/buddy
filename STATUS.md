@@ -1,6 +1,6 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-10. Branch `main`. Latest **released Mac**: **`0.3.27`** (signed/notarized GitHub release, updater manifest published). iOS uploaded to **TestFlight build `20`** and processing in App Store Connect. Sync was previously confirmed seamless; current focus is Mac/iOS polish regression cleanup and visual QA._
+_Last updated: 2026-07-10. Branch `main`. Latest **released Mac**: **`0.3.27`** (signed/notarized GitHub release, updater manifest published). Source version is **`0.3.28`** because the docs-only wrap commit accidentally triggered the bump bot; **do not treat 0.3.28 as released** unless a later release run exists. iOS uploaded to **TestFlight build `20`** and processing in App Store Connect. Sync was previously confirmed seamless; current focus is Mac/iOS polish regression cleanup and visual QA._
 
 
 ## Session summary — 2026-07-10 — Future rows, red-state regression, Morning launch, releases
@@ -9,7 +9,7 @@ _Last updated: 2026-07-10. Branch `main`. Latest **released Mac**: **`0.3.27`** 
 - **Mac Future rows restored to desktop behavior:** Future rows are fixed at 110px, no extra `Future` heading, and actions are Mac hover-only (vertical `+` and `×` rail). iOS remains swipe-only for Future rows.
 - **Future red-state regression fixed:** at 5 active tasks (`lvl1`), Mac Future titles now turn Buddy red; at 6 active tasks (`lvl2`), Future rows are white-on-red and `+` is hidden. iOS Future sent rows now follow the same escalation colors.
 - **Morning window work continued:** Morning is a separate standard macOS window labeled `morning`; drawer remains `main`. Local app confirmed two Buddy windows after tray actions: a 2px drawer sliver and a standard Morning window at visible-screen size with an 8px inset. Raised Morning via AX after launch.
-- **Releases:** Mac **v0.3.27** published successfully: `https://github.com/whale/buddy/releases/tag/v0.3.27`. iOS **TestFlight build 20** uploaded successfully; Fastlane skipped waiting for App Store processing.
+- **Releases:** Mac **v0.3.27** published successfully: `https://github.com/whale/buddy/releases/tag/v0.3.27`. iOS **TestFlight build 20** uploaded successfully; Fastlane skipped waiting for App Store processing. A docs-only wrap commit then triggered a source bump to `0.3.28`; no Mac `0.3.28` release was started in this session.
 
 **Verified this session:**
 - `pnpm ui:smoke` → **4/4 passed**, including new Future escalation regression test.
