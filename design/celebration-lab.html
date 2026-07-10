@@ -8,47 +8,84 @@
   :root{ --ink:#000; --dim:rgba(0,0,0,.45); --line:#d9d9d9; --red:#e5484d; --bg:#ececee; }
   *{ box-sizing:border-box; margin:0; }
   body{ font:15px/1.45 -apple-system, "Helvetica Neue", sans-serif; background:var(--bg); color:var(--ink); display:flex; height:100vh; overflow:hidden; }
-  #stage{ flex:1; position:relative; background:#fff; border-radius:24px; margin:16px; overflow:hidden; box-shadow:0 6px 16px rgba(0,0,0,.06); cursor:pointer; }
-  #stage canvas{ position:absolute; inset:0; }
-  #hint{ position:absolute; top:16px; left:0; right:0; text-align:center; color:var(--dim); font-size:13px; pointer-events:none; }
-  #panel{ width:320px; padding:24px 20px; overflow-y:auto; }
+  #stagewrap{ flex:1; display:flex; flex-direction:column; margin:16px; gap:12px; min-width:0; }
+  .stage{ position:relative; background:#fff; border-radius:24px; overflow:hidden; box-shadow:0 6px 16px rgba(0,0,0,.06); }
+  #bigStage{ flex:1; cursor:pointer; }
+  #bigStage canvas{ position:absolute; inset:0; }
+  #hint{ position:absolute; top:14px; left:0; right:0; text-align:center; color:var(--dim); font-size:13px; pointer-events:none; }
+  #quietStage{ height:230px; display:none; flex:none; }
+  body[data-mode="quiet"] #quietStage{ display:block; }
+  body[data-mode="quiet"] #bigStage{ display:none; }
+  #quietStage .row{ position:absolute; left:32px; right:32px; top:50%; transform:translateY(-50%); display:flex; align-items:center; justify-content:space-between; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:28px 0; }
+  #quietStage .task{ font-size:24px; font-weight:500; letter-spacing:-0.48px; }
+  #check{ width:44px; height:44px; border-radius:999px; border:none; background:transparent; cursor:pointer; display:grid; place-items:center; color:#8c8c8c; }
+  #check:hover{ background:rgba(0,0,0,.05); }
+  #check svg{ pointer-events:none; }
+  .pop{ position:absolute; font-size:24px; pointer-events:none; will-change:transform,opacity; }
+  #panel{ width:320px; padding:22px 20px; overflow-y:auto; }
   h1{ font-size:16px; margin-bottom:2px; }
-  .sub{ color:var(--dim); font-size:12.5px; margin-bottom:16px; }
-  .presets{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:18px; }
+  .sub{ color:var(--dim); font-size:12.5px; margin-bottom:14px; }
+  .mode{ display:flex; gap:6px; background:rgba(0,0,0,.05); border-radius:999px; padding:4px; margin-bottom:16px; }
+  .mode button{ flex:1; font:600 13px inherit; padding:8px 0; border-radius:999px; border:none; background:transparent; cursor:pointer; color:var(--dim); }
+  .mode button.active{ background:#fff; color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.08); }
+  .presets{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:16px; }
   .presets button{ font:600 12.5px/1.2 inherit; padding:9px 6px; border-radius:999px; border:1px solid var(--line); background:#fff; cursor:pointer; }
   .presets button.active{ background:#000; color:#fff; border-color:#000; }
-  .row{ margin-bottom:11px; }
-  .row label{ display:flex; justify-content:space-between; font-size:12.5px; color:var(--dim); margin-bottom:2px; }
-  .row label b{ color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
+  .row2{ margin-bottom:11px; }
+  .row2 label{ display:flex; justify-content:space-between; font-size:12.5px; color:var(--dim); margin-bottom:2px; }
+  .row2 label b{ color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
   input[type=range]{ width:100%; accent-color:#000; }
-  #fire{ width:100%; margin:14px 0 6px; padding:12px; font:600 15px inherit; color:#fff; background:var(--red); border:none; border-radius:999px; cursor:pointer; }
+  #fire{ width:100%; margin:12px 0 6px; padding:12px; font:600 15px inherit; color:#fff; background:var(--red); border:none; border-radius:999px; cursor:pointer; }
   .note{ font-size:12px; color:var(--dim); }
+  #fps{ position:absolute; bottom:10px; right:16px; font-size:11px; color:var(--dim); }
 </style>
 </head>
-<body>
-<div id="stage"><canvas id="c"></canvas><div id="hint">click anywhere on the stage to fire from that spot ↑ · presets fire from their own corner</div></div>
+<body data-mode="big">
+<div id="stagewrap">
+  <div class="stage" id="bigStage"><canvas id="c"></canvas><div id="hint">click anywhere to fire from that spot · sliders re-fire automatically</div><div id="fps"></div></div>
+  <div class="stage" id="quietStage">
+    <div class="row">
+      <span class="task">Musou tshirts</span>
+      <button id="check" title="Mark done">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
 <div id="panel">
   <h1>Celebration Lab 🦜</h1>
-  <div class="sub">Pick a preset, then drag sliders — every change re-fires. These numbers port 1:1 to the Mac canvas and iOS.</div>
+  <div class="sub">Numbers port 1:1 to Mac + iOS. Rendering is sprite-cached now — the earlier lag was the prototype re-drawing raw emoji every frame, not Chrome.</div>
 
-  <div class="presets" id="presets"></div>
+  <div class="mode">
+    <button data-mode="big" class="active">Big celebration</button>
+    <button data-mode="quiet">Quiet pop (min)</button>
+  </div>
 
-  <div id="sliders"></div>
+  <div id="bigPanel">
+    <div class="presets" id="presets"></div>
+    <div id="sliders"></div>
+    <button id="fire">Fire! 🎉</button>
+    <div class="note">Emoji variety draws from: 🦜 👍 😀 😄 😁 😆 😊 🥳 🤩 😎 🙌 — slide "Variety" down for parrots-only, up for the full spread.</div>
+  </div>
 
-  <button id="fire">Fire! 🎉</button>
-  <div class="note">Physics per particle: position += velocity · velocity.y += gravity · velocity ×= (1−drag) · fade begins at a random point in the tail. No keyframes — a real integrator, so it can't look "suddenly down".</div>
+  <div id="quietPanel" style="display:none">
+    <div class="sub">The minimum celebration: ONE random yellow hand — 👍 🤘 💪 ✊ 🤜 — floats up from the checkmark. In fast (fade+rise), out slow. Click the ✓ on the row to preview.</div>
+    <div id="qsliders"></div>
+    <button id="pop" style="width:100%;margin:12px 0 6px;padding:12px;font:600 15px inherit;color:#fff;background:#000;border:none;border-radius:999px;cursor:pointer;">Pop 👍</button>
+    <div class="note">"Ease in fast, ease out slow": the glyph fades IN during the first slice of the rise, rides a decelerating curve, and spends the long tail fading OUT as it settles at the top.</div>
+  </div>
 </div>
 
 <script>
+/* =========================== BIG CELEBRATION =========================== */
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const stage = document.getElementById('stage');
-function size(){ cv.width = stage.clientWidth * devicePixelRatio; cv.height = stage.clientHeight * devicePixelRatio; ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
+const bigStage = document.getElementById('bigStage');
+function size(){ cv.width = bigStage.clientWidth * devicePixelRatio; cv.height = bigStage.clientHeight * devicePixelRatio; ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
 addEventListener('resize', size); size();
 
-// ---- tunables ---------------------------------------------------------
 const DEFS = [
-  // key, label, min, max, step, fmt
   ['count',   'Parrots',            10, 300, 1,  v=>v],
+  ['variety', 'Emoji variety',      1, 11, 1,   v=>v+' kinds'],
   ['speed',   'Launch speed',       300, 2200, 10, v=>v+' px/s'],
   ['speedJit','Speed variation %',  0, 100, 1,  v=>v+'%'],
   ['angle',   'Launch angle',       20, 160, 1, v=>v+'°'],
@@ -62,20 +99,19 @@ const DEFS = [
   ['fadeJit', 'Fade randomness',    0, 100, 1, v=>v+'%'],
   ['stagger', 'Launch stagger',     0, 900, 10, v=>v+'ms'],
 ];
-const P = {};   // live params
+const P = {};
 
 const PRESETS = {
-  'Current (v0.3)':      {count:100, speed:1500, speedJit:35, angle:118, spread:28, gravity:260,  drag:0.4, spin:180, sizeMin:22, sizeMax:26, life:1.8, fadeJit:20, stagger:600, origin:'br'},
-  'Cannon ✦ recommended':{count:120, speed:1400, speedJit:45, angle:68,  spread:22, gravity:1500, drag:1.2, spin:240, sizeMin:16, sizeMax:34, life:3.2, fadeJit:60, stagger:250, origin:'bl'},
-  'Fountain':            {count:160, speed:1050, speedJit:55, angle:90,  spread:35, gravity:1200, drag:0.8, spin:120, sizeMin:14, sizeMax:28, life:3.6, fadeJit:70, stagger:700, origin:'bc'},
-  'Gentle drift':        {count:70,  speed:700,  speedJit:40, angle:75,  spread:45, gravity:500,  drag:2.5, spin:60,  sizeMin:18, sizeMax:30, life:4.5, fadeJit:85, stagger:800, origin:'bl'},
+  'Whale ✦ picked':  {count:120, variety:11, speed:1400, speedJit:98, angle:43, spread:39, gravity:1500, drag:0.6, spin:630, sizeMin:16, sizeMax:44, life:6.0, fadeJit:77, stagger:440, origin:'bl'},
+  'Current (v0.3)':  {count:100, variety:2,  speed:1500, speedJit:35, angle:118, spread:28, gravity:260, drag:0.4, spin:180, sizeMin:22, sizeMax:26, life:1.8, fadeJit:20, stagger:600, origin:'br'},
+  'Cannon':          {count:120, variety:4,  speed:1400, speedJit:45, angle:68, spread:22, gravity:1500, drag:1.2, spin:240, sizeMin:16, sizeMax:34, life:3.2, fadeJit:60, stagger:250, origin:'bl'},
+  'Fountain':        {count:160, variety:6,  speed:1050, speedJit:55, angle:90, spread:35, gravity:1200, drag:0.8, spin:120, sizeMin:14, sizeMax:28, life:3.6, fadeJit:70, stagger:700, origin:'bc'},
 };
-let origin = 'bl';   // bl / bc / br
+let origin = 'bl';
 
-// ---- UI ---------------------------------------------------------------
 const slidersEl = document.getElementById('sliders');
 for(const [key,label,min,max,step,fmt] of DEFS){
-  const row = document.createElement('div'); row.className='row';
+  const row = document.createElement('div'); row.className='row2';
   row.innerHTML = `<label>${label}<b data-v="${key}"></b></label>
     <input type="range" min="${min}" max="${max}" step="${step}" data-k="${key}">`;
   slidersEl.appendChild(row);
@@ -100,22 +136,43 @@ for(const name of Object.keys(PRESETS)){
   presetsEl.appendChild(b);
 }
 
-// ---- particles --------------------------------------------------------
-const GLYPHS = ['🦜','🦜','🦜','👍🏼'];
+// Glyph pool, ordered: variety=1 → parrots only; full → the whole happy spread.
+const POOL = ['🦜','👍','😀','😄','😁','😆','😊','🥳','🤩','😎','🙌'];
+
+// Sprite cache: each glyph is rasterised ONCE per size bucket, then blitted.
+// (Drawing raw emoji text per particle per frame is what made v1 lag.)
+const SPRITES = new Map();
+function sprite(glyph, px){
+  const bucket = Math.round(px/4)*4;                    // 4px buckets keep the cache small
+  const key = glyph+bucket;
+  let s = SPRITES.get(key);
+  if(!s){
+    s = document.createElement('canvas');
+    const pad = Math.ceil(bucket*0.25);
+    s.width = s.height = (bucket + pad*2) * 2;          // ×2 for retina
+    const g = s.getContext('2d');
+    g.scale(2,2);
+    g.font = bucket + 'px system-ui';
+    g.textAlign='center'; g.textBaseline='middle';
+    g.fillText(glyph, bucket/2+pad, bucket/2+pad);
+    SPRITES.set(key, s);
+  }
+  return s;
+}
+
 let parts = [];
 function originPoint(){
-  const w = stage.clientWidth, h = stage.clientHeight;
+  const w = bigStage.clientWidth, h = bigStage.clientHeight;
   return origin==='bl' ? [40, h-24] : origin==='br' ? [w-40, h-24] : [w/2, h-24];
 }
 let clickPt = null;
-stage.addEventListener('click', e=>{ clickPt = [e.offsetX, e.offsetY]; fire(true); });
+bigStage.addEventListener('click', e=>{ clickPt = [e.offsetX, e.offsetY]; fire(true); });
 
 function fire(fromClick){
   const [ox, oy] = fromClick && clickPt ? clickPt : originPoint();
   const rad = d => d * Math.PI / 180;
   const now = performance.now();
-  // Angle is measured from the horizontal, INTO the stage: a bottom-left origin
-  // fires up-right, bottom-right fires up-left, centre fires straight up ±.
+  const pool = POOL.slice(0, Math.max(1, P.variety));
   const base = origin==='br' && !fromClick ? 180 - P.angle : P.angle;
   for(let i=0;i<P.count;i++){
     const a   = rad(base) + rad((Math.random()*2-1) * P.spread);
@@ -126,19 +183,21 @@ function fire(fromClick){
       vx: Math.cos(a) * sp, vy: -Math.sin(a) * sp,
       rot: Math.random()*360, vr: (Math.random()*2-1) * P.spin,
       size: P.sizeMin + Math.random()*(Math.max(0,P.sizeMax-P.sizeMin)),
-      glyph: GLYPHS[Math.floor(Math.random()*GLYPHS.length)],
-      born: now + Math.random()*P.stagger,      // stagger = cascade
+      glyph: pool[Math.floor(Math.random()*pool.length)],
+      born: now + Math.random()*P.stagger,
       life,
-      fadeAt: life * (0.55 + Math.random()*0.35), // fade starts at a random tail point
+      fadeAt: life * (0.55 + Math.random()*0.35),
     });
   }
   if(parts.length > 4000) parts = parts.slice(-4000);
 }
 
-let last = performance.now();
+let last = performance.now(), fpsN=0, fpsT=last;
+const fpsEl = document.getElementById('fps');
 (function tick(now){
   const dt = Math.min(0.033, (now - last)/1000); last = now;
-  ctx.clearRect(0,0,stage.clientWidth,stage.clientHeight);
+  fpsN++; if(now-fpsT>500){ fpsEl.textContent = Math.round(fpsN*1000/(now-fpsT))+' fps · '+parts.length+' live'; fpsN=0; fpsT=now; }
+  ctx.clearRect(0,0,bigStage.clientWidth,bigStage.clientHeight);
   const drag = Math.max(0, 1 - P.drag*dt);
   parts = parts.filter(p=>{
     if(now < p.born) return true;
@@ -149,22 +208,91 @@ let last = performance.now();
     p.x += p.vx * dt; p.y += p.vy * dt;
     p.rot += p.vr * dt;
     const alpha = t < p.fadeAt ? 1 : Math.max(0, 1 - (t - p.fadeAt)/(p.life - p.fadeAt));
+    const img = sprite(p.glyph, p.size);
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.translate(p.x, p.y); ctx.rotate(p.rot * Math.PI/180);
-    ctx.font = p.size + 'px system-ui';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(p.glyph, 0, 0);
+    ctx.drawImage(img, -img.width/4, -img.height/4, img.width/2, img.height/2);
     ctx.restore();
-    return p.y < stage.clientHeight + 80;
+    return p.y < bigStage.clientHeight + 80;
   });
   requestAnimationFrame(tick);
 })(last);
 
 document.getElementById('fire').onclick = () => fire();
 
-// boot: recommended preset
-document.querySelectorAll('#presets button')[1].click();
+/* ============================ QUIET POP ================================ */
+// Minimum celebration: ONE random yellow hand floats up from the checkmark.
+const QP = { rise: 70, dur: 1100, inPct: 18, size: 24, drift: 6 };
+const QDEFS = [
+  ['rise',  'Rise distance', 30, 140, 1,  v=>v+'px'],
+  ['dur',   'Duration',      500, 2500, 10, v=>v+'ms'],
+  ['inPct', 'Fade-in slice', 5, 50, 1,   v=>v+'% of the rise'],
+  ['size',  'Glyph size',    16, 40, 1,  v=>v+'px'],
+  ['drift', 'Side drift',    0, 30, 1,   v=>'±'+v+'px'],
+];
+const HANDS = ['👍','🤘','💪','✊','🤜'];   // YELLOW default-tone hands only
+const qEl = document.getElementById('qsliders');
+for(const [key,label,min,max,step,fmt] of QDEFS){
+  const row = document.createElement('div'); row.className='row2';
+  row.innerHTML = `<label>${label}<b data-qv="${key}"></b></label>
+    <input type="range" min="${min}" max="${max}" step="${step}" data-qk="${key}">`;
+  qEl.appendChild(row);
+}
+function qsync(){
+  for(const [key,,,,,fmt] of QDEFS){
+    document.querySelector(`[data-qv="${key}"]`).textContent = fmt(QP[key]);
+    document.querySelector(`[data-qk="${key}"]`).value = QP[key];
+  }
+}
+qEl.addEventListener('input', e=>{
+  const k = e.target.dataset.qk; if(!k) return;
+  QP[k] = +e.target.value; qsync(); quietPop();
+});
+qsync();
+
+const quietStage = document.getElementById('quietStage');
+let lastHand = -1;
+function quietPop(){
+  const check = document.getElementById('check');
+  const cr = check.getBoundingClientRect(), sr = quietStage.getBoundingClientRect();
+  // one at a time, randomized without immediate repeats
+  let i; do { i = Math.floor(Math.random()*HANDS.length); } while(i===lastHand);
+  lastHand = i;
+  const el = document.createElement('div');
+  el.className = 'pop';
+  el.textContent = HANDS[i];
+  el.style.fontSize = QP.size+'px';
+  el.style.left = (cr.left - sr.left + cr.width/2 - QP.size/2) + 'px';
+  el.style.top  = (cr.top - sr.top - QP.size) + 'px';
+  quietStage.appendChild(el);
+  const dx = (Math.random()*2-1) * QP.drift;
+  // In fast (fade+rise start quick), out slow: decelerating rise; opacity ramps
+  // up inside the first `inPct` of the journey and drains over the long tail.
+  const inEnd = QP.inPct/100;
+  el.animate([
+    { transform:`translate(0px, 0px)`,                      opacity: 0,   offset: 0 },
+    { transform:`translate(${dx*inEnd}px, ${-QP.rise*inEnd}px)`, opacity: 1, offset: inEnd },
+    { transform:`translate(${dx}px, ${-QP.rise}px)`,        opacity: 0,   offset: 1 },
+  ], { duration: QP.dur, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' }).onfinish = ()=> el.remove();
+}
+document.getElementById('check').onclick = quietPop;
+document.getElementById('pop').onclick = quietPop;
+
+/* ============================ mode switch ============================== */
+document.querySelectorAll('.mode button').forEach(b=>{
+  b.onclick = ()=>{
+    document.querySelectorAll('.mode button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    document.body.dataset.mode = b.dataset.mode;
+    document.getElementById('bigPanel').style.display = b.dataset.mode==='big' ? '' : 'none';
+    document.getElementById('quietPanel').style.display = b.dataset.mode==='quiet' ? '' : 'none';
+    if(b.dataset.mode==='quiet') setTimeout(quietPop, 250);
+  };
+});
+
+// boot: the user's picked preset
+document.querySelectorAll('#presets button')[0].click();
 </script>
 </body>
 </html>
