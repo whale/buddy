@@ -96,6 +96,27 @@ final class BuddyFieldReportUITests: XCTestCase {
             "Tapping the revealed + action must send the row to today (tap was swallowed)")
     }
 
+    /// R3-1: a SLOW first swipe must open the tray in ONE pull. (The direction
+    /// check used pan velocity, which is noisy on a slow pull — the recognizer
+    /// bailed, the row rubber-banded, and only the second pull worked.)
+    func testSlowFirstSwipeOpensTray() throws {
+        let app = launch(fixture: "future-long")
+        let row = app.staticTexts["Future item 12"]
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        // MODEST pull: ~80pt of finger travel — comfortably past the ~59pt open
+        // threshold, but NOT past it if translation is measured against the row
+        // that moves with the finger (that feedback halves the effective travel:
+        // the row lagged the finger and sprang back — the "bounce, works on the
+        // second pull" report). Slight thumb-arc diagonal for realism.
+        let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.40))
+        let end = row.coordinate(withNormalizedOffset: CGVector(dx: 0.64, dy: 0.60))
+        start.press(forDuration: 0.4, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
+        sleep(1)
+        let plus = app.buttons["swipe-plus"].firstMatch
+        XCTAssertTrue(plus.exists && plus.isHittable,
+            "One slow pull must reveal a tappable tray (first-swipe bounce regression)")
+    }
+
     /// R2-5: the Future list must scroll when it is longer than the panel.
     func testFutureListScrolls() throws {
         let app = launch(fixture: "future-long")
@@ -112,6 +133,23 @@ final class BuddyFieldReportUITests: XCTestCase {
         let afterY = first.exists ? first.frame.minY : -9999   // scrolled offscreen also counts
         XCTAssertLessThan(afterY, beforeY - 60,
             "Future list did not scroll (row 1 y \(beforeY) → \(afterY))")
+    }
+
+    /// R3-2 evidence pass: tap the Add row while an external recording captures
+    /// the insert + keyboard + focus choreography for frame analysis.
+    func testAddTaskRecordingPass() throws {
+        let app = launch(fixture: "lvl0")
+        let add = app.staticTexts["Add"]
+        XCTAssertTrue(add.waitForExistence(timeout: 3))
+        sleep(2)                 // settle frames before the tap
+        add.tap()
+        sleep(3)                 // capture the full add + keyboard sequence
+        let editor = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH 'task-editor'")).firstMatch
+        XCTAssertTrue(editor.exists)
+        app.typeText("Hello")
+        sleep(2)
+        app.keyboards.buttons["done"].firstMatch.exists ? app.keyboards.buttons["done"].tap() : app.typeText("\n")
+        sleep(2)
     }
 
     /// R2-4/R2-6 evidence pass: open + close both sheets slowly while an external

@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Buddy · Celebration Lab</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{ --ink:#000; --dim:rgba(0,0,0,.45); --line:#d9d9d9; --red:#e5484d; --bg:#ececee; }
+  *{ box-sizing:border-box; margin:0; }
+  body{ font:15px/1.45 -apple-system, "Helvetica Neue", sans-serif; background:var(--bg); color:var(--ink); display:flex; height:100vh; overflow:hidden; }
+  #stage{ flex:1; position:relative; background:#fff; border-radius:24px; margin:16px; overflow:hidden; box-shadow:0 6px 16px rgba(0,0,0,.06); cursor:pointer; }
+  #stage canvas{ position:absolute; inset:0; }
+  #hint{ position:absolute; top:16px; left:0; right:0; text-align:center; color:var(--dim); font-size:13px; pointer-events:none; }
+  #panel{ width:320px; padding:24px 20px; overflow-y:auto; }
+  h1{ font-size:16px; margin-bottom:2px; }
+  .sub{ color:var(--dim); font-size:12.5px; margin-bottom:16px; }
+  .presets{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:18px; }
+  .presets button{ font:600 12.5px/1.2 inherit; padding:9px 6px; border-radius:999px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  .presets button.active{ background:#000; color:#fff; border-color:#000; }
+  .row{ margin-bottom:11px; }
+  .row label{ display:flex; justify-content:space-between; font-size:12.5px; color:var(--dim); margin-bottom:2px; }
+  .row label b{ color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
+  input[type=range]{ width:100%; accent-color:#000; }
+  #fire{ width:100%; margin:14px 0 6px; padding:12px; font:600 15px inherit; color:#fff; background:var(--red); border:none; border-radius:999px; cursor:pointer; }
+  .note{ font-size:12px; color:var(--dim); }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas><div id="hint">click anywhere on the stage to fire from that spot ↑ · presets fire from their own corner</div></div>
+<div id="panel">
+  <h1>Celebration Lab 🦜</h1>
+  <div class="sub">Pick a preset, then drag sliders — every change re-fires. These numbers port 1:1 to the Mac canvas and iOS.</div>
+
+  <div class="presets" id="presets"></div>
+
+  <div id="sliders"></div>
+
+  <button id="fire">Fire! 🎉</button>
+  <div class="note">Physics per particle: position += velocity · velocity.y += gravity · velocity ×= (1−drag) · fade begins at a random point in the tail. No keyframes — a real integrator, so it can't look "suddenly down".</div>
+</div>
+
+<script>
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const stage = document.getElementById('stage');
+function size(){ cv.width = stage.clientWidth * devicePixelRatio; cv.height = stage.clientHeight * devicePixelRatio; ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
+addEventListener('resize', size); size();
+
+// ---- tunables ---------------------------------------------------------
+const DEFS = [
+  // key, label, min, max, step, fmt
+  ['count',   'Parrots',            10, 300, 1,  v=>v],
+  ['speed',   'Launch speed',       300, 2200, 10, v=>v+' px/s'],
+  ['speedJit','Speed variation %',  0, 100, 1,  v=>v+'%'],
+  ['angle',   'Launch angle',       20, 160, 1, v=>v+'°'],
+  ['spread',  'Spread',             2, 90, 1,  v=>'±'+v+'°'],
+  ['gravity', 'Gravity',            200, 3000, 10, v=>v],
+  ['drag',    'Air drag',           0, 8, .1,  v=>v.toFixed(1)],
+  ['spin',    'Tumble',             0, 720, 5, v=>v+'°/s'],
+  ['sizeMin', 'Size min',           10, 40, 1, v=>v+'px'],
+  ['sizeMax', 'Size max',           14, 64, 1, v=>v+'px'],
+  ['life',    'Lifetime',           1.2, 6, .1, v=>v.toFixed(1)+'s'],
+  ['fadeJit', 'Fade randomness',    0, 100, 1, v=>v+'%'],
+  ['stagger', 'Launch stagger',     0, 900, 10, v=>v+'ms'],
+];
+const P = {};   // live params
+
+const PRESETS = {
+  'Current (v0.3)':      {count:100, speed:1500, speedJit:35, angle:118, spread:28, gravity:260,  drag:0.4, spin:180, sizeMin:22, sizeMax:26, life:1.8, fadeJit:20, stagger:600, origin:'br'},
+  'Cannon ✦ recommended':{count:120, speed:1400, speedJit:45, angle:68,  spread:22, gravity:1500, drag:1.2, spin:240, sizeMin:16, sizeMax:34, life:3.2, fadeJit:60, stagger:250, origin:'bl'},
+  'Fountain':            {count:160, speed:1050, speedJit:55, angle:90,  spread:35, gravity:1200, drag:0.8, spin:120, sizeMin:14, sizeMax:28, life:3.6, fadeJit:70, stagger:700, origin:'bc'},
+  'Gentle drift':        {count:70,  speed:700,  speedJit:40, angle:75,  spread:45, gravity:500,  drag:2.5, spin:60,  sizeMin:18, sizeMax:30, life:4.5, fadeJit:85, stagger:800, origin:'bl'},
+};
+let origin = 'bl';   // bl / bc / br
+
+// ---- UI ---------------------------------------------------------------
+const slidersEl = document.getElementById('sliders');
+for(const [key,label,min,max,step,fmt] of DEFS){
+  const row = document.createElement('div'); row.className='row';
+  row.innerHTML = `<label>${label}<b data-v="${key}"></b></label>
+    <input type="range" min="${min}" max="${max}" step="${step}" data-k="${key}">`;
+  slidersEl.appendChild(row);
+}
+slidersEl.addEventListener('input', e=>{
+  const k = e.target.dataset.k; if(!k) return;
+  P[k] = +e.target.value; sync(); fire();
+  document.querySelectorAll('#presets button').forEach(b=>b.classList.remove('active'));
+});
+function sync(){
+  for(const [key,,,,,fmt] of DEFS){
+    document.querySelector(`[data-v="${key}"]`).textContent = fmt(P[key]);
+    document.querySelector(`[data-k="${key}"]`).value = P[key];
+  }
+}
+const presetsEl = document.getElementById('presets');
+for(const name of Object.keys(PRESETS)){
+  const b = document.createElement('button'); b.textContent = name;
+  b.onclick = ()=>{ Object.assign(P, PRESETS[name]); origin = PRESETS[name].origin;
+    document.querySelectorAll('#presets button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); sync(); fire(); };
+  presetsEl.appendChild(b);
+}
+
+// ---- particles --------------------------------------------------------
+const GLYPHS = ['🦜','🦜','🦜','👍🏼'];
+let parts = [];
+function originPoint(){
+  const w = stage.clientWidth, h = stage.clientHeight;
+  return origin==='bl' ? [40, h-24] : origin==='br' ? [w-40, h-24] : [w/2, h-24];
+}
+let clickPt = null;
+stage.addEventListener('click', e=>{ clickPt = [e.offsetX, e.offsetY]; fire(true); });
+
+function fire(fromClick){
+  const [ox, oy] = fromClick && clickPt ? clickPt : originPoint();
+  const rad = d => d * Math.PI / 180;
+  const now = performance.now();
+  // Angle is measured from the horizontal, INTO the stage: a bottom-left origin
+  // fires up-right, bottom-right fires up-left, centre fires straight up ±.
+  const base = origin==='br' && !fromClick ? 180 - P.angle : P.angle;
+  for(let i=0;i<P.count;i++){
+    const a   = rad(base) + rad((Math.random()*2-1) * P.spread);
+    const sp  = P.speed * (1 + (Math.random()*2-1) * P.speedJit/100);
+    const life = P.life * (1 - Math.random()*P.fadeJit/100*.5);
+    parts.push({
+      x: ox, y: oy,
+      vx: Math.cos(a) * sp, vy: -Math.sin(a) * sp,
+      rot: Math.random()*360, vr: (Math.random()*2-1) * P.spin,
+      size: P.sizeMin + Math.random()*(Math.max(0,P.sizeMax-P.sizeMin)),
+      glyph: GLYPHS[Math.floor(Math.random()*GLYPHS.length)],
+      born: now + Math.random()*P.stagger,      // stagger = cascade
+      life,
+      fadeAt: life * (0.55 + Math.random()*0.35), // fade starts at a random tail point
+    });
+  }
+  if(parts.length > 4000) parts = parts.slice(-4000);
+}
+
+let last = performance.now();
+(function tick(now){
+  const dt = Math.min(0.033, (now - last)/1000); last = now;
+  ctx.clearRect(0,0,stage.clientWidth,stage.clientHeight);
+  const drag = Math.max(0, 1 - P.drag*dt);
+  parts = parts.filter(p=>{
+    if(now < p.born) return true;
+    const t = (now - p.born)/1000;
+    if(t > p.life) return false;
+    p.vy += P.gravity * dt;
+    p.vx *= drag; p.vy *= drag;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.rot += p.vr * dt;
+    const alpha = t < p.fadeAt ? 1 : Math.max(0, 1 - (t - p.fadeAt)/(p.life - p.fadeAt));
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(p.x, p.y); ctx.rotate(p.rot * Math.PI/180);
+    ctx.font = p.size + 'px system-ui';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(p.glyph, 0, 0);
+    ctx.restore();
+    return p.y < stage.clientHeight + 80;
+  });
+  requestAnimationFrame(tick);
+})(last);
+
+document.getElementById('fire').onclick = () => fire();
+
+// boot: recommended preset
+document.querySelectorAll('#presets button')[1].click();
+</script>
+</body>
+</html>
