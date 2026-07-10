@@ -1,0 +1,37 @@
+{
+  "$comment": "THE escalation token contract — single source of truth for both platforms. Mac consumes it as the CSS custom-property blocks in dist/index.html (#drawer/#morning + .lvl1/.lvl2); iOS mirrors it in Theme/EscalationTheme.swift. Each platform has a test pinning its values to this file (Mac: __buddy.smokeTest lvl1/lvl2 colour asserts; iOS: EscalationTokenParityTests). Change the design here FIRST, then both platforms, or the tests fail.",
+  "rule": "Level is driven by the ACTIVE task count: <=4 lvl0, ==5 lvl1, >=6 lvl2. THE PATTERN (2026-07-10): EVERY text and element follows lvl0 black-on-white, lvl1 red-text-on-white, lvl2 white-on-red. No carve-outs: done rows, day headers, glyphs, settings text and controls all follow.",
+  "red": "#e5484d",
+  "levels": {
+    "lvl0": {
+      "card": "#ffffff",
+      "ink": "#000000",
+      "inkDim": "rgba(0,0,0,0.45)",
+      "glyph": "#8c8c8c",
+      "chromeInk": "rgba(0,0,0,0.45)",
+      "selBg": "#000000",
+      "selInk": "#ffffff",
+      "line": "#d9d9d9"
+    },
+    "lvl1": {
+      "card": "#ffffff",
+      "ink": "#e5484d",
+      "inkDim": "rgba(229,72,77,0.65)",
+      "glyph": "#e5484d",
+      "chromeInk": "#e5484d",
+      "selBg": "#e5484d",
+      "selInk": "#ffffff",
+      "line": "#d9d9d9"
+    },
+    "lvl2": {
+      "card": "#e5484d",
+      "ink": "#ffffff",
+      "inkDim": "rgba(255,255,255,0.6)",
+      "glyph": "rgba(255,255,255,0.92)",
+      "chromeInk": "#ffffff",
+      "selBg": "#ffffff",
+      "selInk": "#e5484d",
+      "line": "rgba(255,255,255,0.3)"
+    }
+  }
+}

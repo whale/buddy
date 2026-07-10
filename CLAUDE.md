@@ -19,23 +19,30 @@ The UI re-themes itself across these states **entirely through CSS custom
 properties** defined in the `<style>` block. When you add or change any UI that
 shows text/borders/icons on a card, you MUST use these tokens so it adapts:
 
-| Token | lvl0 (white) | lvl2 (red bg) | Use for |
-|-------|-------------|---------------|---------|
-| `var(--ink)` | `#000` | `#fff` | primary text |
-| `var(--ink-dim)` | `rgba(0,0,0,.45)` | `rgba(255,255,255,.6)` | secondary / done / dim text |
-| `.chrome` class | black | white (red on lvl1) | header glyphs that should go red at lvl1 |
-| `.bd` class | `#d9d9d9` border | `rgba(255,255,255,.3)` | adaptive card borders/dividers |
-| `var(--chrome-ink)` / `--sel-bg` / `--sel-ink` / `--line` | … | … | buttons, selected pills, lines |
+THE PATTERN (user decision 2026-07-10): **EVERY text and element follows
+lvl0 black-on-white → lvl1 red-text-on-white → lvl2 white-on-red. No carve-outs** —
+done rows, day headers, glyphs, settings text and controls all follow. The canonical
+token table lives in `design/escalation-tokens.json` (mirrored by the CSS vars on Mac
+and `EscalationTheme.swift` on iOS; each platform has a test pinning it).
+
+| Token | lvl0 (white) | lvl1 (red text) | lvl2 (red bg) | Use for |
+|-------|-------------|-----------------|---------------|---------|
+| `var(--ink)` | `#000` | `var(--red)` | `#fff` | ALL primary text (active + done + labels) |
+| `var(--ink-dim)` | `rgba(0,0,0,.45)` | `rgba(229,72,77,.65)` | `rgba(255,255,255,.6)` | secondary / struck / dim text |
+| `var(--glyph)` (`.icon-ink`) | `#8c8c8c` | `var(--red)` | `rgba(255,255,255,.92)` | row action glyphs |
+| `.chrome` class | black | red | white | header glyphs/date |
+| `.bd` class | `#d9d9d9` border | `#d9d9d9` | `rgba(255,255,255,.3)` | adaptive card borders/dividers |
+| `var(--chrome-ink)` / `--sel-bg` / `--sel-ink` / `--line` / `--addtxt` | … | … | … | buttons, selected pills, lines, Add row |
 
 **Hardcoding `text-black`, `text-black/35`, `rgba(0,0,0,…)`, `#000`, `border-[#d9d9d9]`
 on anything that sits on a card is a BUG** — it stays dark on the red background and
 becomes illegible (this exact mistake shipped the unreadable "Donezo" rows on red).
+Since `--ink`/`--ink-dim` are level-driven, per-level colour branching in JS is also
+a smell — just use the token.
 
-- "Done" / Donezo rows are **neutral but adaptive** → `--ink` (label) + `--ink-dim`
-  (struck title). They must NOT use `.chrome` (that turns them red at lvl1 — done
-  work isn't pressure) and must NOT be hardcoded dark (illegible at lvl2).
-- Active task text is the exception: it intentionally uses the escalation colours
-  directly (`#fff` at lvl2, `RED` at lvl1, `#000` otherwise).
+⚠️ CSS gotcha: an ID rule (`#settings{ transition:… }`) silently overrides `.sheet`'s
+transition (specificity) — that once killed the sheet slide entirely. Keep all sheet
+transitions on `.sheet`/`.sheet.closing` only.
 
 ---
 
