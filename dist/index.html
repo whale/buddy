@@ -1996,9 +1996,11 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     // native mousedown focus + position the caret.
     txt.addEventListener('mousedown',()=>{ if(editingId===it.id || it.state==='done') return; kbActive=false; cursor=idx; editingId=it.id; txt.setAttribute('contenteditable','true'); txt.classList.remove('empty'); });
     txt.addEventListener('input',()=>{ it.text=txt.textContent.trim(); });
-    // Enter COMMITS the edit, nothing more. (It used to chain into a brand-new
-    // empty task — field report 2026-07-10: that's never what an edit intends.)
-    txt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); txt.blur(); } });
+    // Enter COMMITS the edit, nothing more. stopPropagation is LOAD-BEARING:
+    // blur() clears editingId synchronously, so without it this same keypress
+    // bubbles to the global key layer, which then reads Enter as "cycle the
+    // cursored task" and marks it done (field reports 2026-07-10 ×2).
+    txt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); e.stopPropagation(); txt.blur(); } });
     txt.addEventListener('blur',()=>{ const prev=it.text; it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable'); editingId=null; if(!it.text){ tombstone(it.id); state.items=state.items.filter(x=>x.id!==it.id); } else if(it.text!==prev){ touch(it); } render(); });
     row.appendChild(txt);
 
@@ -2955,13 +2957,14 @@ window.__buddy = {
       ok('edit: cursor lands in the task text',
          ae&&ae.getAttribute&&ae.getAttribute('contenteditable')==='true'&&ae.dataset&&ae.dataset.tid==='s1',
          'active='+(ae&&ae.tagName)+' tid='+(ae&&ae.dataset&&ae.dataset.tid));
-      // Enter must COMMIT the edit only — never chain into a new empty task
-      // (field report 2026-07-10).
+      // Enter must COMMIT the edit only — never chain into a new empty task,
+      // and never leak to the global layer (which would cycle the task done).
       const nBeforeEnter=state.items.length;
       if(ae) ae.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
-      ok('edit: Enter commits without creating a new task',
-         state.items.length===nBeforeEnter && editingId===null,
-         'len '+nBeforeEnter+'→'+state.items.length+' editing='+editingId);
+      const s1After=state.items.find(i=>i.id==='s1');
+      ok('edit: Enter commits without creating a new task or completing it',
+         state.items.length===nBeforeEnter && editingId===null && s1After && s1After.state!=='done',
+         'len '+nBeforeEnter+'→'+state.items.length+' editing='+editingId+' s1='+(s1After&&s1After.state));
       if(document.activeElement&&document.activeElement.blur) document.activeElement.blur();
       const before=activeCount();
       const vBefore=(state.items.find(i=>i.id==='s2')||{}).v||0;
