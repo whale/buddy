@@ -37,7 +37,6 @@ enum CelebPhysics {
     static let life: Double = 6.0, fadeJit = 0.77
     static let stagger: Double = 0.44
     static let count = 120
-    static let labWidth: Double = 940      // horizontal reach scales to panel width
     static let pool = ["🦜","👍","😀","😄","😁","😆","😊","🥳","🤩","😎","🙌"]
 
     static let quietRise: Double = 70, quietDur: Double = 1.1
@@ -96,15 +95,16 @@ private struct PhysicsBurst: View {
         let kinds = max(2, Int((2 + i * Double(CelebPhysics.pool.count - 2)).rounded()))
         let pool = Array(CelebPhysics.pool.prefix(kinds))
         let W = UIScreen.main.bounds.width, H = UIScreen.main.bounds.height
-        let xs = min(1, W / CelebPhysics.labWidth)     // same narrow-stage rule as the Mac
         start = Date()
         parts = (0..<count).map { _ in
             let a = (CelebPhysics.angle + .random(in: -CelebPhysics.spread...CelebPhysics.spread)) * .pi / 180
             let sp = CelebPhysics.speed * (1 + .random(in: -CelebPhysics.speedJit...CelebPhysics.speedJit))
             let life = CelebPhysics.life * (1 - .random(in: 0...CelebPhysics.fadeJit) * 0.5)
+            // Bottom-RIGHT of the screen, flying up-LEFT — full lab speed, no
+            // width scaling (the squeeze read as a "swirl" on the phone).
             return P(glyph: pool.randomElement()!,
-                     x0: 40, y0: H - 24,
-                     vx0: cos(a) * sp * xs, vy0: -sin(a) * sp,
+                     x0: W - 40, y0: H - 24,
+                     vx0: -cos(a) * sp, vy0: -sin(a) * sp,
                      rot0: .random(in: 0...360), vr: .random(in: -CelebPhysics.spin...CelebPhysics.spin),
                      size: .random(in: CelebPhysics.sizeMin...CelebPhysics.sizeMax),
                      born: .random(in: 0...CelebPhysics.stagger),

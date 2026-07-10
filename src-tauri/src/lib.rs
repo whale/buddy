@@ -208,6 +208,67 @@ fn hide_morning_window(app: AppHandle) {
     }
 }
 
+// ============ Full-screen celebration overlay ============
+// The burst covers the WHOLE screen (bottom-right → top-left), not just the
+// 452px drawer — so it plays in its own transparent, click-through, floating
+// window (same second-window pattern as Morning). Created lazily, hidden when
+// the burst ends. The webview boots with surface label "confetti" and renders
+// ONLY the burst.
+static PENDING_CELEBRATE: std::sync::Mutex<Option<i32>> = std::sync::Mutex::new(None);
+
+#[tauri::command]
+fn celebrate_fullscreen(app: AppHandle, intensity: i32) {
+    *PENDING_CELEBRATE.lock().unwrap() = Some(intensity);
+    let win = match app.get_webview_window("confetti") {
+        Some(w) => w,
+        None => match WebviewWindowBuilder::new(&app, "confetti", WebviewUrl::App("index.html".into()))
+            .title("Buddy")
+            .transparent(true)
+            .decorations(false)
+            .resizable(false)
+            .always_on_top(true)
+            .visible(false)
+            .focused(false)
+            .shadow(false)
+            .accept_first_mouse(false)
+            .build()
+        {
+            Ok(w) => w,
+            Err(e) => { eprintln!("[buddy] confetti window failed: {e}"); return; }
+        },
+    };
+    // Cover the screen the drawer lives on (fall back to primary).
+    let mon = app.get_webview_window("main")
+        .and_then(|m| m.current_monitor().ok().flatten())
+        .or_else(|| win.primary_monitor().ok().flatten());
+    if let Some(mon) = mon {
+        let _ = win.set_position(*mon.position());
+        let _ = win.set_size(*mon.size());
+    }
+    let _ = win.set_ignore_cursor_events(true);   // clicks pass straight through
+    #[cfg(target_os = "macos")]
+    allow_over_fullscreen(&win);
+    let _ = win.show();
+    // Existing window (webview already booted): deliver now. A FRESH window's
+    // webview isn't listening yet — it collects the pending burst via
+    // confetti_ready when it boots.
+    let _ = app.emit_to("confetti", "buddy://celebrate", intensity);
+}
+
+/// Called by the confetti webview once its listener is live — replays the
+/// burst that triggered the window's creation (the direct emit predates boot).
+#[tauri::command]
+fn confetti_ready(app: AppHandle) {
+    if let Some(i) = PENDING_CELEBRATE.lock().unwrap().take() {
+        let _ = app.emit_to("confetti", "buddy://celebrate", i);
+    }
+}
+
+#[tauri::command]
+fn hide_confetti_window(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("confetti") { let _ = w.hide(); }
+}
+
 /// Re-fit Morning to the current macOS screen's usable area. Called when the
 /// web layer notices the active monitor changed while Morning is already open.
 #[tauri::command]
@@ -896,7 +957,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, export_done_tasks, set_reserve, reserve_trusted, set_morning_mode, open_morning_window, hide_morning_window, fit_morning_window, morning_translucent, check_for_update, install_update, load_state, load_recovery_state, save_state, append_event])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, export_done_tasks, set_reserve, reserve_trusted, set_morning_mode, open_morning_window, hide_morning_window, fit_morning_window, morning_translucent, celebrate_fullscreen, confetti_ready, hide_confetti_window, check_for_update, install_update, load_state, load_recovery_state, save_state, append_event])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).
