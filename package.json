@@ -3,7 +3,7 @@
   "version": "0.3.28",
   "private": true,
   "license": "MIT",
-  "description": "Buddy — a calm day companion. Web app (index.html) wrapped in a Tauri v2 Mac menu-bar shell.",
+  "description": "Buddy \u2014 a calm day companion. Web app (index.html) wrapped in a Tauri v2 Mac menu-bar shell.",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
@@ -11,7 +11,8 @@
     "icons": "python3 src-tauri/gen-icons.py",
     "ui:smoke": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-ui-smoke.spec.js --reporter=line",
     "sync:live": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-two-device.spec.js --reporter=line",
-    "diag": "scripts/buddy-diag.sh"
+    "diag": "scripts/buddy-diag.sh",
+    "sync:doctor": "node scripts/buddy-sync-doctor.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

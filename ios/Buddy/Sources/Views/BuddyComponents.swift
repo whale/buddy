@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Lucide glyph
 // The Mac uses Lucide icons (stroke 1.8), NOT SF Symbols. These are the real Lucide
@@ -60,6 +61,7 @@ struct BuddySheetHeader<Leading: View>: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("sheet-close")   // UI tests drive the close by id
             }
             .padding(.horizontal, 32)   // match the rows' 32pt gutter on both sides
             .frame(height: 68)   // matches the Mac sheet header h-[68px]
@@ -73,6 +75,8 @@ extension EscalationTheme {
     var sheetTitle: Color { level == .lvl2 ? Color.white.opacity(0.92) : Color.black.opacity(0.8) }
     var sheetLabel: Color { level == .lvl2 ? Color.white.opacity(0.92) : Color.black.opacity(0.6) }
     var sheetFaint: Color { level == .lvl2 ? Color.white.opacity(0.5)  : Color.black.opacity(0.35) }
+    // Faintest sheet text (the version footer): black/30, white/40 on red.
+    var sheetGhost: Color { level == .lvl2 ? Color.white.opacity(0.4)  : Color.black.opacity(0.3) }
 }
 
 // MARK: - Swipeable row
@@ -80,10 +84,19 @@ extension EscalationTheme {
 // user's pick). Native `.swipeActions` only works inside a List — which can't do the
 // equal-height flex rows — so this is a custom swipe that preserves the layout.
 //   swipe LEFT → checkmark · calendar (sleep) · X (delete) · tap → onTap (edit)
+// Mac-parity motion: the sheet slide uses the EXACT Mac curves (dist/index.html
+// :root) — open = --ease-out cubic-bezier(0.23,1,0.32,1) over .42s (fast → slow
+// at the top); close = --ease-in cubic-bezier(0.68,0,0.77,0) over .32s (slow →
+// fast toward the bottom). One source for every open/close call site.
+enum BuddyAnim {
+    static let sheetOpen  = Animation.timingCurve(0.23, 1, 0.32, 1, duration: 0.42)
+    static let sheetClose = Animation.timingCurve(0.68, 0, 0.77, 0, duration: 0.32)
+}
+
 struct SwipeableRow<Content: View>: View {
     var rowID: String                   // identity, so only one row stays open at a time
     @Binding var openRowID: String?     // shared: which row is currently open
-    var cardFill: Color                 // opaque row bg so the actions hide when closed
+    var theme: EscalationTheme          // card fill + tray/divider/glyph tokens (RULE 1)
     var onComplete: (() -> Void)? = nil
     var onAdd: (() -> Void)? = nil       // future rows: swipe → add to today
     var onSleep: (() -> Void)? = nil
@@ -96,11 +109,8 @@ struct SwipeableRow<Content: View>: View {
     // to 0 the instant the finger lifts — a frame before onEnded's settle — which is the jitter.
     @State private var offset: CGFloat = 0     // committed rest offset (0 or -openWidth)
     @State private var drag: CGFloat = 0       // live finger delta during a drag
-    @State private var locked = false          // gesture committed to horizontal
 
     private let actionW: CGFloat = 58          // ≥ 44pt (Apple's min tap target)
-    private let actionBG = Color(hex: "#ececec")
-    private let dividerC = Color(hex: "#c9c9c9")
     private let settle   = Animation.easeOut(duration: 0.2)   // fast, no spring bounce (shadcn-ish)
 
     // Trailing actions, left→right: checkmark · calendar (move to Future) · X (remove).
@@ -122,12 +132,12 @@ struct SwipeableRow<Content: View>: View {
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
                 ForEach(Array(actions.enumerated()), id: \.offset) { i, act in
-                    if i > 0 { dividerC.frame(width: 1).frame(maxHeight: .infinity) }
+                    if i > 0 { theme.swipeDivider.frame(width: 1).frame(maxHeight: .infinity) }
                     Button { fire(act.run) } label: {
                         LucideIcon(act.icon, size: 22)
-                            .foregroundStyle(.black)
+                            .foregroundStyle(theme.glyph)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(actionBG)
+                            .background(theme.swipeActionBg)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -136,26 +146,32 @@ struct SwipeableRow<Content: View>: View {
             }
 
             // Content on top — opaque, so it hides the actions at rest; offset reveals them.
-            content()
-                .background(cardFill)
+            // The swipe is a UIKIT pan, not a SwiftUI DragGesture: ANY SwiftUI drag on a
+            // row (high-priority OR simultaneous) starves the enclosing ScrollView's pan
+            // and the Future list stops scrolling — verified empirically via the
+            // `-noSwipe` experiment switch (RULE 4). The UIKit recognizer begins ONLY on
+            // horizontal movement, so vertical drags stay with the ScrollView.
+            let base = content()
+                .background(theme.cardBackground)
                 .offset(x: x)
-                .highPriorityGesture(
-                    DragGesture(minimumDistance: 8)
-                        .onChanged { v in
-                            if !locked && abs(v.translation.width) > abs(v.translation.height) { locked = true }
-                            if locked { drag = v.translation.width }   // 1:1 with the finger, no animation
-                        }
-                        .onEnded { v in
-                            let willOpen = (offset + v.translation.width) < -openWidth * 0.5
-                            withAnimation(settle) { offset = willOpen ? -openWidth : 0; drag = 0 }
-                            if willOpen { openRowID = rowID }
-                            else if openRowID == rowID { openRowID = nil }
-                            locked = false
-                        }
-                )
-                .onTapGesture {
-                    if offset != 0 { close() } else { onTap?() }
+            Group {
+                if ProcessInfo.processInfo.arguments.contains("-noSwipe") {
+                    base.onTapGesture { if offset != 0 { close() } else { onTap?() } }
+                } else {
+                    base.overlay(
+                        HorizontalPanCatcher(
+                            onChanged: { tx in drag = tx },   // 1:1 with the finger, no animation
+                            onEnded: { tx in
+                                let willOpen = (offset + tx) < -openWidth * 0.5
+                                withAnimation(settle) { offset = willOpen ? -openWidth : 0; drag = 0 }
+                                if willOpen { openRowID = rowID }
+                                else if openRowID == rowID { openRowID = nil }
+                            },
+                            onTap: { if offset != 0 { close() } else { onTap?() } }
+                        )
+                    )
                 }
+            }
         }
         .clipped()
         // Another row opened → close this one.
@@ -176,6 +192,57 @@ struct SwipeableRow<Content: View>: View {
     private func fire(_ action: @escaping () -> Void) {
         action()
         close()
+    }
+}
+
+// A UIKit pan that begins ONLY on horizontal movement and coexists with the
+// UIScrollView pan. This is the load-bearing piece of SwipeableRow: SwiftUI
+// DragGestures (any priority) block the enclosing ScrollView from scrolling,
+// so row swipes MUST live at the UIKit layer. A tap recognizer rides along so
+// tap-to-edit keeps working (the overlay sits above the row's content).
+private struct HorizontalPanCatcher: UIViewRepresentable {
+    var onChanged: (CGFloat) -> Void
+    var onEnded: (CGFloat) -> Void
+    var onTap: () -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let v = UIView()
+        v.backgroundColor = .clear
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pan(_:)))
+        pan.maximumNumberOfTouches = 1
+        pan.delegate = context.coordinator
+        v.addGestureRecognizer(pan)
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap(_:)))
+        v.addGestureRecognizer(tap)
+        return v
+    }
+
+    func updateUIView(_ view: UIView, context: Context) { context.coordinator.parent = self }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: HorizontalPanCatcher
+        init(_ parent: HorizontalPanCatcher) { self.parent = parent }
+
+        @objc func pan(_ g: UIPanGestureRecognizer) {
+            let t = g.translation(in: g.view)
+            switch g.state {
+            case .changed: parent.onChanged(t.x)
+            case .ended, .cancelled, .failed: parent.onEnded(t.x)
+            default: break
+            }
+        }
+        @objc func tap(_ g: UITapGestureRecognizer) {
+            if g.state == .ended { parent.onTap() }
+        }
+        // Horizontal starts only — a vertical start FAILS here, so the ScrollView scrolls.
+        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+            guard let pan = g as? UIPanGestureRecognizer else { return true }
+            let v = pan.velocity(in: pan.view)
+            return abs(v.x) > abs(v.y)
+        }
+        func gestureRecognizer(_ g: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
     }
 }
 

@@ -18,9 +18,12 @@ enum EscalationLevel: Int {
 }
 
 // MARK: - Escalation theme
-// All colours derived from the web CSS variables so they stay in sync:
-//   --card, --ink, --ink-dim in lvl0/1/2.
+// All colours derived from the shared token contract so they stay in sync:
+//   design/escalation-tokens.json (pinned by EscalationTokenParityTests).
 // The red value (#e5484d) matches `--red` in the web app root.
+// THE PATTERN (2026-07-10): EVERY text/element follows lvl0 black-on-white,
+// lvl1 red-on-white, lvl2 white-on-red. No carve-outs — done rows, day
+// headers, glyphs and settings controls all follow.
 struct EscalationTheme {
     let level: EscalationLevel
 
@@ -32,19 +35,33 @@ struct EscalationTheme {
         }
     }
 
-    // Primary text — task titles, labels
+    // Primary text — task titles, labels, done words. Follows THE PATTERN:
+    // black → red → white (done rows included; the old "done stays neutral
+    // at lvl1" carve-out was removed 2026-07-10).
     var ink: Color {
         switch level {
-        case .lvl0, .lvl1: return .black
-        case .lvl2:        return .white
+        case .lvl0: return .black
+        case .lvl1: return Color(hex: "#e5484d")
+        case .lvl2: return .white
         }
     }
 
-    // Secondary text — done/dim rows, timestamps
+    // Secondary text — done/dim rows, timestamps. Same pattern at 45/65/60%.
     var inkDim: Color {
         switch level {
-        case .lvl0, .lvl1: return Color.black.opacity(0.45)
-        case .lvl2:        return Color.white.opacity(0.6)
+        case .lvl0: return Color.black.opacity(0.45)
+        case .lvl1: return Color(hex: "#e5484d").opacity(0.65)
+        case .lvl2: return Color.white.opacity(0.6)
+        }
+    }
+
+    // Small functional glyphs — swipe-action icons, row icons.
+    // Grey at rest, red at lvl1, near-white on the red card.
+    var glyph: Color {
+        switch level {
+        case .lvl0: return Color(hex: "#8c8c8c")
+        case .lvl1: return Color(hex: "#e5484d")
+        case .lvl2: return Color.white.opacity(0.92)
         }
     }
 
@@ -123,6 +140,49 @@ struct EscalationTheme {
         case .lvl2:        return Color(hex: "#c33d41")
         }
     }
+
+    // Swipe-action tray behind a row. Neutral grey at lvl0/1; on the red card
+    // it's the card red darkened ~18% (the Mac's tray-on-red idiom) so the
+    // tray still reads as "behind" while the glyphs stay legible.
+    var swipeActionBg: Color {
+        switch level {
+        case .lvl0, .lvl1: return Color(hex: "#ececec")
+        case .lvl2:        return Color(hex: "#bc3b3f")   // #e5484d + rgba(0,0,0,0.18) overlay
+        }
+    }
+    var swipeDivider: Color {
+        switch level {
+        case .lvl0, .lvl1: return Color(hex: "#c9c9c9")
+        case .lvl2:        return Color.white.opacity(0.3)
+        }
+    }
+
+    // Segmented control (Mac .seg-sel): the selected pill stays WHITE at every
+    // level; its label is black → red → red. The track is faint black on light,
+    // faint white on the red card.
+    var segSelInk: Color { level == .lvl0 ? .black : Color(hex: "#e5484d") }
+    var segTrack: Color { level == .lvl2 ? Color.white.opacity(0.20) : Color.black.opacity(0.05) }
+
+    // Settings slider (Mac .buddy-range): solid thumb black → red → white,
+    // thin track at black-15% → red-25% → white-30%.
+    var sliderThumb: Color {
+        switch level {
+        case .lvl0: return .black
+        case .lvl1: return Color(hex: "#e5484d")
+        case .lvl2: return .white
+        }
+    }
+    var sliderTrack: Color {
+        switch level {
+        case .lvl0: return Color.black.opacity(0.15)
+        case .lvl1: return Color(hex: "#e5484d").opacity(0.25)
+        case .lvl2: return Color.white.opacity(0.30)
+        }
+    }
+
+    // Error text (Mac #syncError): token red on light surfaces; red-on-red is
+    // invisible at lvl2 → white there.
+    var errorText: Color { level == .lvl2 ? .white : Color(hex: "#e5484d") }
 
     // Convenience factory
     static func from(activeCount: Int) -> EscalationTheme {

@@ -155,6 +155,10 @@ fn open_morning_window(app: AppHandle) {
         make_standard_morning_window(&win);
         let _ = win.show();
         let _ = win.set_focus();
+        // The webview keeps whatever it last showed — without this the re-shown
+        // window is BLANK (the planner overlay hid itself when the day was done).
+        // Opening the window is an explicit "show me the planner" intent.
+        let _ = app.emit_to("morning", "buddy://morning-open", ());
         return;
     }
 
@@ -618,6 +622,15 @@ mod reserve {
         }
     }
 
+    /// Is Buddy's CURRENT binary trusted for Accessibility? Auto-updates can
+    /// re-sign the app, and macOS keys the TCC grant to the binary — an old,
+    /// stale "Buddy" row in System Settings then reads as NOT trusted here,
+    /// and the nudge loop silently no-ops. Surfaced to Settings so the outage
+    /// is visible instead of silent.
+    pub fn trusted() -> bool {
+        unsafe { AXIsProcessTrusted() }
+    }
+
     pub fn set(on: bool) {
         ACTIVE.store(on, Ordering::SeqCst);
         if on {
@@ -644,6 +657,17 @@ fn set_reserve(on: bool) {
     reserve::set(on);
     #[cfg(not(target_os = "macos"))]
     let _ = on;
+}
+
+/// Whether the Accessibility permission is granted to THIS binary — the
+/// "Give Buddy room" feature is a silent no-op without it. JS shows a
+/// re-grant hint in Settings when this is false.
+#[tauri::command]
+fn reserve_trusted() -> bool {
+    #[cfg(target_os = "macos")]
+    return reserve::trusted();
+    #[cfg(not(target_os = "macos"))]
+    false
 }
 
 // ============ Durable state file — the origin-independent source of truth ============
@@ -872,7 +896,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, export_done_tasks, set_reserve, set_morning_mode, open_morning_window, hide_morning_window, fit_morning_window, morning_translucent, check_for_update, install_update, load_state, load_recovery_state, save_state, append_event])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, export_done_tasks, set_reserve, reserve_trusted, set_morning_mode, open_morning_window, hide_morning_window, fit_morning_window, morning_translucent, check_for_update, install_update, load_state, load_recovery_state, save_state, append_event])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).

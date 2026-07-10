@@ -49,9 +49,9 @@ struct HistoryView: View {
                 let active = tab == t
                 Text(t.rawValue)
                     .font(.geist(15, .regular)).tracking(-0.30)
-                    // Selected label follows escalation like the selected chrome icon
-                    // (black → red at lvl1/lvl2); pill stays white — mirrors Mac .seg-sel.
-                    .foregroundStyle(active ? (theme.level == .lvl0 ? Color.black : Color(hex: "#e5484d")) : theme.chromeInk)
+                    // Selected label follows escalation (black → red at lvl1/lvl2);
+                    // pill stays white at every level — mirrors Mac .seg-sel.
+                    .foregroundStyle(active ? theme.segSelInk : theme.chromeInk)
                     .padding(.horizontal, 16).frame(height: 38)
                     .background(
                         Capsule().fill(active ? Color.white : .clear)
@@ -62,7 +62,7 @@ struct HistoryView: View {
             }
         }
         .padding(4)
-        .background(Capsule().fill(theme.level == .lvl2 ? Color.white.opacity(0.20) : Color.black.opacity(0.05)))
+        .background(Capsule().fill(theme.segTrack))
     }
 
     // A rendered group: a header + its lines. Precomputed so the view body stays
@@ -161,7 +161,7 @@ struct HistoryView: View {
         SwipeableRow(
             rowID: id,
             openRowID: $openFutureRowID,
-            cardFill: theme.cardBackground,
+            theme: theme,
             onAdd: store.atHardCap ? nil : { withoutAnimation { store.wakeDeferredTask(id: id) } },
             onDelete: { withoutAnimation { store.deleteDeferred(id: id) } }
         ) {
@@ -180,28 +180,20 @@ struct HistoryView: View {
         SwipeableRow(
             rowID: id,
             openRowID: $openFutureRowID,
-            cardFill: theme.cardBackground,
+            theme: theme,
             onRestore: { withoutAnimation { store.unsendDeferred(id: id) } }
         ) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("Sent to today!").font(.geist(18, .semibold)).tracking(-0.30)
                     .foregroundStyle(theme.escalationText).fixedSize(horizontal: true, vertical: false)
                 Text(text).font(.geist(18, .regular)).tracking(-0.36)
-                    .foregroundStyle(futureDimText).lineLimit(1)
+                    .foregroundStyle(theme.inkDim).lineLimit(1)
                 Spacer(minLength: 8)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .padding(.horizontal, 32)
         }
         .frame(height: 110)
-    }
-
-    private var futureDimText: Color {
-        switch theme.level {
-        case .lvl0: return theme.inkDim
-        case .lvl1: return Color(hex: "#e5484d").opacity(0.65)
-        case .lvl2: return theme.inkDim
-        }
     }
 
     // Rightmost row icon: glyph hugs the row's trailing edge so every surface's icons line up
