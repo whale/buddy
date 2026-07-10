@@ -139,7 +139,9 @@ The repo currently has the old Apple **Key ID / Team ID** in git *history*
 
 ```bash
 # requires git-filter-repo (brew install git-filter-repo)
-git filter-repo --replace-text <(printf '8LPB7CQ8S8==>REDACTED\n9QDAAYWU9X==>REDACTED\n')
+# (substitute the ACTUAL old Key ID / Team ID — deliberately not written out
+#  here: this file lives in a public repo)
+git filter-repo --replace-text <(printf '<OLD-KEY-ID>==>REDACTED\n<OLD-TEAM-ID>==>REDACTED\n')
 git remote add origin https://github.com/whale/buddy.git   # filter-repo drops the remote
 git push --force --all && git push --force --tags
 gh repo edit whale/buddy --visibility public

@@ -31,3 +31,7 @@ test-results/
 ios/build/
 ios/fastlane/report.xml
 ios/fastlane/README.md
+
+# App Store Connect private keys — never commit
+*.p8
+AuthKey_*

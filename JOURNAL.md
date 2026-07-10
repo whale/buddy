@@ -5,6 +5,29 @@ Newest first.
 
 ---
 
+## 2026-07-10 — the field-report marathon: five lessons that now have guardrails
+
+1. **Sync "working" on both ends ≠ synced.** Dev Buddy and the iPhone were each
+   green — pushing to two DIFFERENT buckets (dev held a stale syncKey from an old
+   Resync). Split brain is invisible from inside either device. Guardrails:
+   `pnpm sync:doctor`, the bucket suffix in both Settings, `sync-owner` diag.
+2. **Your own half-typed echo can beat your commit.** The 1.5s poll pushed
+   mid-edit text at an unchanged per-item `v`; the equal-`v` canonical tiebreak
+   then preferred "Thi" over "Thing". Fix: no sync passes while editing + the
+   blur v-bump compares against the text at EDIT START (the live-updated
+   `it.text` always said "unchanged").
+3. **"Uploaded to TestFlight" ≠ visible.** Apple's ingestion silently swallowed
+   build 21 — fastlane had `skip_waiting_for_build_processing`, so "success"
+   meant only "file transferred". The lane now waits; green = installable.
+4. **SwiftUI DragGesture (ANY priority) starves an enclosing ScrollView** — the
+   Future list stopped scrolling even with `simultaneousGesture`. Row swipes must
+   be a UIKit pan that only *begins* on horizontal movement. And its overlay must
+   ride BEFORE `.offset`, or it covers the revealed tray and eats the action taps
+   (shipped broken in build 24, caught by the user, now a UI test).
+5. **XCUI frames lie about text.** The editor "jumped 4.5pt" by accessibility
+   frame while a screenshot pixel-diff showed 0.0pt. Interaction claims need
+   observed evidence — that's RULE 4 and `RELEASE-CHECKLIST.md` now.
+
 ## 2026-07-01 — "random" celebration words weren't random (deterministic hash of sequential ids)
 
 **The bug.** A tester's completed tasks showed patterned done-words (Donezo / Ticked Off /
