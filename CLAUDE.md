@@ -116,6 +116,23 @@ field reports can be traced and reproduced WITHOUT the user babysitting.
    `.bak`) show ids (uppercase = iPhone-minted, lowercase = Mac), per-row `v`, and
    tombstones — often enough to reconstruct what happened without any log.
 
+## 🎥 RULE 4 — See it, don't infer it (Mac AND iOS)
+
+Any claim about interaction, motion, scrolling, keyboard behavior, or layout
+MUST be verified by OBSERVING the running app — reading the code and reasoning
+about it is not verification (that's how "Future scrolls now" shipped broken).
+
+- **Mac web:** serve `dist/` + Playwright — screenshots per state, computed-style
+  reads, and transition sampling (poll `getComputedStyle().transform` mid-flight).
+- **Mac native:** `pnpm tauri dev` + `screencapture` / screen recording.
+- **iOS:** a BOOTED simulator, always: build, install, launch (`xcrun simctl`),
+  seed deterministic state with the DEBUG `-uiFixture` harness, drive real
+  gestures (XCUITest), and capture evidence —
+  `xcrun simctl io booted screenshot` / `recordVideo`.
+- **Motion/gesture bugs need video or frame sampling**, not a single still.
+- Save all captures to the session scratchpad; report what was observed vs.
+  what remains unverified. "The code should do X" is a hypothesis, not a result.
+
 ## Foundation
 
 Buddy's design language follows the shared Foundation system — prefer its tokens

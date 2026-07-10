@@ -26,6 +26,13 @@ struct TodayView: View {
     @State private var editingId: String? = nil
     @State private var editText: String   = ""
 
+    // Keyboard reveal (R2-3): the layout ignores the keyboard (a shrinking geo.size
+    // made the fit font flash), so instead the whole column LIFTS just enough to keep
+    // the edited row visible above the keyboard, then settles back on commit.
+    @State private var keyboardTop: CGFloat = .infinity   // keyboard frame top, screen coords
+    @State private var editorMaxY: CGFloat = 0            // edited row's bottom, screen coords
+    @State private var keyboardLift: CGFloat = 0          // current upward offset of the column
+
     // Adaptive row fitting (see RowFit) — recomputed when the list or its size changes.
     @State private var fit = RowFit.Result(font: 24, vpad: 16, scroll: false)
 
@@ -82,16 +89,23 @@ struct TodayView: View {
                 // Settings/History slide up over the LIST card; the header + bottom bar stay put.
                 ZStack {
                     listCard
-                    if showHistory {
-                        HistoryView(store: store, onClose: { withAnimation(.easeIn(duration: 0.32)) { showHistory = false } })
-                            .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
-                            .transition(sheetTransition)
+                    // Sheets are CLIPPED to the card bounds (Mac parity: the sheet slides
+                    // WITHIN card 2). Unclipped, the descending white sheet painted over
+                    // the grey gap above the bottom bar for a few frames — the "flash"
+                    // field report (R2-6). No shadow on sheets: they live inside the card.
+                    ZStack {
+                        if showHistory {
+                            HistoryView(store: store, onClose: { withAnimation(BuddyAnim.sheetClose) { showHistory = false } })
+                                .buddyCard(fill: theme.cardBackground, shadow: false)
+                                .transition(sheetTransition)
+                        }
+                        if showSettings {
+                            SettingsView(store: store, sync: sync, onClose: { withAnimation(BuddyAnim.sheetClose) { showSettings = false } })
+                                .buddyCard(fill: theme.cardBackground, shadow: false)
+                                .transition(sheetTransition)
+                        }
                     }
-                    if showSettings {
-                        SettingsView(store: store, sync: sync, onClose: { withAnimation(.easeIn(duration: 0.32)) { showSettings = false } })
-                            .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
-                            .transition(sheetTransition)
-                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)   // fills the gap between header + bottom bar
                 // No blanket .animation here — the per-action withAnimation curves drive the
@@ -105,11 +119,20 @@ struct TodayView: View {
             }
             .padding(.horizontal, 8)     // even side gutter
             .padding(.top, 8)            // small gutter below the status-bar safe area (no more)
+            .offset(y: -keyboardLift)    // lift the column so the edited row clears the keyboard
             .ignoresSafeArea(.container, edges: .bottom)   // bottom bar runs off the bottom edge
             // The keyboard must NOT shrink the layout: a rising keyboard changed geo.size,
             // retriggered recomputeFit mid-add and made the whole list's font flash.
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .animation((showHistory || showSettings) ? nil : .easeInOut(duration: 0.2), value: activeCount)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+                if let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                    keyboardTop = frame.minY
+                    updateKeyboardLift()
+                }
+            }
+            .onChange(of: editorMaxY) { _, _ in updateKeyboardLift() }
+            .onChange(of: editingId) { _, _ in updateKeyboardLift() }
 
             if showCelebration {
                 CelebrationView(intensity: store.settings.celebrate) { showCelebration = false }
@@ -150,15 +173,39 @@ struct TodayView: View {
     }
 
     // Sheet in/out: a vertical slide over the list card (the card stays put).
-    // Open animates .easeOut (fast → slow at the top), close .easeIn (slow → fast down).
+    // Open animates BuddyAnim.sheetOpen (fast → slow at the top), close .sheetClose.
     private var sheetTransition: AnyTransition {
         .move(edge: .bottom)
+    }
+
+    // Fixed-point keyboard avoidance: compute the lift from the row's UNSHIFTED
+    // position (observed frame + current lift) so the observer feeding on the
+    // shifted frame can't oscillate.
+    private func updateKeyboardLift() {
+        let target: CGFloat
+        if editingId == nil || keyboardTop == .infinity || editorMaxY == 0 {
+            target = 0
+        } else {
+            let unshifted = editorMaxY + keyboardLift
+            target = max(0, unshifted + 12 - keyboardTop)
+        }
+        guard abs(target - keyboardLift) > 0.5 else { return }
+        withAnimation(.easeOut(duration: 0.25)) { keyboardLift = target }
     }
 
     // MARK: - Card 1 — date block (numeral · weekday/month · weather)
 
     // Baseline-aligned like the Mac (text-box-trim + items-end): the 62pt numeral's
     // baseline sits on the month line's baseline; the weather icon's bottom rests on it too.
+    // VERTICAL geometry is derived from real font metrics — the Mac trims the numeral's
+    // box to cap-height/baseline, so its card = capHeight + 32pt above and below. SwiftUI
+    // keeps the full line box, so we reproduce the same visual: bottom padding places the
+    // BASELINE exactly 32pt above the card bottom; height = capHeight + 64 places the cap
+    // exactly 32pt below the card top. (A fixed 114pt + line-box padding sat the whole
+    // group visibly too high — field report R2-2.)
+    private var numeralFont: UIFont {
+        UIFont(name: "Geist-Medium", size: 62) ?? .systemFont(ofSize: 62, weight: .medium)
+    }
     private var headerCard: some View {
         HStack(alignment: .lastTextBaseline) {
             HStack(alignment: .lastTextBaseline, spacing: 12) {
@@ -187,8 +234,9 @@ struct TodayView: View {
         }
         .padding(.leading, 32)
         .padding(.trailing, 26)
-        .padding(.vertical, 32)
-        .frame(height: 114, alignment: .bottom)
+        .padding(.bottom, 32 - abs(numeralFont.descender))          // baseline = 32pt above the card bottom
+        .frame(height: ceil(numeralFont.capHeight) + 64, alignment: .bottom)   // cap = 32pt below the card top
+        .frame(maxWidth: .infinity)
         .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
     }
 
@@ -199,17 +247,17 @@ struct TodayView: View {
             HStack(spacing: 30) {    // Figma gap-35 between the 20px icons
                 // (Figma shows a pin here too, but it has no iPhone function — omitted for now.)
                 bottomChrome("calendar", selected: showHistory) {
-                    if showHistory { withAnimation(.easeIn(duration: 0.32)) { showHistory = false } }
-                    else { withAnimation(.easeOut(duration: 0.42)) { showHistory = true; showSettings = false } }
+                    if showHistory { withAnimation(BuddyAnim.sheetClose) { showHistory = false } }
+                    else { withAnimation(BuddyAnim.sheetOpen) { showHistory = true; showSettings = false } }
                 }
                 bottomChrome("settings", selected: showSettings) {
-                    if showSettings { withAnimation(.easeIn(duration: 0.32)) { showSettings = false } }
-                    else { withAnimation(.easeOut(duration: 0.42)) { showSettings = true; showHistory = false } }
+                    if showSettings { withAnimation(BuddyAnim.sheetClose) { showSettings = false } }
+                    else { withAnimation(BuddyAnim.sheetOpen) { showSettings = true; showHistory = false } }
                 }
             }
             Spacer()
             Button {
-                withAnimation(.easeIn(duration: 0.32)) {
+                withAnimation(BuddyAnim.sheetClose) {
                     showHistory = false
                     showSettings = false
                 }
@@ -243,6 +291,7 @@ struct TodayView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("chrome-\(icon)")   // UI tests drive the chrome by id
     }
 
     // MARK: - Card 2 — task list
@@ -305,15 +354,30 @@ struct TodayView: View {
         // Flex-fill rows to share the column when there's room; natural height when scrolling.
         let fillH: CGFloat? = fit.scroll ? nil : .infinity
         if editingId == task.id {
-            InlineTaskEditor(
-                text: $editText,
-                fontSize: fit.font,
-                textColor: UIColor(theme.escalationText),
-                accessibilityIdentifier: "task-editor-\(task.id)",
-                onCommit: { commitEdit(id: task.id) }
-            )
-            .padding(.horizontal, 32).padding(.vertical, fit.vpad)
-            .frame(maxWidth: .infinity, maxHeight: fillH, alignment: .leading)
+            // Ghost-sizing swap: an INVISIBLE Text with the display row's exact
+            // modifiers does the layout, and the UITextView is overlaid onto its
+            // bounds — the swap cannot move the text by construction (R2-1: a
+            // UITextView's own line box is ~2pt taller than SwiftUI Text, which
+            // made the row jump on every metric-matching attempt).
+            Text(editText.isEmpty ? " " : editText)
+                .font(.geist(fit.font, .medium)).tracking(-0.48).lineSpacing(2)
+                .opacity(0)
+                .overlay(
+                    InlineTaskEditor(
+                        text: $editText,
+                        fontSize: fit.font,
+                        textColor: UIColor(theme.escalationText),
+                        accessibilityIdentifier: "task-editor-\(task.id)",
+                        onCommit: { commitEdit(id: task.id) }
+                    )
+                )
+                .frame(maxWidth: .infinity, maxHeight: fillH, alignment: .leading)
+                .padding(.horizontal, 32).padding(.vertical, fit.vpad)
+                .background(GeometryReader { g in
+                    Color.clear
+                        .onAppear { editorMaxY = g.frame(in: .global).maxY }
+                        .onChange(of: g.frame(in: .global).maxY) { _, v in editorMaxY = v }
+                })
         } else {
             SwipeableRow(
                 rowID: task.id,
@@ -461,9 +525,20 @@ private struct InlineTaskEditor: UIViewRepresentable {
     func updateUIView(_ view: UITextView, context: Context) {
         context.coordinator.parent = self
         view.accessibilityIdentifier = accessibilityIdentifier
-        view.font = UIFont(name: "Geist-Medium", size: fontSize) ?? .systemFont(ofSize: fontSize, weight: .medium)
+        // Match the Text row's metrics EXACTLY (font + kern −0.48 + lineSpacing 2),
+        // so the editor swap is pixel-stable (R2-1).
+        let font = UIFont(name: "Geist-Medium", size: fontSize) ?? .systemFont(ofSize: fontSize, weight: .medium)
+        let para = NSMutableParagraphStyle()
+        para.lineSpacing = 2
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font, .foregroundColor: textColor, .kern: -0.48, .paragraphStyle: para,
+        ]
+        view.font = font
         view.textColor = textColor
-        if !view.isFirstResponder && view.text != text { view.text = text }
+        view.typingAttributes = attrs
+        if !view.isFirstResponder && view.text != text {
+            view.attributedText = NSAttributedString(string: text, attributes: attrs)
+        }
         if !view.isFirstResponder {
             DispatchQueue.main.async {
                 view.becomeFirstResponder()
