@@ -1,6 +1,23 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-10 (evening). Branch `main`. Latest **released Mac**: **`v0.3.29`** (signed/notarized, updater manifest live). Latest **iOS**: **TestFlight `0.1.0 (25)`** (processed + distributed — 24 has a swipe-tap regression, 25 fixes it). Docs cleaned: the stale plan files (HANDOFF, PLAN, SYNC-HANDOFF, DATA-SAFETY-PLAN, …) are deleted — THIS file's top + `RELEASE-CHECKLIST.md` + `JOURNAL.md` are the live docs._
+_Last updated: 2026-07-10 (night). Branch `main`. Latest **released Mac**: **`v0.3.34`** (signed/notarized, updater manifest live). Latest **iOS**: **TestFlight `0.1.0 (28)`** (processed + distributed). Docs: THIS file's top + `RELEASE-CHECKLIST.md` + `JOURNAL.md` are the live docs; `design/celebration-lab.html` is the celebration tuning playground._
+
+## Session summary — 2026-07-10 (night) — celebration physics, add choreography, swipe pan, friend beta
+
+**Shipped as Mac v0.3.34 + TestFlight (28)** (PRs #93–#96, on top of the earlier marathon):
+- **Physics celebration, both platforms** (lab preset "Whale ✦ picked"; constants in dist `CELEB/QUIET` and iOS `CelebPhysics` — change together): ballistic integrator, bottom-RIGHT of the SCREEN → top-left at full lab speed (a width-scaling squeeze read as a "swirl" on the phone — removed). Emoji variety scales with intensity (parrots+thumbs → full happy spread). **celebrate = 0 → quiet pop**: one yellow hand (👍🤘💪✊🤜) floats 70px up from the completed row's ✓, in-fast/out-slow.
+- **Mac full-screen overlay window** `confetti`: transparent, click-through, floating, created lazily, hidden after each burst; surface is a pure renderer (no load/sync/saves, deaf to drawer broadcasts); Rust `celebrate_fullscreen`/`confetti_ready` (boot-replay handshake)/`hide_confetti_window`. ⚠️ **The native overlay's first appearance is UNVERIFIED** — it needs a real completion (no automatable trigger); if it misbehaves, windump the live windows first.
+- **Calm add (iOS)**: removed the blanket `.animation(value: items/activeCount)` wrappers that crossfaded every descendant during add (blank header/rows) — one explicit animation driver per interaction; bottom bar has its own scoped fade. Frame-analyzed before/after.
+- **Swipe pan (iOS)**: translation measured in the WINDOW (self-referential measurement under-counted travel → "bounce, needs two pulls"); direction check prefers accumulated translation. ⚠️ Feel on a real 120Hz device still needs the user's thumb.
+- **Synced-done morph**: a task completed on the other device now becomes a Donezo row (render sets a catch-up timer; isDonezo is time-based but only the completing device re-rendered).
+- **Settings sync row (Mac)**: Unlink iPhone + Resync side by side, "Synced HH:MM · bucket" on its own line below.
+- **Friend beta (user completed setup)**: external group "Friends" created, tester added, **build 27 submitted for Apple Beta App Review — still `WAITING_FOR_BETA_REVIEW` at wrap** (check with `cd ios && fastlane status`). The invite email auto-sends on approval; the friend then auto-receives newer builds (28+) pushed to the group.
+
+**Verified at wrap:** ui:smoke 4/4 · cargo check · iOS 74 unit + 9 UI tests · Mac burst direction measured in browser (x̄ 812→701 right→left) · iOS full-screen cascade sim-recorded · sync:doctor = one bucket (0dc16090) · v0.3.34 release assets + TestFlight 28 distribution confirmed via API.
+
+**Next session:** (1) user's on-device pass — Mac overlay burst (first native flight!), swipe feel, quiet pop on both; (2) `fastlane status` → nudge user when build 27 review clears (the session-bound watcher died with this session); (3) then the standing queue below.
+
+---
 
 ## Session summary — 2026-07-10 (marathon) — 15 field reports fixed + shipped both platforms
 
