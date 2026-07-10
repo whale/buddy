@@ -25,7 +25,7 @@
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager,
+    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_updater::UpdaterExt;
 
@@ -44,16 +44,10 @@ fn toggle_drawer(app: &AppHandle) {
     let _ = app.emit("buddy://toggle", ());
 }
 
-/// Toggle the morning planner (the ⌘⌥⌃M show-off shortcut). Like `toggle_drawer`,
-/// we RAISE the OS window FIRST — a JS-only keydown can't bring its own occluded
-/// window frontmost. Then emit the toggle intent; the web layer shows morning if
-/// it's hidden, or dismisses it if it's already up.
+/// Show the morning planner (the ⌘⌥⌃M show-off shortcut). This is native now:
+/// Morning is its own standard resizable window, not a JS mode of the drawer.
 fn toggle_morning(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.show();
-        let _ = win.set_focus();
-    }
-    let _ = app.emit("buddy://morning-toggle", ());
+    open_morning_window(app.clone());
 }
 
 /// macOS: allow this (alwaysOnTop) window to be shown in the SAME Space as an app
@@ -145,14 +139,111 @@ fn set_morning_mode(app: AppHandle, on: bool) {
     }
 }
 
-/// macOS: while morning is up, give the (transparent) window a full-size content view
-/// with a transparent titlebar, so the real traffic-light buttons float over the opaque
-/// morning content instead of sitting on a broken see-through title bar.
+/// Open Morning as its own standard macOS window. This is intentional: the
+/// drawer is a frameless transparent utility window, while Morning is a normal
+/// resizable document window. Mutating one native window between those roles
+/// makes resize/display behavior brittle.
+#[tauri::command]
+fn open_morning_window(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("morning") {
+        #[cfg(target_os = "macos")]
+        make_standard_morning_window(&win);
+        let _ = win.show();
+        let _ = win.set_focus();
+        return;
+    }
+
+    let win = match WebviewWindowBuilder::new(
+        &app,
+        "morning",
+        WebviewUrl::App("index.html".into()),
+    )
+    .title("Buddy")
+    .inner_size(1200.0, 800.0)
+    .min_inner_size(432.0, 600.0)
+    .decorations(true)
+    .resizable(true)
+    .transparent(false)
+    .always_on_top(false)
+    .visible(false)
+    .focused(true)
+    .shadow(true)
+    .build() {
+        Ok(win) => win,
+        Err(e) => {
+            eprintln!("[buddy] open_morning_window failed: {e}");
+            return;
+        }
+    };
+
+    #[cfg(target_os = "macos")]
+    make_standard_morning_window(&win);
+    let _ = win.show();
+    let _ = win.set_focus();
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    }
+}
+
+#[tauri::command]
+fn hide_morning_window(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("morning") {
+        let _ = win.hide();
+    }
+    let _ = app.emit("buddy://morning-closed", ());
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    }
+}
+
+/// Re-fit Morning to the current macOS screen's usable area. Called when the
+/// web layer notices the active monitor changed while Morning is already open.
+#[tauri::command]
+fn fit_morning_window(app: AppHandle) {
+    #[cfg(target_os = "macos")]
+    if let Some(win) = app
+        .get_webview_window("morning")
+        .or_else(|| app.get_webview_window("main"))
+    {
+        if let Ok(ptr) = win.ns_window() {
+            if !ptr.is_null() {
+                use objc2_app_kit::NSWindow;
+                unsafe {
+                    if let Some(ns) = (ptr as *const NSWindow).as_ref() {
+                        fit_morning_window_to_visible_screen(ns);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn make_standard_morning_window(win: &tauri::WebviewWindow) {
+    if let Ok(ptr) = win.ns_window() {
+        if !ptr.is_null() {
+            use objc2_app_kit::NSWindow;
+            unsafe {
+                if let Some(ns) = (ptr as *const NSWindow).as_ref() {
+                    apply_standard_morning_chrome(ns);
+                    fit_morning_window_to_visible_screen(ns);
+                }
+            }
+        }
+    }
+}
+
+/// macOS: Morning should behave like a normal resizable document window. The
+/// drawer starts as a frameless transparent utility, so when Morning turns on we
+/// explicitly restore the standard titled/resizable frame. Avoid
+/// FullSizeContentView here: it looks clean, but it makes the resize hit area
+/// feel non-standard when the window is fitted to the screen.
 #[cfg(target_os = "macos")]
 fn morning_window_chrome(win: &tauri::WebviewWindow, on: bool) {
-    use objc2_app_kit::{
-        NSColor, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask, NSWindowTitleVisibility,
-    };
+    use objc2_app_kit::{NSColor, NSWindow, NSWindowCollectionBehavior};
     let Ok(ptr) = win.ns_window() else { return };
     if ptr.is_null() {
         return;
@@ -160,29 +251,10 @@ fn morning_window_chrome(win: &tauri::WebviewWindow, on: bool) {
     let ns = ptr as *const NSWindow;
     unsafe {
         let Some(ns) = ns.as_ref() else { return };
-        ns.setTitlebarAppearsTransparent(on);
-        ns.setTitleVisibility(if on {
-            NSWindowTitleVisibility::Hidden
-        } else {
-            NSWindowTitleVisibility::Visible
-        });
-        let mut mask = ns.styleMask();
         if on {
-            mask |= NSWindowStyleMask::FullSizeContentView | NSWindowStyleMask::Resizable;
+            apply_standard_morning_chrome(ns);
         } else {
-            mask &= !NSWindowStyleMask::FullSizeContentView;
-        }
-        ns.setStyleMask(mask);
-        // The webview doesn't paint the titlebar strip, so on a transparent window that
-        // area shows through dark. Make the window opaque + white while morning is up so
-        // the strip matches the card; revert to clear/non-opaque for the drawer. Also give
-        // morning a real window shadow (the transparent drawer suppresses it and draws its
-        // own CSS shadow instead).
-        ns.setHasShadow(on);
-        if on {
-            ns.setOpaque(true);
-            ns.setBackgroundColor(Some(&NSColor::whiteColor()));
-        } else {
+            ns.setHasShadow(false);
             ns.setOpaque(false);
             ns.setBackgroundColor(Some(&NSColor::clearColor()));
         }
@@ -192,6 +264,7 @@ fn morning_window_chrome(win: &tauri::WebviewWindow, on: bool) {
         // morning (→ a first-class window), restore it for the drawer.
         if on {
             ns.setCollectionBehavior(NSWindowCollectionBehavior::Default);
+            fit_morning_window_to_visible_screen(ns);
         } else {
             ns.setCollectionBehavior(
                 ns.collectionBehavior()
@@ -199,6 +272,42 @@ fn morning_window_chrome(win: &tauri::WebviewWindow, on: bool) {
                     | NSWindowCollectionBehavior::FullScreenAuxiliary,
             );
         }
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn apply_standard_morning_chrome(ns: &objc2_app_kit::NSWindow) {
+    use objc2_app_kit::{NSColor, NSWindowStyleMask, NSWindowTitleVisibility};
+    ns.setTitlebarAppearsTransparent(false);
+    ns.setTitleVisibility(NSWindowTitleVisibility::Visible);
+    let mut mask = ns.styleMask();
+    mask |= NSWindowStyleMask::Titled
+        | NSWindowStyleMask::Closable
+        | NSWindowStyleMask::Miniaturizable
+        | NSWindowStyleMask::Resizable;
+    mask &= !NSWindowStyleMask::FullSizeContentView;
+    ns.setStyleMask(mask);
+    ns.setHasShadow(true);
+    ns.setOpaque(true);
+    ns.setBackgroundColor(Some(&NSColor::whiteColor()));
+    ns.setLevel(0);
+}
+
+/// macOS already knows the usable screen rectangle: `visibleFrame` excludes the
+/// menu bar and Dock. Use that instead of guessing pixel gaps in the web layer.
+#[cfg(target_os = "macos")]
+unsafe fn fit_morning_window_to_visible_screen(ns: &objc2_app_kit::NSWindow) {
+    if let Some(screen) = ns.screen() {
+        let mut frame = screen.visibleFrame();
+        // Leave the resize border reachable. An exact visibleFrame fit puts
+        // the edge on the physical screen boundary, which makes manual edge
+        // resizing feel unavailable on some display setups.
+        const EDGE_INSET: f64 = 8.0;
+        frame.origin.x += EDGE_INSET;
+        frame.origin.y += EDGE_INSET;
+        frame.size.width = (frame.size.width - EDGE_INSET * 2.0).max(432.0);
+        frame.size.height = (frame.size.height - EDGE_INSET * 2.0).max(600.0);
+        ns.setFrame_display(frame, true);
     }
 }
 
@@ -758,7 +867,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, export_done_tasks, set_reserve, set_morning_mode, morning_translucent, check_for_update, install_update, load_state, load_recovery_state, save_state, append_event])
+        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, export_done_tasks, set_reserve, set_morning_mode, open_morning_window, hide_morning_window, fit_morning_window, morning_translucent, check_for_update, install_update, load_state, load_recovery_state, save_state, append_event])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).
@@ -766,11 +875,12 @@ pub fn run() {
 
             // --- Menu-bar (tray) icon + menu ---
             let toggle_item = MenuItemBuilder::with_id("toggle", "Show / Hide Buddy").build(app)?;
+            let morning_item = MenuItemBuilder::with_id("morning", "Morning…").build(app)?;
             let settings_item = MenuItemBuilder::with_id("settings", "Settings…").build(app)?;
             let report_item = MenuItemBuilder::with_id("report", "Report a bug…").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Quit Buddy").build(app)?;
             let menu = MenuBuilder::new(app)
-                .items(&[&toggle_item, &settings_item, &report_item])
+                .items(&[&toggle_item, &morning_item, &settings_item, &report_item])
                 .separator()
                 .items(&[&quit_item])
                 .build()?;
@@ -796,6 +906,7 @@ pub fn run() {
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "toggle" => toggle_drawer(app),
+                    "morning" => toggle_morning(app),
                     "settings" => { let _ = app.emit("buddy://settings", ()); }
                     "report" => { let _ = app.emit("buddy://report-bug", ()); }
                     "quit" => app.exit(0),
@@ -924,7 +1035,13 @@ pub fn run() {
                 tauri::WindowEvent::Moved(p) => eprintln!("[buddy-win] Moved {},{}", p.x, p.y),
                 tauri::WindowEvent::Focused(f) => eprintln!("[buddy-win] Focused {}", f),
                 // Closing (e.g. Cmd+W) just hides — Buddy lives in the menu bar.
-                tauri::WindowEvent::CloseRequested { api, .. } => { api.prevent_close(); let _ = window.hide(); }
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    if window.label() == "morning" {
+                        let _ = window.app_handle().emit("buddy://morning-closed", ());
+                    }
+                }
                 _ => {}
             }
         })

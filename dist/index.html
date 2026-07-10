@@ -2184,61 +2184,94 @@ function histLoadMore(){
 // FUTURE: a manual holding pen. Parked tasks DON'T auto-return — you pull each
 // into today with + (capped) or drop it with ×. Rows are read-only (edit a task
 // after pulling it into today). Newest-parked on top; no date grouping.
+function makeFutureSwipeRow(contentEl, actions){
+  const row=document.createElement('div');
+  row.className='future-row bd relative overflow-hidden border-[#d9d9d9]';
+  row.style.cssText='height:110px; background:var(--card); touch-action:pan-y;';
+
+  const rail=document.createElement('div');
+  rail.className='absolute inset-y-0 right-0 flex';
+  actions.forEach((a,i)=>{
+    if(i>0){ const line=document.createElement('div'); line.style.cssText='width:1px;background:var(--line)'; rail.appendChild(line); }
+    const b=document.createElement('button');
+    b.title=a.title;
+    b.className='w-[58px] h-full grid place-items-center';
+    b.style.cssText='background:rgba(0,0,0,.07);color:var(--ink)';
+    b.innerHTML=a.icon; muteIconPointerEvents(b);
+    b.addEventListener('mousedown',e=>e.preventDefault());
+    b.addEventListener('click',e=>{ e.stopPropagation(); a.run(); close(); });
+    rail.appendChild(b);
+  });
+  row.appendChild(rail);
+
+  const front=document.createElement('div');
+  front.className='absolute inset-0 flex items-center px-8';
+  front.style.cssText='background:var(--card); transition:transform .2s ease; will-change:transform;';
+  front.appendChild(contentEl);
+  row.appendChild(front);
+
+  const openWidth=actions.length*58 + Math.max(0, actions.length-1);
+  let startX=0, startY=0, dx=0, dragging=false, locked=false, open=false;
+  const setX=x=>{ front.style.transform='translateX('+Math.max(-openWidth, Math.min(0,x))+'px)'; };
+  const close=()=>{ open=false; setX(0); };
+  const openRow=()=>{ open=true; setX(-openWidth); };
+  row.addEventListener('pointerdown',e=>{ startX=e.clientX; startY=e.clientY; dx=open?-openWidth:0; dragging=true; locked=false; front.style.transition='none'; row.setPointerCapture?.(e.pointerId); });
+  row.addEventListener('pointermove',e=>{
+    if(!dragging) return;
+    const tx=e.clientX-startX, ty=e.clientY-startY;
+    if(!locked && Math.abs(tx)>Math.abs(ty)) locked=true;
+    if(locked){ e.preventDefault(); setX(dx+tx); }
+  });
+  row.addEventListener('pointerup',e=>{
+    if(!dragging) return;
+    dragging=false; front.style.transition='transform .2s ease';
+    const tx=e.clientX-startX;
+    (dx+tx < -openWidth*.45) ? openRow() : close();
+  });
+  row.addEventListener('pointercancel',()=>{ dragging=false; front.style.transition='transform .2s ease'; close(); });
+  return row;
+}
+
+// FUTURE: a manual holding pen. Parked tasks DON'T auto-return — you pull each
+// into today with + (capped) or drop it with ×. Rows are read-only (edit a task
+// after pulling it into today). Newest-parked on top; no date grouping.
 function renderFuture(){
   if(!state.deferred || !state.deferred.length){ histBody.appendChild(histEmpty('Nothing in Future yet.')); return; }
   const full = activeCount()>=HARD_CAP;            // today maxed → hide every +
-  const grp=document.createElement('div'); grp.className='bd px-8 py-5';
-  state.deferred.slice().reverse().forEach(d=>{
-    if(d.sent){ grp.appendChild(buildSentFutureRow(d)); return; }   // "Sent to today!" confirmation row
-    const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(full?' pr-[44px]':' pr-[72px]');
-    // Read-only text — adaptive ink so it stays legible on the red (lvl2) background.
-    const t=document.createElement('div');
-    t.className='tracking-[-0.36px] flex-1 min-w-0 leading-[1.3]';
-    t.style.cssText='font-size:18px;color:var(--ink)';
-    t.textContent=d.text; r.appendChild(t);
-    // + (left of ×): add to today. Hidden when today is full — same cap as everywhere.
-    if(!full){
-      const add=document.createElement('button'); add.title='Add to today';
-      add.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
-      add.style.right=HIST_ICON_RIGHT2;
-      add.style.color='var(--ink-dim)'; add.innerHTML=PLUS; muteIconPointerEvents(add);
-      add.addEventListener('mousedown',e=>e.preventDefault());
-      add.addEventListener('click',()=>addDeferredToToday(d.id));
-      r.appendChild(add);
-    }
-    // × : remove for good.
-    const del=document.createElement('button'); del.title='Remove';
-    del.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
-    del.style.right=HIST_ICON_RIGHT;
-    del.style.color='var(--ink-dim)'; del.innerHTML=XICON; muteIconPointerEvents(del);
-    del.addEventListener('mousedown',e=>e.preventDefault());
-    del.addEventListener('click',()=>deleteDeferred(d.id));
-    r.appendChild(del);
-    grp.appendChild(r);
+  const wrap=document.createElement('div');
+  wrap.className='bd';
+  state.deferred.slice().reverse().forEach((d,i)=>{
+    const row=d.sent ? buildSentFutureRow(d) : buildFutureRow(d, full);
+    if(i>0) row.classList.add('border-t');
+    wrap.appendChild(row);
   });
-  histBody.appendChild(grp);
+  histBody.appendChild(wrap);
 }
+
+function buildFutureRow(d, full){
+  const t=document.createElement('div');
+  t.className='flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2]';
+  t.style.cssText='font-size:24px;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden';
+  t.textContent=d.text;
+  const actions=[];
+  if(!full) actions.push({title:'Add to today', icon:PLUS, run:()=>addDeferredToToday(d.id)});
+  actions.push({title:'Remove', icon:XICON, run:()=>deleteDeferred(d.id)});
+  return makeFutureSwipeRow(t, actions);
+}
+
 // A parked task that's been sent to Today: bold "Sent to today!" + the title in grey,
 // NO strikethrough (it isn't done — it's in play today). Adaptive tokens so it stays
 // legible on the red (lvl2) background. Only action is ↩ undo (same icon as Donezo).
 function buildSentFutureRow(d){
-  const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5 pr-[44px]';
   const lab=document.createElement('div'); lab.className='flex items-baseline gap-2 min-w-0 flex-1';
   const tag=document.createElement('span');
   tag.className='font-semibold tracking-[-0.3px] shrink-0'; tag.style.cssText='font-size:18px;color:var(--ink)';
   tag.textContent='Sent to today!';
   const ttl=document.createElement('span');
-  ttl.className='truncate'; ttl.style.cssText='font-size:18px;color:var(--ink-dim)';   // grey, NO line-through
+  ttl.className='truncate'; ttl.style.cssText='font-size:18px;color:var(--ink-dim)';
   ttl.textContent=d.text;
-  lab.append(tag, ttl); r.appendChild(lab);
-  const undo=document.createElement('button'); undo.title='Undo — back to Future';
-  undo.className='absolute top-1/2 -translate-y-1/2 size-[32px] grid place-items-center rounded-full ihover opacity-0 group-hover/h:opacity-100 transition-opacity';
-  undo.style.right=HIST_ICON_RIGHT;
-  undo.style.color='var(--ink-dim)'; undo.innerHTML=UNDO; muteIconPointerEvents(undo);
-  undo.addEventListener('mousedown',e=>e.preventDefault());
-  undo.addEventListener('click',()=>unsendDeferred(d.id));
-  r.appendChild(undo);
-  return r;
+  lab.append(tag, ttl);
+  return makeFutureSwipeRow(lab, [{title:'Undo — back to Future', icon:UNDO, run:()=>unsendDeferred(d.id)}]);
 }
 // Tombstone the id — without it a synced peer's copy resurrects the row on the next pass.
 function deleteDeferred(id){ tombstone(id); state.deferred=state.deferred.filter(d=>d.id!==id); save(); render(); }
@@ -2321,17 +2354,88 @@ function toggleUndone(){
 // Morning window mode (native): ON = drop always-on-top + become a normal Dock/⌘-Tab
 // app so the user can tab away to a meeting and back; comes to front but never locks
 // on top. OFF = back to the quiet edge-drawer. No-op in the browser.
-function morningMode(on){ if(!NATIVE) return; try{ window.__TAURI__.core.invoke('set_morning_mode',{on}); }catch(_){} }
+function morningMode(on){
+  if(!NATIVE) return Promise.resolve();
+  try{ return window.__TAURI__.core.invoke('set_morning_mode',{on}).catch(()=>{}); }
+  catch(_){ return Promise.resolve(); }
+}
+function openNativeMorningWindow(){
+  if(!NATIVE) return Promise.resolve();
+  try{ return window.__TAURI__.core.invoke('open_morning_window').catch(()=>{}); }
+  catch(_){ return Promise.resolve(); }
+}
+function hideNativeMorningWindow(){
+  if(!NATIVE) return Promise.resolve();
+  try{ return window.__TAURI__.core.invoke('hide_morning_window').catch(()=>{}); }
+  catch(_){ return Promise.resolve(); }
+}
+let morningFitTimer=null, morningMonitorKey='';
+function morningVisible(){ return !morning.classList.contains('hidden'); }
+function fitMorningWindow(){
+  if(!NATIVE || !morningVisible()) return Promise.resolve();
+  try{ return window.__TAURI__.core.invoke('fit_morning_window').catch(()=>{}); }
+  catch(_){ return Promise.resolve(); }
+}
+async function checkMorningMonitor(force=false){
+  if(!NATIVE) return;
+  if(!morningVisible()){ stopMorningFitWatcher(); return; }
+  try{
+    const W=window.__TAURI__.window, mon=await W.currentMonitor();
+    if(!mon) return;
+    const key=[
+      mon.position?.x, mon.position?.y,
+      mon.size?.width, mon.size?.height,
+      mon.scaleFactor
+    ].join(':');
+    if(force || key!==morningMonitorKey){
+      morningMonitorKey=key;
+      await fitMorningWindow();
+    }
+  }catch(_){}
+}
+function startMorningFitWatcher(){
+  if(!NATIVE) return;
+  stopMorningFitWatcher();
+  morningMonitorKey='';
+  checkMorningMonitor(true);
+  morningFitTimer=setInterval(()=>checkMorningMonitor(false), 750);
+}
+function stopMorningFitWatcher(){
+  if(morningFitTimer){ clearInterval(morningFitTimer); morningFitTimer=null; }
+}
 // Called at the START of the morning→drawer leave: drop the opaque white backing so the
 // planner fade reveals the desktop (the rest of the window revert happens on morningMode(false)).
 function morningTranslucent(){ if(!NATIVE) return; try{ window.__TAURI__.core.invoke('morning_translucent'); }catch(_){} }
-function showMorning(){ T('showMorning'); clearTimeout(shrinkTimer); clearTimeout(closeTimer); clearTimeout(openTimer); undoneAdded=false; undoneIds=[]; morning.classList.remove('morning-leaving','hidden'); render(); nativeFit('full'); morningMode(true); }
+async function showMorning(){
+  T('showMorning');
+  clearTimeout(shrinkTimer); clearTimeout(closeTimer); clearTimeout(openTimer);
+  undoneAdded=false; undoneIds=[];
+  if(NATIVE && !IS_MORNING_WINDOW){
+    closeDrawer();
+    await nativeFit('sliver');
+    await openNativeMorningWindow();
+    return;
+  }
+  morning.classList.remove('morning-leaving','hidden');
+  render();
+  if(NATIVE && IS_MORNING_WINDOW){
+    await fitMorningWindow();
+    return;
+  }
+  await morningMode(true);
+  if(NATIVE) startMorningFitWatcher(); else await nativeFit('full');
+}
 // Morning → drawer handoff. The planner fades + shrinks out (~.5s linear) while the
 // drawer slides in from the right (its existing ease-out curve), arriving just as
 // the planner vanishes. Native: hold the window full-screen through the fade, then
 // shrink it to hug the drawer once the planner is hidden. `tuckMs` = how long the
 // drawer lingers before tucking to the edge (skipped when pinned).
 function leaveMorningToDrawer(tuckMs){
+  if(NATIVE && IS_MORNING_WINDOW){
+    writeNow();
+    hideNativeMorningWindow();
+    return;
+  }
   const reduce=reducedMotion();
   const FADE=reduce?0:500, SLIDE_AT=reduce?0:250;
   nativeFocus();
@@ -2341,9 +2445,10 @@ function leaveMorningToDrawer(tuckMs){
   // Slide the drawer in over the still-full-screen window (no native resize yet).
   setTimeout(()=>{ drawer.classList.remove('translate-x-full'); requestAnimationFrame(fitToday); }, SLIDE_AT);
   // Planner is gone → drop it, then shrink the window to the drawer (panel stays put).
-  setTimeout(()=>{
+  setTimeout(async ()=>{
     morning.classList.add('hidden'); morning.classList.remove('morning-leaving'); render();
-    if(NATIVE){ morningMode(false); nativeFit('drawer'); }   // restore always-on-top + Accessory, then hug the edge
+    stopMorningFitWatcher();
+    if(NATIVE){ await morningMode(false); await nativeFit('drawer'); }   // restore always-on-top + Accessory, then hug the edge
     if(!state.pinned && tuckMs!=null) closeTimer=setTimeout(()=>{ if(!state.pinned) closeDrawer(); }, tuckMs);
   }, FADE);
 }
@@ -3342,6 +3447,8 @@ window.__buddy = {
 /* --------------------------- boot -------------------------------- */
 /* ---- native (Tauri) window sizing: morning = full screen, daily = right-edge strip ---- */
 const NATIVE = !!(window.__TAURI__ && window.__TAURI__.window);
+const SURFACE = NATIVE ? (window.__TAURI__.window.getCurrentWindow().label || 'main') : (new URLSearchParams(location.search).get('surface') || 'main');
+const IS_MORNING_WINDOW = SURFACE === 'morning';
 function T(m){ try{ window.__TAURI__?.core?.invoke('trace',{msg:String(m)}); }catch(_){} }
 
 /* ---------------- diagnostics event log (privacy-safe) ----------------
@@ -3380,6 +3487,10 @@ if(NATIVE){
   // ⌘⌥⌃M: raise, then show/hide morning. Hiding uses leaveMorningToDrawer (NOT skip)
   // so a peek-and-close does NOT mark the day planned — the auto-morning can still fire.
   ev.listen('buddy://morning-toggle', ()=> showMorning());   // ⌘⌥⌃M ALWAYS brings the morning planner forward (not a hide-toggle)
+  ev.listen('buddy://morning-closed', async ()=>{ if(IS_MORNING_WINDOW) return;
+    await bootReconcileFile();
+    settleNative();
+  });
   ev.listen('buddy://toggle', ()=>{ if(morningUp()) return;
     drawer.classList.contains('translate-x-full') ? openDrawer() : closeDrawer(); });
   ev.listen('buddy://report-bug', ()=> reportBug());
@@ -3444,11 +3555,11 @@ async function reportBug(){
 }
 const SLIVER=2;    // hidden width — just enough to keep the webview alive (no widget)
 const DRAWERW=452; // revealed/pinned window width — wider than the 416 drawer so the card's soft left (screen-facing) drop shadow has room to fade instead of being clipped by the window edge
-// Top inset so the window clears the menu bar. The bottom gap keeps the drawer's
-// lower rounded corners on-screen on displays where the monitor height includes
-// pixels under the Dock/screen edge.
+// Top inset so the drawer clears the menu bar. Morning is fitted natively with
+// macOS NSScreen.visibleFrame in set_morning_mode(true), because the OS already
+// knows the usable screen area after the menu bar/Dock.
 const MENUBAR=30;
-const BOTTOM_GAP=12;
+const DRAWER_BOTTOM_GAP=12;
 async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
   T('nativeFit('+mode+')');
   if(!NATIVE) return;
@@ -3458,9 +3569,9 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
     if(!mon || !D.PhysicalSize || !D.PhysicalPosition) return;
     const sz=mon.size, p=mon.position, sf=mon.scaleFactor;
     const top=Math.round(MENUBAR*sf);     // clear the menu bar
-    const bottom=Math.round(BOTTOM_GAP*sf);
-    const h=sz.height - top - bottom;
     if(mode==='full'){
+      const bottom=Math.round(DRAWER_BOTTOM_GAP*sf);
+      const h=sz.height - top - bottom;
       // Morning fills the screen below the menu bar (frontmost, not full-bleed). The old
       // geometry-memory (restore last size/pos) kept restoring bad/tiny values because the
       // save raced the native re-chrome in this shared-window setup — so it's retired here.
@@ -3469,6 +3580,8 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
       await win.setPosition(new D.PhysicalPosition(p.x, p.y + top));
       return;
     }
+    const bottom=Math.round(DRAWER_BOTTOM_GAP*sf);
+    const h=sz.height - top - bottom;
     const w=Math.round((mode==='drawer'?DRAWERW:SLIVER)*sf);
     await win.setSize(new D.PhysicalSize(w, h));
     await win.setPosition(new D.PhysicalPosition(p.x + sz.width - w, p.y + top));
@@ -3505,6 +3618,11 @@ function bootFinish(recovered){
   // even if slept tasks have woken into the list, so you still plan your three.
   T('boot done='+state.today.morningDone+' n='+state.today.items.length+' rolled='+rolled+' recovered='+recovered);
   diag('boot', {items:state.today.items.length, hist:state.history.length, deferred:(state.deferred||[]).length, rolled:!!rolled, recovered:!!recovered});
+  if(IS_MORNING_WINDOW){
+    if(!state.today.morningDone) showMorning(); else hideNativeMorningWindow();
+    writeNow();
+    return;
+  }
   if(!state.today.morningDone) showMorning(); else settleNative();
   writeNow();                                // converge localStorage + file mirror to the chosen state
 }
@@ -3512,6 +3630,7 @@ function boot(){
   cursor=0; kbActive=false; editingId=null;  // reset transient keyboard cursor on (re)boot
   if(NATIVE){
     document.body.classList.add('native');
+    if(IS_MORNING_WINDOW) document.body.classList.add('morning-surface');
     // Dev builds: rename the header to "Dev Buddy" so it's never confused with the
     // installed release app (which also gets a red menu-bar icon, set in Rust).
     window.__TAURI__.core.invoke('is_dev').then(dev=>{ if(dev){ const t=$('#appTitle'); if(t) t.textContent='Dev Buddy'; document.title='Dev Buddy'; } }).catch(()=>{});

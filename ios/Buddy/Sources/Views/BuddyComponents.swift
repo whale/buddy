@@ -85,6 +85,7 @@ struct SwipeableRow<Content: View>: View {
     @Binding var openRowID: String?     // shared: which row is currently open
     var cardFill: Color                 // opaque row bg so the actions hide when closed
     var onComplete: (() -> Void)? = nil
+    var onAdd: (() -> Void)? = nil       // future rows: swipe → add to today
     var onSleep: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
     var onRestore: (() -> Void)? = nil  // done rows: swipe → undo (back to to-do)
@@ -106,6 +107,7 @@ struct SwipeableRow<Content: View>: View {
     private var actions: [(icon: String, run: () -> Void)] {
         var a: [(String, () -> Void)] = []
         if let onRestore  { a.append(("undo", onRestore)) }   // done rows: rewind to to-do
+        if let onAdd      { a.append(("plus", onAdd)) }
         if let onComplete { a.append(("check", onComplete)) }
         if let onSleep    { a.append(("calendar", onSleep)) }
         if let onDelete   { a.append(("x", onDelete)) }
