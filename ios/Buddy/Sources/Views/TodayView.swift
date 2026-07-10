@@ -38,6 +38,8 @@ struct TodayView: View {
 
     // Celebration overlay
     @State private var showCelebration = false
+    @State private var celebrationAnchor: CGPoint? = nil   // quiet-pop origin (completed row's ✓)
+    @State private var rowFrames: [String: CGRect] = [:]   // active-row frames, global coords
 
     // Live weather ornament
     @State private var weather = WeatherService()
@@ -139,7 +141,7 @@ struct TodayView: View {
             .onChange(of: editingId) { _, _ in updateKeyboardLift() }
 
             if showCelebration {
-                CelebrationView(intensity: store.settings.celebrate) { showCelebration = false }
+                CelebrationView(intensity: store.settings.celebrate, anchor: celebrationAnchor) { showCelebration = false }
                     .ignoresSafeArea()
                     .transition(.opacity)
             }
@@ -403,6 +405,12 @@ struct TodayView: View {
                     .padding(.horizontal, 32).padding(.vertical, fit.vpad)
             }
             .frame(maxWidth: .infinity, maxHeight: fillH)
+            // Track the row's frame so the quiet pop can rise from where the ✓ was.
+            .background(GeometryReader { g in
+                Color.clear
+                    .onAppear { rowFrames[task.id] = g.frame(in: .global) }
+                    .onChange(of: g.frame(in: .global)) { _, v in rowFrames[task.id] = v }
+            })
         }
     }
 
@@ -459,8 +467,15 @@ struct TodayView: View {
     // MARK: - Interactions
 
     private func handleComplete(task: BuddyTask) {
+        // Anchor BEFORE the mutation — the row re-sorts into the Donezo group.
+        if let f = rowFrames[task.id] {
+            celebrationAnchor = CGPoint(x: f.maxX - 40, y: f.midY)   // the swipe-✓ area
+        } else {
+            celebrationAnchor = nil
+        }
         let didComplete = withAnimation(.easeOut(duration: 0.3)) { store.complete(task) }
-        if didComplete && store.settings.celebrate > 0 {
+        // celebrate == 0 is the QUIET POP, not silence — never gate it off here.
+        if didComplete {
             withAnimation { showCelebration = true }
         }
     }
