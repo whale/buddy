@@ -25,7 +25,7 @@ On that page, grab the **`Buddy_…_universal.dmg`** file.
 Buddy is a **menu-bar app**, so it won't show in your Dock. Click the sticker icon up top to show/hide it, open settings, or quit. The drawer also reveals when you move your mouse to the **right edge** of your screen.
 
 ### Updates are automatic
-Buddy checks for new versions on its own. When one's ready, a banner slides in offering **Install & Relaunch** — one click and you're up to date. (You can also check manually in **Settings → Check for Updates**.)
+Buddy checks for new versions on its own (at launch, every few hours, and when it regains focus). When one's ready, a banner slides in offering **Install & Relaunch** — one click and you're up to date.
 
 ### Something broken or weird?
 Use **Report a bug…** in the menu-bar icon's menu — it captures a screenshot of just Buddy plus a few diagnostics and sends them to the maintainer. That's the best way to send feedback.
@@ -35,7 +35,7 @@ Use **Report a bug…** in the menu-bar icon's menu — it captures a screenshot
 ## How to use it, in a minute
 
 - **Morning** — a calm screen asks for up to **3** things. Press Enter between them.
-- **A task's life** — click it to set it as **now**, click again to mark it **done**. Done tasks celebrate with confetti, then slide up to the top as **"Donezo."** rows (and also file themselves under **Calendar → Done → Today**). Hover any done row for the **↩ undo** to bring it back.
+- **A task's life** — hover a task and click the **✓** to complete it; click the task's **text** to edit it (Enter saves, Tab hops to the next task). Done tasks celebrate with confetti, then slide up to the top as **"Donezo."** rows (and also file themselves under **Calendar → Done → Today**). Hover any done row for the **↩ undo** to bring it back.
 - **The gentle nudge** — 4 tasks is fine. **5** turns the text red; **6** turns the whole drawer red — Buddy's quiet way of saying *that's a lot*. Finishing things eases the red back down.
 - **Pin it** — the pin icon keeps the drawer open so it doesn't tuck away.
 - **History** — the calendar icon shows what you've finished and what's coming up.
@@ -47,27 +47,28 @@ Buddy is fully driveable from the keyboard:
 | Key | Does |
 |-----|------|
 | `` ` `` (backtick) | Toggle the drawer open/closed |
-| ↑ / ↓ | Move between today's tasks and the Add row |
-| Enter | On a task: cycle it (→ done throws confetti). On Add: add + edit |
-| F | Set the cursored task as **now** without cycling |
+| ↑ / ↓ / Tab | Move between today's tasks and the Add row (in the Future panel, Tab walks the parked rows) |
+| Enter | On a task: cycle it (→ done throws confetti). On Add: add + edit. On a cursored Future row: send it to today |
 | E | Edit · ⌫ / Delete | Remove · A or + | Add a task |
+| Tab (while editing) | Save and edit the next task (Shift+Tab: previous) |
 | Esc | Commit an edit, else close history, else close the drawer |
 
 ---
 
 ## For developers & contributors
 
-Buddy is **MIT-licensed and open source**. The Mac app is the shipped product; an iOS companion is in early development. Everything is **local-first** — it works fully offline, and sync is opt-in (below), so you can clone, build, and run with **no backend and no secrets**.
+Buddy is **MIT-licensed and open source**. The Mac app is the shipped product; the iOS companion ships via TestFlight and live-syncs with it. Everything is **local-first** — it works fully offline, and sync is opt-in (below), so you can clone, build, and run with **no backend and no secrets**.
 
 ### Repository layout
 
 | Path | What it is |
 |------|-----------|
-| `dist/index.html` | The entire Mac web app — vanilla JS + locally-bundled Tailwind & Inter. No build step. |
-| `src-tauri/` | The **Tauri v2** (Rust) macOS shell — tray, window, durable-state commands. |
-| `ios/` | The **iOS companion** (SwiftUI, generated with XcodeGen, shipped with fastlane). Early WIP. |
+| `dist/index.html` | The entire Mac web app — vanilla JS + locally-bundled Tailwind & Geist. No build step. |
+| `src-tauri/` | The **Tauri v2** (Rust) macOS shell — tray, windows, durable-state commands. |
+| `ios/` | The **iOS companion** (SwiftUI, generated with XcodeGen, shipped with fastlane via TestFlight). Live-syncs with the Mac. |
 | `api/` | A serverless function for bug-report intake (see [Bug reports](#bug-reports)). |
-| Plans & runbooks | `RELEASE-UPDATER.md`, `IOS-COMPANION-PLAN.md`, `DATA-SAFETY-PLAN.md`, `BUG-REPORTS.md`, `CLAUDE.md`. |
+| `design/` | `escalation-tokens.json` — the cross-platform color contract (pinned by tests on both platforms). |
+| Runbooks | `RELEASE-UPDATER.md` (sign/notarize/publish), `RELEASE-CHECKLIST.md` (pre-ship regression pass), `BUG-REPORTS.md`, `CLAUDE.md`. |
 
 ### Build & run the Mac app
 
@@ -80,7 +81,7 @@ Before every release the browser smoke test must pass — `await window.__buddy.
 
 ### Build & run the iOS app
 
-Needs Xcode and [XcodeGen](https://github.com/yonsm/XcodeGen) (`brew install xcodegen`). The `.xcodeproj` is **generated** from `ios/project.yml` (not committed).
+Needs Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`). The `.xcodeproj` is **generated** from `ios/project.yml` (not committed).
 
 ```bash
 cd ios
@@ -96,14 +97,13 @@ To run it on **your own iPhone**, open the project in Xcode and set the signing 
 cd ios && fastlane beta    # needs ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH set
 ```
 
-### Sync (planned — opt-in, local-first)
+### Sync (live — opt-in, local-first)
 
-Buddy stores your data **on your own machine** and works fully offline. Cross-device sync (Mac ⇄ iPhone) is **opt-in** and not wired up yet. The design:
+Buddy stores your data **on your own machine** and works fully offline. Cross-device sync (Mac ⇄ iPhone) is **opt-in** and live:
 
-- A **Supabase** backend you supply yourself (URL + anon key). Nothing is baked into the app — a fork runs **local-only by default**, so cloning and building needs no accounts.
-- Devices pair by **scanning a QR code** carrying an auto-generated sync key — no login, no email. One synced document, last-write-wins with a local backup.
-
-Full design in **`IOS-COMPANION-PLAN.md`**; how local data is kept safe in **`DATA-SAFETY-PLAN.md`**.
+- A **Supabase** backend you supply yourself (URL + anon key; schema in `supabase/`). Nothing is baked into the app — a fork runs **local-only by default**, so cloning and building needs no accounts.
+- Devices pair by **scanning a QR code** carrying an auto-generated sync key — no login, no email. One synced document with a deterministic symmetric merge (same test vectors on both platforms) and local backups.
+- Settings on each device shows the sync **bucket id** ("Synced 12:04 · ab12cd") — two devices showing the same code are provably paired. If devices ever stop converging, run `pnpm sync:doctor` for a verdict.
 
 ### Bug reports
 

@@ -1,9 +1,26 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-10. Branch `main`. Latest **released Mac**: **`0.3.27`** (signed/notarized GitHub release, updater manifest published). Source version is **`0.3.28`** because the docs-only wrap commit accidentally triggered the bump bot; **do not treat 0.3.28 as released** unless a later release run exists. iOS uploaded to **TestFlight build `20`** and processing in App Store Connect. Sync was previously confirmed seamless; current focus is Mac/iOS polish regression cleanup and visual QA._
+_Last updated: 2026-07-10 (evening). Branch `main`. Latest **released Mac**: **`v0.3.29`** (signed/notarized, updater manifest live). Latest **iOS**: **TestFlight `0.1.0 (25)`** (processed + distributed — 24 has a swipe-tap regression, 25 fixes it). Docs cleaned: the stale plan files (HANDOFF, PLAN, SYNC-HANDOFF, DATA-SAFETY-PLAN, …) are deleted — THIS file's top + `RELEASE-CHECKLIST.md` + `JOURNAL.md` are the live docs._
 
+## Session summary — 2026-07-10 (marathon) — 15 field reports fixed + shipped both platforms
 
-## Session summary — 2026-07-10 — Future rows, red-state regression, Morning launch, releases
+**Shipped as Mac v0.3.29 + TestFlight (25)** (PRs #90, #91):
+- **THE PATTERN**: every text/element follows lvl0 black → lvl1 red → lvl2 white-on-red, no done-row carve-out. Contract: `design/escalation-tokens.json`, pinned by Mac smokeTest asserts + iOS `EscalationTokenParityTests`.
+- **Mac**: history is a real slide-up sheet; sheets slide (ease-out up / ease-in down, curves in `:root`); Future +/× jitter fixed; Enter commits an edit (no chain, no complete); Tab hops rows / walks the Future panel; Buddy wordmark → Today; Give-Buddy-room `reserve_trusted` + Settings hint (root cause: TCC grant dies on re-signed updates — user must remove+re-add in Accessibility); **mid-edit sync no longer truncates commits** ("Thing"→"Thi": polls skip while editing + blur v-bumps vs edit-start).
+- **iOS**: ghost-sizing edit swap (0.0pt text movement, pixel-verified); keyboard lift for low rows; date header from real font metrics (cap+64, baseline 32 from bottom); Mac-identical sheet curves + card-clipped sheets (no close flash); Future scrolls (UIKit `HorizontalPanCatcher` — ANY SwiftUI drag starves the ScrollView; overlay must ride BEFORE `.offset` or tray taps are swallowed, caught + regression-tested same day); swipe tray a11y ids.
+- **Sync forensics**: dev build was split-brained onto a stale syncKey bucket. `pnpm sync:doctor` (containers → buckets → backend verdict), bucket suffix in both Settings ("Synced HH:MM · 0dc160"), `sync-owner` diag event. Dev now paired to the real bucket.
+- **Process**: `RELEASE-CHECKLIST.md` (pre-ship regression pass, wired into RULE 2); CLAUDE.md **RULE 4** (see it, don't infer it — simulator/video evidence for every interaction claim); fastlane `beta` now **waits for App Store processing** (a silently-swallowed upload = loud failure; build 21 vanished this way) + `fastlane status` lane; ship announcements always state version/app/what-to-check (memory: feedback-ship-announcements).
+
+**Open:**
+1. User on-device pass of v0.3.29 + build (25); Give-Buddy-room re-grant (user action).
+2. Dead-code sweep (still from THE PLAN batch 5): edge-tab subsystem, `renderSkipped`, `#morningUndone`, `.todaybadge`, `--chrome-hover`, `.donezo-leaving`, iOS `TaskRowView.swift`, `EscalationTheme.focusFill`.
+3. THE PLAN batch 4 burrs: weekday XSS escape + CSP, Backquote global-shortcut chord, iOS Done-tab "Today" undo no-op, updater re-check after failed install, drawer poll pause when tucked, QR-in-bug-screenshot.
+4. Known minor: iOS Settings sync fields don't keyboard-avoid; reserve strip 416 vs drawer 452; reserve is main-display-only.
+5. If ONE more merge-class sync bug appears: migrate the document to Automerge (agreed stance) instead of patching.
+
+---
+
+## Session summary — 2026-07-10 (morning) — Future rows, red-state regression, Morning launch, releases
 
 **Shipped + verified:**
 - **Mac Future rows restored to desktop behavior:** Future rows are fixed at 110px, no extra `Future` heading, and actions are Mac hover-only (vertical `+` and `×` rail). iOS remains swipe-only for Future rows.
