@@ -71,6 +71,31 @@ final class BuddyFieldReportUITests: XCTestCase {
         XCTAssertLessThan(afterY, beforeY - 60, "no-gesture scroll also failed (structural): \(beforeY) → \(afterY)")
     }
 
+    /// Swipe-open a Future row and TAP a tray action — the tap must FIRE, not
+    /// close the row (regression 2026-07-10: the pan overlay didn't slide with
+    /// the content, covered the revealed tray, and swallowed every action tap).
+    func testSwipeActionButtonFires() throws {
+        let app = launch(fixture: "future-long")
+        let row = app.staticTexts["Future item 12"]   // newest-parked → rendered on top
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        // Real horizontal swipe left on the row to reveal the tray.
+        let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        let end = row.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        sleep(1)
+        // Tap the "plus" (send to today) action in the revealed tray.
+        let plus = app.buttons.matching(NSPredicate(format: "label == 'plus' OR identifier == 'swipe-plus'")).firstMatch
+        if plus.exists {
+            plus.tap()
+        } else {
+            // Fallback: tap where the tray's first action sits (right edge of the row).
+            row.coordinate(withNormalizedOffset: CGVector(dx: 1.15, dy: 0.5)).tap()
+        }
+        sleep(1)
+        XCTAssertTrue(app.staticTexts["Sent to today!"].waitForExistence(timeout: 2),
+            "Tapping the revealed + action must send the row to today (tap was swallowed)")
+    }
+
     /// R2-5: the Future list must scroll when it is longer than the panel.
     func testFutureListScrolls() throws {
         let app = launch(fixture: "future-long")

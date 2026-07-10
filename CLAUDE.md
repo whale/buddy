@@ -48,6 +48,9 @@ transitions on `.sheet`/`.sheet.closing` only.
 
 ## 🧪 RULE 2 — Verify every build before shipping. Two gates, both required.
 
+**Before ANY release/TestFlight upload, walk `RELEASE-CHECKLIST.md` top to
+bottom** (automated gates → per-platform interactive pass → sync → announce).
+
 A change that "looks cosmetic" can break shared plumbing three steps away
 (rendering, attributes, focus, colours). Before **every** `pnpm tauri build`:
 
