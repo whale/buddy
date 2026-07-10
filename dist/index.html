@@ -1332,6 +1332,12 @@ async function setSync(cfg){                        // Settings/pairing writes c
 let syncStartedAt = 0;
 async function syncNow(reason){
   if(!syncStore || !syncOwnerId) return null;
+  // NEVER sync mid-edit. A pass here would PUSH the half-typed text at the item's
+  // unchanged v; after commit, pickItem's equal-v canonical tiebreak can then pick
+  // the shorter stale echo over the finished text ("Thing" → "Thi", field report
+  // 2026-07-10). Adopt was already deferred while editing — skip the push too; the
+  // post-blur 'change' pass catches everything up seconds later.
+  if(editingActive()){ syncPending = true; diag('sync-skipped-editing', {reason}); return null; }
   if(syncing){
     // Watchdog: the single-flight flag must never wedge sync permanently. Fetches
     // now abort at 10s, so a pass older than 60s is a zombie — reset and proceed.
@@ -1783,6 +1789,7 @@ function startEdit(id){
   const el=wrap.querySelector(`[data-tid="${id}"]`);
   if(!el) return;
   editingId=id;
+  el.dataset.editStart=(state.items.find(x=>x.id===id)||{}).text||'';   // v-bump baseline (see blur)
   el.setAttribute('contenteditable','true'); el.classList.remove('empty'); el.focus();
   const r=document.createRange(); r.selectNodeContents(el); r.collapse(false);
   const s=window.getSelection(); s.removeAllRanges(); s.addRange(r);
@@ -1994,14 +2001,18 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     // click drops the cursor at the click point (setting it on `click` was a tick too
     // late, which is why it used to take two clicks). Don't preventDefault: let the
     // native mousedown focus + position the caret.
-    txt.addEventListener('mousedown',()=>{ if(editingId===it.id || it.state==='done') return; kbActive=false; cursor=idx; editingId=it.id; txt.setAttribute('contenteditable','true'); txt.classList.remove('empty'); });
+    txt.addEventListener('mousedown',()=>{ if(editingId===it.id || it.state==='done') return; kbActive=false; cursor=idx; editingId=it.id; txt.dataset.editStart=it.text||''; txt.setAttribute('contenteditable','true'); txt.classList.remove('empty'); });
     txt.addEventListener('input',()=>{ it.text=txt.textContent.trim(); });
     // Enter COMMITS the edit, nothing more. stopPropagation is LOAD-BEARING:
     // blur() clears editingId synchronously, so without it this same keypress
     // bubbles to the global key layer, which then reads Enter as "cycle the
     // cursored task" and marks it done (field reports 2026-07-10 ×2).
     txt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); e.stopPropagation(); txt.blur(); } });
-    txt.addEventListener('blur',()=>{ const prev=it.text; it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable'); editingId=null; if(!it.text){ tombstone(it.id); state.items=state.items.filter(x=>x.id!==it.id); } else if(it.text!==prev){ touch(it); } render(); });
+    // v-bump compares against the text at EDIT START, not `it.text` — the input
+    // listener keeps it.text live during typing, so comparing against it always
+    // said "unchanged" and the finished edit kept its old v (which let a mid-edit
+    // wire echo win the equal-v merge tiebreak and truncate the text).
+    txt.addEventListener('blur',()=>{ const started = txt.dataset.editStart!==undefined ? txt.dataset.editStart : it.text; delete txt.dataset.editStart; it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable'); editingId=null; if(!it.text){ tombstone(it.id); state.items=state.items.filter(x=>x.id!==it.id); } else if(it.text!==started){ touch(it); } render(); });
     row.appendChild(txt);
 
     // Right action column reveals on hover (like before). Editing is now click-the-text
@@ -3138,6 +3149,39 @@ window.__buddy = {
       pastDaysShown+=PAST_PAGE; render();
       ok('load more: next week revealed on click', histBody.querySelectorAll('.hrow').length===14, 'rows='+histBody.querySelectorAll('.hrow').length);
       pastDaysShown=PAST_PAGE; state.histOpen=false;          // reset transient UI
+
+      // Mid-edit sync must never truncate a commit ("Thing" → "Thi", field report
+      // 2026-07-10): passes SKIP while editing (no half-typed push), blur bumps v,
+      // and a stale wire echo at the old v loses the merge.
+      state.tombstones={}; state.history=[]; state.deferred=[];
+      state.today={date:localDate(),morningDone:true,items:[{id:'ed1',text:'Old',state:'neutral',v:1}]};
+      editingId=null; render();
+      const edStore=makeFakeCASStore();
+      const prevStore=syncStore, prevOwner=syncOwnerId;
+      syncStore=edStore; syncOwnerId='smoke-ed';
+      try{
+        await syncNow('boot');                                   // server ← "Old" v1
+        startEdit('ed1');
+        const edEl=todayWrap.querySelector('[data-tid="ed1"]');
+        edEl.textContent='Thi'; edEl.dispatchEvent(new InputEvent('input',{bubbles:true}));
+        const skip=await syncNow('poll');                        // mid-edit poll
+        ok('sync: mid-edit pass is skipped (no half-typed push)',
+           skip===null && edStore._rows()['smoke-ed'].blob.today.items[0].text==='Old',
+           'server='+edStore._rows()['smoke-ed'].blob.today.items[0].text);
+        edEl.textContent='Thing'; edEl.dispatchEvent(new InputEvent('input',{bubbles:true}));
+        edEl.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+        ok('edit: commit bumps v (beats stale wire echoes in merge)',
+           (state.items.find(i=>i.id==='ed1')||{}).v===2,
+           'v='+((state.items.find(i=>i.id==='ed1')||{}).v));
+        // poison the server with a stale mid-edit echo at the OLD v; sync must keep the commit
+        const poisoned=JSON.parse(JSON.stringify(edStore._rows()['smoke-ed'].blob));
+        poisoned.today.items[0]={...poisoned.today.items[0], text:'Thi', v:1};
+        edStore._rows()['smoke-ed']={blob:poisoned, version:edStore._rows()['smoke-ed'].version+1};
+        await syncNow('poll');
+        ok('sync: committed text survives a stale mid-edit echo',
+           (state.items.find(i=>i.id==='ed1')||{}).text==='Thing',
+           'text='+((state.items.find(i=>i.id==='ed1')||{}).text));
+      } finally { syncStore=prevStore; syncOwnerId=prevOwner; syncPending=false; }
 
       // sync step 3: the pure merge must lose nothing. Run the full suite and gate on it.
       const mt=this.mergeTest();
