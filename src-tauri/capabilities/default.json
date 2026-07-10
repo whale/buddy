@@ -2,7 +2,10 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Core permissions for Buddy's window control, tray, and global shortcut.",
-  "windows": ["main"],
+  "windows": [
+    "main",
+    "morning"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-show",

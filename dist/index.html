@@ -2184,54 +2184,31 @@ function histLoadMore(){
 // FUTURE: a manual holding pen. Parked tasks DON'T auto-return — you pull each
 // into today with + (capped) or drop it with ×. Rows are read-only (edit a task
 // after pulling it into today). Newest-parked on top; no date grouping.
-function makeFutureSwipeRow(contentEl, actions){
+function makeFutureHoverRow(contentEl, actions){
   const row=document.createElement('div');
-  row.className='future-row bd relative overflow-hidden border-[#d9d9d9]';
-  row.style.cssText='height:110px; background:var(--card); touch-action:pan-y;';
-
-  const rail=document.createElement('div');
-  rail.className='absolute inset-y-0 right-0 flex';
-  actions.forEach((a,i)=>{
-    if(i>0){ const line=document.createElement('div'); line.style.cssText='width:1px;background:var(--line)'; rail.appendChild(line); }
-    const b=document.createElement('button');
-    b.title=a.title;
-    b.className='w-[58px] h-full grid place-items-center';
-    b.style.cssText='background:rgba(0,0,0,.07);color:var(--ink)';
-    b.innerHTML=a.icon; muteIconPointerEvents(b);
-    b.addEventListener('mousedown',e=>e.preventDefault());
-    b.addEventListener('click',e=>{ e.stopPropagation(); a.run(); close(); });
-    rail.appendChild(b);
-  });
-  row.appendChild(rail);
+  row.className='future-row bd group/h relative flex items-center border-[#d9d9d9]';
+  row.style.cssText='height:110px;background:var(--card);';
 
   const front=document.createElement('div');
-  front.className='absolute inset-0 flex items-center px-8';
-  front.style.cssText='background:var(--card); transition:transform .2s ease; will-change:transform;';
+  front.className='flex items-center px-8 pr-[88px] w-full h-full min-w-0';
   front.appendChild(contentEl);
   row.appendChild(front);
 
-  const openWidth=actions.length*58 + Math.max(0, actions.length-1);
-  let startX=0, startY=0, dx=0, dragging=false, locked=false, open=false;
-  const setX=x=>{ front.style.transform='translateX('+Math.max(-openWidth, Math.min(0,x))+'px)'; };
-  const close=()=>{ open=false; setX(0); };
-  const openRow=()=>{ open=true; setX(-openWidth); };
-  row.addEventListener('pointerdown',e=>{ startX=e.clientX; startY=e.clientY; dx=open?-openWidth:0; dragging=true; locked=false; front.style.transition='none'; row.setPointerCapture?.(e.pointerId); });
-  row.addEventListener('pointermove',e=>{
-    if(!dragging) return;
-    const tx=e.clientX-startX, ty=e.clientY-startY;
-    if(!locked && Math.abs(tx)>Math.abs(ty)) locked=true;
-    if(locked){ e.preventDefault(); setX(dx+tx); }
+  const rail=document.createElement('div');
+  rail.className='absolute right-6 top-1/2 -translate-y-1/2 flex flex-col items-center gap-3 opacity-0 group-hover/h:opacity-100 transition-opacity';
+  actions.forEach(a=>{
+    const b=document.createElement('button');
+    b.title=a.title;
+    b.className='size-[32px] grid place-items-center rounded-full ihover';
+    b.style.cssText='color:var(--ink-dim)';
+    b.innerHTML=a.icon; muteIconPointerEvents(b);
+    b.addEventListener('mousedown',e=>e.preventDefault());
+    b.addEventListener('click',e=>{ e.stopPropagation(); a.run(); });
+    rail.appendChild(b);
   });
-  row.addEventListener('pointerup',e=>{
-    if(!dragging) return;
-    dragging=false; front.style.transition='transform .2s ease';
-    const tx=e.clientX-startX;
-    (dx+tx < -openWidth*.45) ? openRow() : close();
-  });
-  row.addEventListener('pointercancel',()=>{ dragging=false; front.style.transition='transform .2s ease'; close(); });
+  row.appendChild(rail);
   return row;
 }
-
 // FUTURE: a manual holding pen. Parked tasks DON'T auto-return — you pull each
 // into today with + (capped) or drop it with ×. Rows are read-only (edit a task
 // after pulling it into today). Newest-parked on top; no date grouping.
@@ -2256,7 +2233,7 @@ function buildFutureRow(d, full){
   const actions=[];
   if(!full) actions.push({title:'Add to today', icon:PLUS, run:()=>addDeferredToToday(d.id)});
   actions.push({title:'Remove', icon:XICON, run:()=>deleteDeferred(d.id)});
-  return makeFutureSwipeRow(t, actions);
+  return makeFutureHoverRow(t, actions);
 }
 
 // A parked task that's been sent to Today: bold "Sent to today!" + the title in grey,
@@ -2271,7 +2248,7 @@ function buildSentFutureRow(d){
   ttl.className='truncate'; ttl.style.cssText='font-size:18px;color:var(--ink-dim)';
   ttl.textContent=d.text;
   lab.append(tag, ttl);
-  return makeFutureSwipeRow(lab, [{title:'Undo — back to Future', icon:UNDO, run:()=>unsendDeferred(d.id)}]);
+  return makeFutureHoverRow(lab, [{title:'Undo — back to Future', icon:UNDO, run:()=>unsendDeferred(d.id)}]);
 }
 // Tombstone the id — without it a synced peer's copy resurrects the row on the next pass.
 function deleteDeferred(id){ tombstone(id); state.deferred=state.deferred.filter(d=>d.id!==id); save(); render(); }

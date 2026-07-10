@@ -62,4 +62,18 @@ test('Future uses Today-style fixed rows without an extra heading', async ({ pag
   expect(layout.rowCount).toBe(2);
   expect(layout.heights).toEqual(['110px', '110px']);
   expect(layout.extraFutureHeadings).toBe(0);
+
+  const hoverActions = await page.evaluate(() => {
+    const row = document.querySelector('.future-row');
+    const rail = row?.querySelector('[title="Add to today"]')?.parentElement;
+    return {
+      add: !!row?.querySelector('[title="Add to today"]'),
+      remove: !!row?.querySelector('[title="Remove"]'),
+      hoverRail: !!rail?.className.includes('group-hover/h:opacity-100'),
+    };
+  });
+
+  expect(hoverActions.add).toBeTruthy();
+  expect(hoverActions.remove).toBeTruthy();
+  expect(hoverActions.hoverRail).toBeTruthy();
 });
