@@ -230,7 +230,12 @@ private struct HorizontalPanCatcher: UIViewRepresentable {
         init(_ parent: HorizontalPanCatcher) { self.parent = parent }
 
         @objc func pan(_ g: UIPanGestureRecognizer) {
-            let t = g.translation(in: g.view)
+            // Measure in the WINDOW, not g.view: the overlay slides with the row,
+            // so translations in its own space are fed back on themselves — the
+            // row lags the finger and modest pulls land under the open threshold
+            // and spring back ("bounces, needs two pulls", field report 2026-07-10).
+            let space = g.view?.window
+            let t = g.translation(in: space)
             switch g.state {
             case .changed: parent.onChanged(t.x)
             case .ended, .cancelled, .failed: parent.onEnded(t.x)
@@ -240,10 +245,15 @@ private struct HorizontalPanCatcher: UIViewRepresentable {
         @objc func tap(_ g: UITapGestureRecognizer) {
             if g.state == .ended { parent.onTap() }
         }
-        // Horizontal starts only — a vertical start FAILS here, so the ScrollView scrolls.
+        // Horizontal starts only — a vertical start FAILS here, so the ScrollView
+        // scrolls. Prefer the TRANSLATION accumulated during the hysteresis
+        // distance (stable) over instantaneous velocity (noisy on slow pulls);
+        // fall back to velocity only when translation is degenerate.
         func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
             guard let pan = g as? UIPanGestureRecognizer else { return true }
-            let v = pan.velocity(in: pan.view)
+            let t = pan.translation(in: pan.view?.window)
+            if abs(t.x) + abs(t.y) > 2 { return abs(t.x) > abs(t.y) }
+            let v = pan.velocity(in: pan.view?.window)
             return abs(v.x) > abs(v.y)
         }
         func gestureRecognizer(_ g: UIGestureRecognizer,

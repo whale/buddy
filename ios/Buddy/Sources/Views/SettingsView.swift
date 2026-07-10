@@ -61,13 +61,19 @@ struct SettingsView: View {
                                 Text("Sync with your Mac")
                                     .font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.sheetLabel)
                                 Spacer()
-                                Text(syncStatusText)
-                                    .font(.geist(15, .regular)).foregroundStyle(theme.sheetFaint)
+                                if !isConnected {   // linked: the status moves down beside Disconnect (Mac parity)
+                                    Text(syncStatusText)
+                                        .font(.geist(15, .regular)).foregroundStyle(theme.sheetFaint)
+                                }
                             }
                             if isConnected {
-                                syncPillRow {
+                                // Status sits RIGHT-ALIGNED beside Disconnect, sharing the
+                                // pill label's text baseline (field report 2026-07-10).
+                                HStack(alignment: .firstTextBaseline, spacing: 10) {
                                     pill("Disconnect") { disconnect() }
                                     Spacer()
+                                    Text(syncStatusText)
+                                        .font(.geist(14, .regular)).foregroundStyle(theme.sheetFaint)
                                 }
                             } else {
                                 syncPillRow {

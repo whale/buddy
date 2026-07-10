@@ -82,7 +82,7 @@ struct TodayView: View {
         ZStack {
             theme.screenBackground
                 .ignoresSafeArea()
-                .animation((showHistory || showSettings) ? nil : .easeInOut(duration: 0.2), value: activeCount)
+                .animation((showHistory || showSettings) ? nil : .easeInOut(duration: 0.2), value: activeCount)   // background tint only
 
             VStack(spacing: 8) {          // gap-2 between the cards
                 headerCard                // date only
@@ -115,6 +115,7 @@ struct TodayView: View {
                 // reacquire focus on real devices (visible cursor flicker, keyboard not lifting).
                 bottomBar                 // chrome icons + "Buddy" — bleeds off the bottom edge
                     .opacity(editingId == nil ? 1 : 0)
+                    .animation(.easeOut(duration: 0.15), value: editingId == nil)   // its own small fade, nothing else rides along
                     .allowsHitTesting(editingId == nil)
             }
             .padding(.horizontal, 8)     // even side gutter
@@ -124,7 +125,10 @@ struct TodayView: View {
             // The keyboard must NOT shrink the layout: a rising keyboard changed geo.size,
             // retriggered recomputeFit mid-add and made the whole list's font flash.
             .ignoresSafeArea(.keyboard, edges: .bottom)
-            .animation((showHistory || showSettings) ? nil : .easeInOut(duration: 0.2), value: activeCount)
+            // NO whole-column animation on activeCount: it crossfaded EVERY descendant
+            // (header text went blank, rows flickered) exactly while the add row was
+            // inserting + the keyboard was rising — the "shaky add" (field report
+            // 2026-07-10, frame a0590). Escalation colors SNAP, like the Mac.
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
                 if let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
                     keyboardTop = frame.minY
@@ -321,7 +325,11 @@ struct TodayView: View {
                     content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
             }
-            .animation((showHistory || showSettings) ? nil : .easeOut(duration: 0.3), value: store.today.items)
+            // No blanket .animation(value: items): it re-animated EVERY subtree change
+            // (row heights, text reflow, colors) on every mutation — including sync
+            // adopts and the add path, where it stacked on the keyboard + lift and
+            // read as shaking. Motion comes ONLY from the mutation sites' explicit
+            // withAnimation, so each interaction has exactly one driver.
             .onAppear { recomputeFit(geo.size) }
             .onChange(of: store.today.items) { _, _ in recomputeFit(geo.size) }
             .onChange(of: geo.size) { _, _ in recomputeFit(geo.size) }
@@ -458,7 +466,12 @@ struct TodayView: View {
     }
 
     private func addTask() {
-        let newId = withAnimation(.easeOut(duration: 0.28)) { store.addTask() }
+        // Calm add: the list re-lays-out INSTANTLY (rows snap to their new share,
+        // like the Mac render), and only the new row fades in via its .transition.
+        // The keyboard + scoped lift are then the only things in motion.
+        var tx = Transaction(animation: .easeOut(duration: 0.16))
+        tx.disablesAnimations = false
+        let newId = withTransaction(tx) { store.addTask() }
         if let newId {
             editText = ""
             editingId = newId
