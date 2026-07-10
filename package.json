@@ -1,9 +1,9 @@
 {
   "name": "buddy",
-  "version": "0.3.28",
+  "version": "0.3.29",
   "private": true,
   "license": "MIT",
-  "description": "Buddy \u2014 a calm day companion. Web app (index.html) wrapped in a Tauri v2 Mac menu-bar shell.",
+  "description": "Buddy — a calm day companion. Web app (index.html) wrapped in a Tauri v2 Mac menu-bar shell.",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
