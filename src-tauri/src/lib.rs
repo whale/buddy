@@ -155,6 +155,10 @@ fn open_morning_window(app: AppHandle) {
         make_standard_morning_window(&win);
         let _ = win.show();
         let _ = win.set_focus();
+        // The webview keeps whatever it last showed — without this the re-shown
+        // window is BLANK (the planner overlay hid itself when the day was done).
+        // Opening the window is an explicit "show me the planner" intent.
+        let _ = app.emit_to("morning", "buddy://morning-open", ());
         return;
     }
 

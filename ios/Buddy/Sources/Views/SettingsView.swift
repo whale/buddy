@@ -160,9 +160,14 @@ struct SettingsView: View {
 
     private var syncStatusText: String {
         guard let sync else { return "Off" }
-        if sync.currentConfig.enabled, sync.lastError != nil, sync.lastSyncedAt == nil { return "Error" }
-        if let t = sync.lastSyncedAt { return "Synced \(Self.hm.string(from: t))" }
-        if sync.currentConfig.isSyncable { return "Connected" }
+        // Bucket id prefix (the Mac shows the same 6 chars): two devices showing
+        // the same suffix are provably on the same sync bucket — split-brain
+        // pairings sync "fine" but never see each other (field report 2026-07-10).
+        let bucket = sync.currentConfig.isSyncable
+            ? " · " + String(SyncIdentity.ownerId(for: sync.currentConfig.syncKey).prefix(6)) : ""
+        if sync.currentConfig.enabled, sync.lastError != nil, sync.lastSyncedAt == nil { return "Error" + bucket }
+        if let t = sync.lastSyncedAt { return "Synced \(Self.hm.string(from: t))" + bucket }
+        if sync.currentConfig.isSyncable { return "Connected" + bucket }
         return "Not connected"
     }
     private static let hm: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()

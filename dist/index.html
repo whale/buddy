@@ -557,6 +557,7 @@ const touch   = it => { if(it) it.v=(it.v|0)+1; };
 // later stale push from another device can't bring the deleted task back.
 const tombstone = id => { if(id){ (state.tombstones||(state.tombstones={}))[id]=Date.now(); } };
 let editingId = null;
+let futureCursor = -1;   // Tab-cursor over the Future panel's rows (−1 = none); reset when the panel opens
 let cursor = 0;                  // keyboard cursor index (0..items.length, last = Add row)
 let kbActive = false;           // true once a key has been used → cursor ring shows
 const SOFT_CAP = 5, HARD_CAP = 6;   // escalation colours all live in the CSS tokens (--ink/--red)
@@ -1321,6 +1322,7 @@ async function initSync(){
   if(!cfg){ syncStore=null; syncOwnerId=null; return false; }
   syncStore   = makeSupabaseCASStore(cfg.url, cfg.key, NATIVE ? 'mac' : 'web');
   syncOwnerId = await deriveOwnerId(cfg.syncKey);   // M2: hash, not the raw key
+  diag('sync-owner', {bucket: syncOwnerId.slice(0,8)});   // which bucket THIS device talks to (split-brain forensics)
   return true;
 }
 async function setSync(cfg){                        // Settings/pairing writes config here
@@ -1373,11 +1375,15 @@ function renderSyncUI(){
   const st=$('#syncStatus'); if(!st) return;
   let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
   const cfg=readSyncCfg();
-  // status pill
+  // status pill — includes the BUCKET id prefix: two devices showing the same
+  // 6 characters are provably on the same sync bucket (split-brain pairings
+  // sync "fine" but never see each other — field report 2026-07-10; run
+  // `pnpm sync:doctor` to diagnose from the outside).
+  const bucket = syncOwnerId ? ' · '+syncOwnerId.slice(0,6) : '';
   if(!cfg) st.textContent='Off';
-  else if(syncLastError) st.textContent='Error';
-  else if(syncLastAt){ const d=new Date(syncLastAt); st.textContent='Synced '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
-  else st.textContent='Connected';
+  else if(syncLastError) st.textContent='Error'+bucket;
+  else if(syncLastAt){ const d=new Date(syncLastAt); st.textContent='Synced '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+bucket; }
+  else st.textContent='Connected'+bucket;
   // which of the three blocks is visible
   const inPairing = !!cfg && syncShowQR && isValidSyncKey(raw.syncKey);
   const inSetup   = !cfg;
@@ -2007,7 +2013,18 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     // blur() clears editingId synchronously, so without it this same keypress
     // bubbles to the global key layer, which then reads Enter as "cycle the
     // cursored task" and marks it done (field reports 2026-07-10 ×2).
-    txt.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); e.stopPropagation(); txt.blur(); } });
+    // Tab commits AND hops to the next active row's edit (Shift+Tab = previous).
+    txt.addEventListener('keydown',e=>{
+      if(e.key==='Enter'){ e.preventDefault(); e.stopPropagation(); txt.blur(); return; }
+      if(e.key==='Tab'){
+        e.preventDefault(); e.stopPropagation();
+        const act=state.items.filter(x=>x.state!=='done');
+        const at=act.findIndex(x=>x.id===it.id);
+        const next=act[(at+(e.shiftKey?-1:1)+act.length)%act.length];
+        txt.blur();                                        // commit (may delete an emptied row)
+        if(next && next.id!==it.id) requestAnimationFrame(()=>startEdit(next.id));
+      }
+    });
     // v-bump compares against the text at EDIT START, not `it.text` — the input
     // listener keeps it.text live during typing, so comparing against it always
     // said "unchanged" and the finished edit kept its old v (which let a mid-edit
@@ -2249,9 +2266,11 @@ function renderFuture(){
   const full = activeCount()>=HARD_CAP;            // today maxed → hide every +
   const wrap=document.createElement('div');
   wrap.className='bd';
+  if(futureCursor>=state.deferred.length) futureCursor=-1;   // clamp after removals
   state.deferred.slice().reverse().forEach((d,i)=>{
     const row=d.sent ? buildSentFutureRow(d) : buildFutureRow(d, full);
     if(i>0) row.classList.add('border-t');
+    if(i===futureCursor) row.classList.add('cursor-ring');   // Tab keyboard cursor
     wrap.appendChild(row);
   });
   histBody.appendChild(wrap);
@@ -2660,7 +2679,7 @@ $('#histBtn')?.addEventListener('click', e=>{ e.stopPropagation();
   const wasSettings=settingsOpen;
   if(settingsOpen) closeSettings();
   state.histOpen = wasSettings ? true : !state.histOpen;   // from settings → always show calendar
-  if(state.histOpen) pastDaysShown=PAST_PAGE;              // fresh open → back to one week
+  if(state.histOpen){ pastDaysShown=PAST_PAGE; futureCursor=-1; }   // fresh open → one week, no Tab cursor
   render(); if(state.histOpen) histScroll.scrollTop=0;
 });
 // keep the toggle honest if the user flips system reduced-motion live
@@ -2809,7 +2828,23 @@ document.addEventListener('keydown', e=>{
   // Only act when the drawer is open (visible).
   if(drawer.classList.contains('translate-x-full')) return;
 
+  // FUTURE panel: Tab / Shift+Tab walk the parked rows (cursor-ring), Enter
+  // sends the cursored row to today (same as its + action, cap-respecting).
+  if(state.histOpen && state.histTab==='future'){
+    const rows=(state.deferred||[]).slice().reverse();   // displayed order (newest first)
+    if(e.key==='Tab' && rows.length){
+      e.preventDefault();
+      futureCursor=((futureCursor+(e.shiftKey?-1:1))%rows.length+rows.length)%rows.length;
+      render(); return;
+    }
+    if(e.key==='Enter' && futureCursor>=0 && rows[futureCursor] && !rows[futureCursor].sent){
+      e.preventDefault(); addDeferredToToday(rows[futureCursor].id); return;
+    }
+    if(e.key==='Escape'){ e.preventDefault(); state.histOpen=false; render(); return; }
+    return;   // other nav keys act on the (hidden) today list — swallow them
+  }
   switch(e.key){
+    case 'Tab':       e.preventDefault(); kbActive=true; moveCursor(e.shiftKey?-1:+1); break;
     case 'ArrowDown': e.preventDefault(); moveCursor(+1); break;
     case 'ArrowUp':   e.preventDefault(); moveCursor(-1); break;
     case 'Enter': {
@@ -2976,6 +3011,14 @@ window.__buddy = {
       ok('edit: Enter commits without creating a new task or completing it',
          state.items.length===nBeforeEnter && editingId===null && s1After && s1After.state!=='done',
          'len '+nBeforeEnter+'→'+state.items.length+' editing='+editingId+' s1='+(s1After&&s1After.state));
+      if(document.activeElement&&document.activeElement.blur) document.activeElement.blur();
+      // Tab in an edit commits and hops to the NEXT active row's edit.
+      startEdit('s1');
+      document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+      ok('edit: Tab commits and edits the next active row',
+         editingId==='s2' && document.activeElement && document.activeElement.dataset && document.activeElement.dataset.tid==='s2',
+         'editing='+editingId);
       if(document.activeElement&&document.activeElement.blur) document.activeElement.blur();
       const before=activeCount();
       const vBefore=(state.items.find(i=>i.id==='s2')||{}).v||0;
@@ -3561,22 +3604,32 @@ window.addEventListener('beforeunload', diagFlush);
 try{ localStorage.removeItem('buddy.morningWin'); }catch(_){}
 if(NATIVE){
   const ev=window.__TAURI__.event;
-  ev.listen('buddy://reveal', ()=>{ if(morningUp()||state.pinned) return; clearTimeout(closeTimer); openDrawer(); });
-  ev.listen('buddy://hide',   ()=>{ if(morningUp()||state.pinned) return; clearTimeout(openTimer); closeDrawer(); });
-  // ⌘⌥⌃M: raise, then show/hide morning. Hiding uses leaveMorningToDrawer (NOT skip)
-  // so a peek-and-close does NOT mark the day planned — the auto-morning can still fire.
-  ev.listen('buddy://morning-toggle', ()=> showMorning());   // ⌘⌥⌃M ALWAYS brings the morning planner forward (not a hide-toggle)
-  ev.listen('buddy://morning-closed', async ()=>{ if(IS_MORNING_WINDOW) return;
-    await bootReconcileFile();
-    settleNative();
-  });
-  ev.listen('buddy://toggle', ()=>{ if(morningUp()) return;
-    drawer.classList.contains('translate-x-full') ? openDrawer() : closeDrawer(); });
-  ev.listen('buddy://report-bug', ()=> reportBug());
-  // Tray "Settings…": reveal the drawer (if hidden) and open the settings sheet.
-  ev.listen('buddy://settings', ()=>{ if(morningUp()) return;
-    if(drawer.classList.contains('translate-x-full')) openDrawer();
-    if(!settingsOpen) openSettings(); });
+  // DRAWER intents are for the MAIN window only. Tauri broadcasts reach every
+  // window, and the morning window once obeyed buddy://hide → nativeFit('sliver')
+  // → clamped to min-width 432 → a blank ghost window parked behind the drawer
+  // (field report 2026-07-10). The morning window listens ONLY for morning-open.
+  if(!IS_MORNING_WINDOW){
+    ev.listen('buddy://reveal', ()=>{ if(morningUp()||state.pinned) return; clearTimeout(closeTimer); openDrawer(); });
+    ev.listen('buddy://hide',   ()=>{ if(morningUp()||state.pinned) return; clearTimeout(openTimer); closeDrawer(); });
+    // ⌘⌥⌃M: raise, then show/hide morning. Hiding uses leaveMorningToDrawer (NOT skip)
+    // so a peek-and-close does NOT mark the day planned — the auto-morning can still fire.
+    ev.listen('buddy://morning-toggle', ()=> showMorning());   // ⌘⌥⌃M ALWAYS brings the morning planner forward (not a hide-toggle)
+    ev.listen('buddy://morning-closed', async ()=>{
+      await bootReconcileFile();
+      settleNative();
+    });
+    ev.listen('buddy://toggle', ()=>{ if(morningUp()) return;
+      drawer.classList.contains('translate-x-full') ? openDrawer() : closeDrawer(); });
+    ev.listen('buddy://report-bug', ()=> reportBug());
+    // Tray "Settings…": reveal the drawer (if hidden) and open the settings sheet.
+    ev.listen('buddy://settings', ()=>{ if(morningUp()) return;
+      if(drawer.classList.contains('translate-x-full')) openDrawer();
+      if(!settingsOpen) openSettings(); });
+  } else {
+    // Re-shown morning window: Rust emits this after win.show() — render the
+    // planner again (the webview kept whatever it last displayed).
+    ev.listen('buddy://morning-open', ()=>{ diag('morning-open',{}); showMorning(); });
+  }
 }
 /* ---- Report a bug (tray menu) -------------------------------------------------
    Capture a screenshot of ONLY Buddy's own UI (the webview DOM via html2canvas —
@@ -3642,6 +3695,10 @@ const DRAWER_BOTTOM_GAP=12;
 async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
   T('nativeFit('+mode+')');
   if(!NATIVE) return;
+  // The morning window sizes itself via fitMorningWindow ONLY. A stray drawer
+  // fit here (leaked broadcast, shared code path) is how the ghost 432×full
+  // window happened — refuse defensively.
+  if(IS_MORNING_WINDOW) return;
   try{
     const W=window.__TAURI__.window, D=window.__TAURI__.dpi||W;
     const win=W.getCurrentWindow(), mon=await W.currentMonitor();
@@ -3698,7 +3755,12 @@ function bootFinish(recovered){
   T('boot done='+state.today.morningDone+' n='+state.today.items.length+' rolled='+rolled+' recovered='+recovered);
   diag('boot', {items:state.today.items.length, hist:state.history.length, deferred:(state.deferred||[]).length, rolled:!!rolled, recovered:!!recovered});
   if(IS_MORNING_WINDOW){
-    if(!state.today.morningDone) showMorning(); else hideNativeMorningWindow();
+    // This window only ever EXISTS because something asked for the planner
+    // (day-start showMorning or the tray/shortcut). Auto-hiding here when the
+    // day was already planned made tray-Morning flash-then-vanish and left a
+    // blank window behind (field report 2026-07-10). Always show the planner.
+    diag('morning-window-boot', {done:!!state.today.morningDone});
+    showMorning();
     writeNow();
     return;
   }
