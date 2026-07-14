@@ -179,9 +179,15 @@ struct SettingsView: View {
         // BACKEND-AWARE display id (sha256(url|syncKey), Mac parity): same 6 chars on
         // two devices now proves same bucket AND same backend — the raw syncKey hash
         // showed identical ids on split-brained pairings once two backends existed.
+        // The url is NORMALIZED (trailing slashes, case) exactly like the Mac's
+        // syncDisplayId: the two devices' copies come from different provisioning
+        // paths (config.js vs fastlane env), and one stray "/" would make a healthy
+        // pairing show two different ids.
         let live = sync.currentConfig.resolved
+        var normUrl = live.backendUrl.lowercased()
+        while normUrl.hasSuffix("/") { normUrl.removeLast() }
         let bucket = live.isSyncable
-            ? " · " + String(SyncIdentity.ownerId(for: live.backendUrl + "|" + live.syncKey).prefix(6)) : ""
+            ? " · " + String(SyncIdentity.ownerId(for: normUrl + "|" + live.syncKey).prefix(6)) : ""
         if sync.currentConfig.enabled, sync.lastError != nil, sync.lastSyncedAt == nil { return "Error" + bucket }
         if let t = sync.lastSyncedAt { return "Synced \(Self.hm.string(from: t))" + bucket }
         if sync.currentConfig.isSyncable { return "Connected" + bucket }

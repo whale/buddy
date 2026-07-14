@@ -57,6 +57,33 @@ final class BlobCryptoTests: XCTestCase {
         XCTAssertFalse(BlobCrypto.isEnvelope("string"))
     }
 
+    // MIXED-VERSION WINDOW: a pre-E2E peer pulls an encrypted row, tolerant-decodes
+    // it as empty-with-extras, merges its plaintext in, and pushes a HYBRID —
+    // plaintext today/history alongside the stale {enc,iv,ct}. That must read as
+    // PLAINTEXT (the stale ct predates the peer's merge), and the envelope keys
+    // must never ride SyncWire's extras back onto the wire.
+    func testHybridBlobReadsAsPlaintextAndStripsEnvelopeKeys() throws {
+        let hybrid: [String: Any] = [
+            "enc": 1, "iv": "AAAA", "ct": "BBBB",
+            "version": 1, "savedAt": 1_750_000_000_000,
+            "today": ["date": "2026-07-14", "morningDone": true, "items": [
+                ["id": "ph1", "text": "PHONE EDIT", "state": "neutral", "v": 2]
+            ]],
+            "history": [], "deferred": [], "tombstones": [:]
+        ]
+        XCTAssertFalse(BlobCrypto.isEnvelope(hybrid), "plaintext markers → not an envelope")
+        XCTAssertTrue(BlobCrypto.isHybrid(hybrid))
+        // SyncWire decode keeps the plaintext and DROPS the envelope keys from extras.
+        let wire = try JSONDecoder().decode(SyncWire.self,
+            from: JSONSerialization.data(withJSONObject: hybrid))
+        XCTAssertEqual(wire.today?.items.first?.text, "PHONE EDIT")
+        XCTAssertNil(wire.extras["enc"]); XCTAssertNil(wire.extras["iv"]); XCTAssertNil(wire.extras["ct"])
+        // Re-encoding never re-emits them.
+        let out = try JSONSerialization.jsonObject(with: JSONEncoder().encode(wire)) as! [String: Any]
+        XCTAssertNil(out["enc"]); XCTAssertNil(out["ct"])
+        XCTAssertNotNil(out["today"])
+    }
+
     func testMalformedSyncKeyYieldsNoKey() {
         XCTAssertNil(BlobCrypto.deriveKey(syncKey: ""))
         XCTAssertNil(BlobCrypto.deriveKey(syncKey: "short"))

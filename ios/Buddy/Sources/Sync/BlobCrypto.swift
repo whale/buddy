@@ -60,9 +60,21 @@ enum BlobCrypto {
         return try AES.GCM.open(box, using: key)
     }
 
-    /// Is this wire value an encryption envelope (vs a legacy plaintext blob)?
+    /// Is this wire value a PURE encryption envelope (vs plaintext or a hybrid)?
+    /// A pre-E2E peer that pulled an encrypted row echoes {enc,iv,ct} back through
+    /// its extras bag alongside its own PLAINTEXT state (hybrid blob) — the stale
+    /// ct there predates that peer's merge, so a blob with plaintext markers must
+    /// be read as plaintext (see isHybrid + SupabaseCASStore.decode).
     static func isEnvelope(_ any: Any?) -> Bool {
         guard let d = any as? [String: Any] else { return false }
         return (d["enc"] as? Int) == 1 && d["iv"] is String && d["ct"] is String
+            && d["today"] == nil && d["savedAt"] == nil
+    }
+
+    /// Envelope keys riding beside plaintext (the mixed-version hybrid).
+    static func isHybrid(_ any: Any?) -> Bool {
+        guard let d = any as? [String: Any] else { return false }
+        return (d["enc"] as? Int) == 1 && d["ct"] is String
+            && (d["today"] != nil || d["savedAt"] != nil)
     }
 }
