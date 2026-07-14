@@ -96,8 +96,17 @@ source "$HOME/.cargo/env"
 set -a && source .env && set +a                                  # Apple notarization creds
 export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/buddy-updater.key)"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+# HOSTED build: inject the Buddy Cloud config (gitignored; values in ~/.config/secrets.env
+# as BUDDY_CLOUD_URL / BUDDY_CLOUD_ANON_KEY). Skip this line for an open-edition build.
+printf 'window.BUDDY_CLOUD = { url: "%s", anon: "%s" };\n' "$BUDDY_CLOUD_URL" "$BUDDY_CLOUD_ANON_KEY" > dist/config.js
 pnpm tauri build --target universal-apple-darwin
+rm dist/config.js                                                # never leave it in the working tree
 ```
+
+⚠️ The public GitHub release ships the HOSTED build (config inside): that's the
+product. The open edition isn't a separate artifact — it's what anyone gets by
+building from source without the config. iOS: `fastlane beta` injects the same
+values into `BuddyCloud.swift` from the env automatically (and restores the file).
 
 This produces, under `src-tauri/target/universal-apple-darwin/release/bundle/`:
 - `dmg/Buddy_<ver>_universal.dmg` — the installer (manual download).

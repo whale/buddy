@@ -1,0 +1,74 @@
+# Buddy Cloud health alarm — the automatic guard against quota abuse.
+#
+# The anon key ships in the app by design, so someone COULD script bucket creation
+# (per-IP throttled, size-capped — see supabase/migrations/*_buddy_hardening.sql).
+# This cron is the backstop: once a day it counts rows and measures the table, and
+# opens a GitHub issue if either crosses the ceiling. An issue → a push notification —
+# no weekly ritual to remember (that ritual would never happen; be honest).
+#
+# Secrets (repo → Settings → Secrets → Actions):
+#   BUDDY_CLOUD_URL          — the Supabase project URL (same one the app ships)
+#   SUPABASE_SERVICE_ROLE    — service_role key. CI-ONLY. NEVER in the app or dist/.
+# Variables (repo → Settings → Variables → Actions, optional):
+#   CLOUD_MAX_ROWS   — row ceiling (default 500). Rows are the abuse signal:
+#                      blob size is already capped server-side (256 KB/push).
+name: Cloud health
+
+on:
+  schedule:
+    - cron: "17 9 * * *"   # daily 09:17 UTC (odd minute — kinder to GitHub's cron load)
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Count rows + table size
+        id: stats
+        env:
+          URL: ${{ secrets.BUDDY_CLOUD_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+        shell: bash
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "No cloud secrets configured — skipping (open-source fork or setup incomplete)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Row count via PostgREST count header (service role bypasses RLS; CI-only).
+          ROWS=$(curl -sf "$URL/rest/v1/buddy_state?select=owner_id" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            -H "Prefer: count=exact" -H "Range: 0-0" -D - -o /dev/null \
+            | tr -d '\r' | awk -F'/' 'tolower($0) ~ /^content-range/ {print $2}')
+          # Rows are the honest abuse signal: blob size is already capped server-side
+          # (256 KB in buddy_push), so runaway growth can only be runaway ROWS.
+          echo "rows=${ROWS:-0}" >> "$GITHUB_OUTPUT"
+          echo "Row count: ${ROWS:-0}"
+
+      - name: Open an issue if over the ceiling
+        if: steps.stats.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ROWS: ${{ steps.stats.outputs.rows }}
+          MAX_ROWS: ${{ vars.CLOUD_MAX_ROWS || 500 }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          if [ "${ROWS:-0}" -le "${MAX_ROWS}" ]; then
+            echo "OK: $ROWS rows (ceiling $MAX_ROWS)."; exit 0
+          fi
+          # Idempotent: one open alarm at a time.
+          EXISTING=$(gh issue list -R "$REPO" --label cloud-alarm --state open --json number --jq 'length')
+          if [ "$EXISTING" -gt 0 ]; then
+            echo "Alarm already open — not duplicating."; exit 0
+          fi
+          gh label create cloud-alarm -R "$REPO" --color D93F0B --force >/dev/null 2>&1 || true
+          BODY="The nightly health check counted **$ROWS** rows in \`buddy_state\` — over the \`CLOUD_MAX_ROWS\` ceiling of $MAX_ROWS."
+          BODY="$BODY"$'\n\n'"If growth is organic: raise the \`CLOUD_MAX_ROWS\` repo variable and celebrate."
+          BODY="$BODY"$'\n'"If it's abuse: check \`buddy_create_log\` for the offending IPs, tighten the per-IP throttle, and rotate the publishable key (Settings → API Keys) — paired apps re-read it from config on update."
+          BODY="$BODY"$'\n\n'"_Automated by .github/workflows/cloud-health.yml._"
+          gh issue create -R "$REPO" --label cloud-alarm \
+            --title "Cloud health: $ROWS sync buckets (ceiling $MAX_ROWS)" \
+            --body "$BODY"
