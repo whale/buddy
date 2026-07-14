@@ -52,6 +52,10 @@ targets:
         # Optional: set to the deployed /api/bug-report endpoint so iOS users can
         # file private GitHub issues without needing a GitHub account. Blank = email fallback.
         BuddyBugReportEndpoint: ""
+        # Background refresh: periodic sync while the app is closed (BGAppRefreshTask).
+        # iOS chooses the actual times; this narrows staleness, it doesn't eliminate it.
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [fyi.whale.buddy.refresh]
         UILaunchScreen:
           UIColorName: ""
         UIRequiredDeviceCapabilities:

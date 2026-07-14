@@ -30,6 +30,8 @@ The released app pairs with **Buddy for iPhone** (TestFlight, App Store soon): o
 
 **Privacy, plainly:** your tasks are **encrypted on your device before they sync** — the sync service stores scrambled data it cannot read, and we couldn't peek if we wanted to. The only things visible server-side are counts (how many tasks, how often you sync), never words. There's an **Erase cloud data** button in Settings that deletes your synced copy from the server (unlink your iPhone first — a still-paired device re-uploads its copy on its next sync). One honest caveat: sync is a *convenience copy*, not a backup — if you ever lose every device at once, your history starts fresh.
 
+**When does the phone sync?** Whenever the app is open, live (about every 1.5 seconds), plus periodic background refreshes while it's closed — iOS decides those times (typically a few per day), so the surest way to catch up instantly is simply opening the app.
+
 ### Updates are automatic
 Buddy checks for new versions on its own (at launch, every few hours, and when it regains focus). When one's ready, a banner slides in offering **Install & Relaunch** — one click and you're up to date.
 
