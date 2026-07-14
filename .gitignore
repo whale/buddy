@@ -35,3 +35,7 @@ ios/fastlane/README.md
 # App Store Connect private keys — never commit
 *.p8
 AuthKey_*
+
+# Buddy Cloud config — present ONLY in hosted builds (CI injects it from a secret).
+# A clone runs local-only without it: that IS the open-source edition.
+dist/config.js

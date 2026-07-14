@@ -6,6 +6,11 @@
 <title>Buddy — prototype</title>
 <script src="assets/vendor/tailwindcss.js"></script>
 <script src="vendor/qrcode.js"></script>   <!-- QR render for iPhone pairing (davidshimjs/qrcodejs, MIT) -->
+<!-- Buddy Cloud config — gitignored, present ONLY in hosted builds (CI injects it).
+     Defines window.BUDDY_CLOUD = { url, anon }. A clone of this repo has no such file
+     (the 404 is silent and harmless) and runs local-only with self-host Settings —
+     that IS the open-source edition. The Ghost hostSettings pattern. -->
+<script src="config.js"></script>
 <style>
   /* Native (Tauri) mode: hide the web-demo scaffolding so only Buddy shows;
      the real macOS desktop sits behind the transparent window. */
@@ -419,7 +424,15 @@
             <span class="text-[18px] text-black/60 tracking-[-0.36px]">Sync with iPhone</span>
           </div>
 
-          <!-- STATE 1: not paired — backend fields + Connect -->
+          <!-- STATE 1a: not paired, HOSTED build (window.BUDDY_CLOUD present) — one
+               button, no server fields. Self-host tooling is the open-source
+               edition's UI, never shown here (founder decision 2026-07-14). -->
+          <div id="syncSetupCloud" class="hidden my-3">
+            <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Tasks are encrypted on this Mac before they sync — Buddy can’t read them.</p>
+            <button id="syncConnectCloudBtn" class="pressable tap-target self-start inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Connect &amp; show QR</button>
+          </div>
+
+          <!-- STATE 1b: not paired, OPEN-SOURCE build — backend fields + Connect -->
           <div id="syncSetup" class="hidden flex flex-col gap-2 my-3">
             <input id="syncUrl" placeholder="Backend URL" spellcheck="false" autocapitalize="off"
               style="color:#000;-webkit-text-fill-color:#000;color-scheme:light"
@@ -444,9 +457,12 @@
                the pills — field report 2026-07-10). -->
           <div id="syncLinked" class="hidden my-3">
             <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Your iPhone is linked — changes sync automatically.</p>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               <button id="syncUnlinkBtn" class="pressable tap-target inline-flex items-center whitespace-nowrap px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Unlink iPhone</button>
               <button id="syncResyncBtn" class="pressable tap-target inline-flex items-center whitespace-nowrap px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Resync</button>
+              <!-- Two-tap confirm (NEVER a browser confirm() — it wedges the webview).
+                   First tap arms, second tap erases the cloud row + unlinks. -->
+              <button id="syncEraseBtn" class="pressable tap-target inline-flex items-center whitespace-nowrap px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Erase cloud data</button>
             </div>
             <div id="syncStatus" class="mt-2 text-[14px] text-black/35">Off</div>
           </div>
@@ -1269,6 +1285,7 @@ function makeFakeCASStore(seed){
       if(expected === cur.version){ cur.blob=blob; cur.version+=1; return { ok:true, version:cur.version }; }
       return { ok:false, blob:cur.blob, version:cur.version };
     },
+    async erase(key){ const had=!!rows[key]; delete rows[key]; return had; },
     _rows(){ return rows; },
   };
 }
@@ -1311,6 +1328,8 @@ function makeSupabaseCASStore(baseUrl, anonKey, device){
       const r = row0(rows);
       return r ? { ok:r.ok, blob:r.blob, version:r.version } : { ok:false, blob:null, version:0 };
     },
+    // "Erase my cloud data" — deletes the one row this key addresses (buddy_delete RPC).
+    async erase(key){ return rpc('buddy_delete', { p_key:key }); },
   };
 }
 
@@ -1323,7 +1342,7 @@ function makeSupabaseCASStore(baseUrl, anonKey, device){
    drive the Settings status (never stamp a success time on failure). */
 const SYNC_CFG_KEY = 'buddy.sync.v1';
 const SYNC_DEBOUNCE_MS = 3000;
-let syncStore=null, syncOwnerId=null, syncing=false, syncPending=false,
+let syncStore=null, syncOwnerId=null, syncDisplayId=null, syncing=false, syncPending=false,
     syncLastAt=0, syncLastError=null, syncDebounce=null;
 // True while applyWire is adopting a pulled snapshot. render() ends with save(), and a
 // sync adoption calls render() — without this guard that save() re-arms scheduleSync,
@@ -1331,6 +1350,14 @@ let syncStore=null, syncOwnerId=null, syncing=false, syncPending=false,
 let applyingRemote=false;
 
 function isValidSyncKey(k){ return typeof k==='string' && k.length===43 && /^[A-Za-z0-9_-]+$/.test(k); }
+/* Buddy Cloud — the hosted backend, defined by the gitignored config.js (hosted builds
+   only). Its url + anon key are IDENTIFIERS, not secrets (Supabase: publishable keys are
+   safe in shipped clients); everything privileged is enforced server-side. Absent →
+   open-source edition → self-host fields. */
+function buddyCloud(){
+  const c = window.BUDDY_CLOUD;
+  return (c && typeof c.url==='string' && c.url && typeof c.anon==='string' && c.anon) ? c : null;
+}
 function readSyncCfg(){
   try{ const o=JSON.parse(lsGet(SYNC_CFG_KEY)||'null');
        return (o && o.enabled && o.url && o.key && isValidSyncKey(o.syncKey)) ? o : null; }
@@ -1339,11 +1366,21 @@ function readSyncCfg(){
 function syncConfigured(){ return !!readSyncCfg(); }
 async function initSync(){
   const cfg = readSyncCfg();
-  if(!cfg){ syncStore=null; syncOwnerId=null; return false; }
+  if(!cfg){ syncStore=null; syncOwnerId=null; syncDisplayId=null; return false; }
+  // Cloud configs re-read url/key from config.js on every init — this is what makes
+  // the hosted publishable key ROTATABLE without re-pairing (the stored values are
+  // just a snapshot from Connect day; config.js is the live truth).
+  const cloud = cfg.cloud ? buddyCloud() : null;
+  const url = cloud ? cloud.url : cfg.url, anon = cloud ? cloud.anon : cfg.key;
   // E2E: everything past this line speaks ciphertext; the raw store is never held.
-  syncStore   = makeEncryptedStore(makeSupabaseCASStore(cfg.url, cfg.key, NATIVE ? 'mac' : 'web'),
+  syncStore   = makeEncryptedStore(makeSupabaseCASStore(url, anon, NATIVE ? 'mac' : 'web'),
                                    await deriveBlobKey(cfg.syncKey));
   syncOwnerId = await deriveOwnerId(cfg.syncKey);   // M2: hash, not the raw key
+  // Display id is BACKEND-AWARE (url|syncKey): two devices showing the same 6 chars
+  // are on the same bucket AND the same backend. The plain syncKey hash lied the
+  // moment two backends could exist — Mac on Cloud + phone on old backend showed
+  // identical ids while split-brained.
+  syncDisplayId = (await deriveOwnerId(url + '|' + cfg.syncKey)).slice(0,6);
   diag('sync-owner', {bucket: syncOwnerId.slice(0,8)});   // which bucket THIS device talks to (split-brain forensics)
   return true;
 }
@@ -1401,24 +1438,33 @@ function renderSyncUI(){
   // 6 characters are provably on the same sync bucket (split-brain pairings
   // sync "fine" but never see each other — field report 2026-07-10; run
   // `pnpm sync:doctor` to diagnose from the outside).
-  const bucket = syncOwnerId ? ' · '+syncOwnerId.slice(0,6) : '';
+  // syncDisplayId is BACKEND-AWARE (sha256(url|syncKey)) — same 6 chars on two
+  // devices now proves same bucket AND same backend (the raw syncKey hash certified
+  // split brains once a second backend existed).
+  const bucket = syncDisplayId ? ' · '+syncDisplayId : '';
   if(!cfg) st.textContent='Off';
   else if(syncLastError) st.textContent='Error'+bucket;
   else if(syncLastAt){ const d=new Date(syncLastAt); st.textContent='Synced '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+bucket; }
   else st.textContent='Connected'+bucket;
-  // which of the three blocks is visible
+  // which of the blocks is visible — setup has a HOSTED variant (one button, no
+  // server fields) and an OPEN-SOURCE variant (url+key fields), keyed off config.js
   const inPairing = !!cfg && syncShowQR && isValidSyncKey(raw.syncKey);
   const inSetup   = !cfg;
   const inLinked  = !!cfg && !inPairing;
-  const setup=$('#syncSetup'), pairing=$('#syncPairing'), linked=$('#syncLinked');
-  setup   && setup.classList.toggle('hidden', !inSetup);
-  pairing && pairing.classList.toggle('hidden', !inPairing);
-  linked  && linked.classList.toggle('hidden', !inLinked);
-  if(inSetup){ if($('#syncUrl')) $('#syncUrl').value=raw.url||''; if($('#syncAnon')) $('#syncAnon').value=raw.key||''; }
+  const cloud = buddyCloud();
+  const setupCloud=$('#syncSetupCloud'), setup=$('#syncSetup'), pairing=$('#syncPairing'), linked=$('#syncLinked');
+  setupCloud && setupCloud.classList.toggle('hidden', !(inSetup && cloud));
+  setup      && setup.classList.toggle('hidden', !(inSetup && !cloud));
+  pairing    && pairing.classList.toggle('hidden', !inPairing);
+  linked     && linked.classList.toggle('hidden', !inLinked);
+  if(inSetup && !cloud){ if($('#syncUrl')) $('#syncUrl').value=raw.url||''; if($('#syncAnon')) $('#syncAnon').value=raw.key||''; }
   // draw the QR once on entering pairing (don't redraw every sync tick → no flicker)
   const qr=$('#syncQR');
-  if(inPairing){ if(qr && qr.children.length===0) renderSyncQR(pairingPayload(raw.url, raw.key, raw.syncKey)); }
+  if(inPairing){ if(qr && qr.children.length===0) renderSyncQR(pairingPayload(raw.url, raw.key, raw.syncKey, !!raw.cloud)); }
   else if(qr) qr.innerHTML='';
+  // disarm the two-tap erase whenever the UI re-renders out of linked state
+  if(!inLinked) eraseArmed=false;
+  const eb=$('#syncEraseBtn'); if(eb) eb.textContent = eraseArmed ? 'Tap again to erase' : 'Erase cloud data';
 }
 function renderSyncStatus(){ renderSyncUI(); }   // back-compat: sync engine calls this on each pass
 function renderSyncQR(payload){
@@ -1429,18 +1475,27 @@ function renderSyncQR(payload){
 }
 async function syncConnectFromUI(){
   const err=$('#syncError'); if(err){ err.classList.add('hidden'); err.textContent=''; }
-  const url=(($('#syncUrl')||{}).value||'').trim(), anon=(($('#syncAnon')||{}).value||'').trim();
+  // Hosted build → the backend comes from config.js, resolved AT WRITE TIME so the
+  // stored config (and therefore the QR + Resync) always has real url/key values —
+  // a read-time fallback once put the literal string "undefined" in the QR.
+  const cloud = buddyCloud();
+  const url  = cloud ? cloud.url  : (($('#syncUrl')||{}).value||'').trim();
+  const anon = cloud ? cloud.anon : (($('#syncAnon')||{}).value||'').trim();
   let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
-  const syncKey=isValidSyncKey(raw.syncKey)?raw.syncKey:generateSyncKey();   // reuse existing key, else mint one
+  // Reuse the existing syncKey ONLY on the same backend. A key reused across a
+  // backend switch keeps the same bucket id while the data lives elsewhere — the
+  // exact split-brain the bucket-id diagnostic exists to catch. New backend, new key.
+  const sameBackend = !raw.url || raw.url===url;
+  const syncKey=(sameBackend && isValidSyncKey(raw.syncKey))?raw.syncKey:generateSyncKey();
   if(!url || !anon){ if(err){ err.textContent='Enter the backend URL and anon key.'; err.classList.remove('hidden'); } return; }
-  const ok=await setSync({ enabled:true, url, key:anon, syncKey });
-  if(!ok){ if(err){ err.textContent='Could not connect — check the URL and anon key.'; err.classList.remove('hidden'); } return; }
+  const ok=await setSync({ enabled:true, cloud:!!cloud, url, key:anon, syncKey });
+  if(!ok){ if(err){ err.textContent=cloud?'Could not connect — try again in a moment.':'Could not connect — check the URL and anon key.'; err.classList.remove('hidden'); } return; }
   syncShowQR=true; renderSyncUI();
 }
 function syncUnlinkFromUI(){
   let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
   raw.enabled=false; lsSet(SYNC_CFG_KEY, JSON.stringify(raw));   // keep the key so reconnect is one click
-  syncStore=null; syncOwnerId=null; syncShowQR=false;
+  syncStore=null; syncOwnerId=null; syncDisplayId=null; syncShowQR=false;
   renderSyncUI();
 }
 async function syncResyncFromUI(){
@@ -1450,15 +1505,34 @@ async function syncResyncFromUI(){
   if(!url || !anon){ syncShowQR=false; renderSyncUI(); return; }
   // Fresh syncKey → a brand-new owner_id bucket, so no stale remote data can conflict.
   // Both devices re-pair from the new QR; each pushes its current list into the clean bucket.
-  const ok=await setSync({ enabled:true, url, key:anon, syncKey:generateSyncKey() });
+  const ok=await setSync({ enabled:true, cloud:!!raw.cloud, url, key:anon, syncKey:generateSyncKey() });
   if(!ok){ if(err){ err.textContent='Could not resync — check the connection.'; err.classList.remove('hidden'); } return; }
   syncShowQR=true; renderSyncUI();
 }
+/* Erase cloud data — two-tap confirm (a browser confirm() would wedge the webview).
+   Deletes the server row via buddy_delete, then unlinks. Local tasks stay untouched. */
+let eraseArmed=false;
+async function syncEraseFromUI(){
+  const err=$('#syncError'); if(err){ err.classList.add('hidden'); err.textContent=''; }
+  if(!eraseArmed){ eraseArmed=true; renderSyncUI(); return; }
+  eraseArmed=false;
+  try{
+    if(syncStore && syncOwnerId) await syncStore.erase(syncOwnerId);
+    diag('cloud-erased', {});
+    syncUnlinkFromUI();
+  }catch(e){
+    if(err){ err.textContent='Could not erase — check the connection and try again.'; err.classList.remove('hidden'); }
+    diag('cloud-erase-failed', {err:String(e&&e.message).slice(0,120)});
+    renderSyncUI();
+  }
+}
 function initSyncUI(){
-  $('#syncConnectBtn') && $('#syncConnectBtn').addEventListener('click', syncConnectFromUI);
+  $('#syncConnectBtn')      && $('#syncConnectBtn').addEventListener('click', syncConnectFromUI);
+  $('#syncConnectCloudBtn') && $('#syncConnectCloudBtn').addEventListener('click', syncConnectFromUI);
   $('#syncUnlinkBtn')  && $('#syncUnlinkBtn').addEventListener('click', syncUnlinkFromUI);
   $('#syncUnlinkBtnP') && $('#syncUnlinkBtnP').addEventListener('click', syncUnlinkFromUI);
   $('#syncResyncBtn')  && $('#syncResyncBtn').addEventListener('click', syncResyncFromUI);
+  $('#syncEraseBtn')   && $('#syncEraseBtn').addEventListener('click', syncEraseFromUI);
   renderSyncUI();
 }
 
@@ -1475,13 +1549,21 @@ async function deriveOwnerId(syncKey){
   const buf=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(syncKey)));
   return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
 }
-// The QR payload carries everything the phone needs: backendUrl, anonKey (publishable by
-// design), and the capability syncKey. Mac and iOS MUST agree on these JSON keys.
-function pairingPayload(backendUrl, anonKey, syncKey){
+// The QR payload. v1 (self-host) carries everything the phone needs: backendUrl,
+// anonKey (publishable by design), and the capability syncKey. v2 (hosted) carries
+// ONLY the syncKey — the phone fills the backend from its own baked-in Buddy Cloud
+// config, which is what keeps the hosted key rotatable (a v1 QR would freeze the
+// anon key into the phone at pairing time). Mac and iOS MUST agree on these keys.
+function pairingPayload(backendUrl, anonKey, syncKey, cloud){
+  if(cloud) return JSON.stringify({ v:2, syncKey:String(syncKey) });
   return JSON.stringify({ v:1, backendUrl:String(backendUrl), anonKey:String(anonKey), syncKey:String(syncKey) });
 }
 function parsePairingPayload(s){
   try{ const o=JSON.parse(s);
+       if(o && o.v===2 && typeof o.syncKey==='string'){
+         const c=buddyCloud();                      // v2 needs a hosted build to resolve
+         return c ? { backendUrl:c.url, anonKey:c.anon, syncKey:o.syncKey, cloud:true } : null;
+       }
        if(o && typeof o.syncKey==='string' && typeof o.backendUrl==='string' && typeof o.anonKey==='string')
          return { backendUrl:o.backendUrl, anonKey:o.anonKey, syncKey:o.syncKey }; }catch{}
   return null;
@@ -1552,6 +1634,7 @@ function makeEncryptedStore(store, blobKey){
       if(r && !r.ok && isEncryptedBlob(r.blob)) r.blob = await decryptBlob(blobKey, r.blob);
       return r;
     },
+    async erase(key){ return store.erase ? store.erase(key) : false; },
   };
 }
 
@@ -3758,6 +3841,31 @@ window.__buddy = {
       const st=blobStats({today:{items:[{state:'neutral'},{state:'done'}]}, deferred:[{}], history:[{},{}]});
       ok('blobStats counts only', st.active===1 && st.done===1 && st.deferred===1 && st.historyDays===2
         && Object.values(st).every(v=>typeof v==='number'));
+
+      // 13. Buddy Cloud (hosted) plumbing — config.js driven, none of it baked in.
+      const hadCloud=window.BUDDY_CLOUD;
+      try{
+        // 13a. No config → open-source edition: v2 QR unparseable (no backend to fill).
+        delete window.BUDDY_CLOUD;
+        ok('v2 QR needs a hosted build to parse', parsePairingPayload('{"v":2,"syncKey":"'+key+'"}')===null);
+        // 13b. Hosted build: v2 payload is syncKey-ONLY on the wire, parse fills the
+        // backend from config — so rotating the cloud key never breaks paired phones.
+        window.BUDDY_CLOUD={url:'https://cloud.test.supabase.co', anon:'anon-cloud'};
+        const v2=pairingPayload('ignored','ignored',key,true);
+        ok('v2 QR carries only the syncKey', !v2.includes('ignored') && !v2.includes('cloud.test'));
+        const pv2=parsePairingPayload(v2);
+        ok('v2 QR resolves backend from config.js', pv2 && pv2.cloud===true
+          && pv2.backendUrl==='https://cloud.test.supabase.co' && pv2.anonKey==='anon-cloud' && pv2.syncKey===key);
+        // 13c. v1 (self-host) QRs still parse in a hosted build — cross-edition pairing.
+        const pv1=parsePairingPayload(pairingPayload('https://self.host','anon-self',key,false));
+        ok('v1 QR still parses (self-host)', pv1 && pv1.backendUrl==='https://self.host' && !pv1.cloud);
+      } finally {
+        if(hadCloud===undefined) delete window.BUDDY_CLOUD; else window.BUDDY_CLOUD=hadCloud;
+      }
+      // 13d. Erase: the store drops the row; a fresh pull sees nothing.
+      const einner=makeFakeCASStore({key:'k', blob:{today:{date:'2026-07-14',items:[]}}, version:2});
+      const ee=makeEncryptedStore(einner, bk);
+      ok('erase removes the cloud row', (await ee.erase('k'))===true && (await ee.pull('k')).version===0);
     }catch(e){ ok('syncTest ran without throwing', false, e&&(e.message+' @ '+(e.stack||'').split('\n')[1])); }
     state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
     state.tombstones=snap.tombstones||{}; state.erasedAt=(typeof snap.erasedAt==='number')?snap.erasedAt:null;

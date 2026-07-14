@@ -38,4 +38,28 @@ final class SyncIdentityTests: XCTestCase {
         XCTAssertNil(SyncIdentity.parse(#"{"backendUrl":"x","syncKey":"y"}"#))   // missing anonKey
         XCTAssertNil(SyncIdentity.parse(#"{"backendUrl":"x","anonKey":"a"}"#))   // missing syncKey
     }
+
+    // v2 (Buddy Cloud) QRs carry only the syncKey; the phone must resolve the backend
+    // from its baked-in BuddyCloud config. This open-source build HAS no config
+    // (BuddyCloud.url is nil), so a v2 code must be REJECTED — never half-paired to an
+    // empty backend. Hosted builds (config injected at build time) take the other branch.
+    func testV2PayloadRequiresBuddyCloudConfig() {
+        let v2 = #"{"v":2,"syncKey":"0123456789012345678901234567890123456789012"}"#
+        if BuddyCloud.present {
+            let p = SyncIdentity.parse(v2)
+            XCTAssertEqual(p?.cloud, true)
+            XCTAssertEqual(p?.backendUrl, BuddyCloud.url)
+            XCTAssertEqual(p?.anonKey, BuddyCloud.anon)
+        } else {
+            XCTAssertNil(SyncIdentity.parse(v2))
+        }
+        XCTAssertNil(SyncIdentity.parse(#"{"v":2}"#))   // v2 without a key is garbage everywhere
+    }
+
+    // v1 QRs (self-host) keep parsing regardless of the build flavor — cross-edition pairing.
+    func testV1StillParsesEverywhere() {
+        let p = SyncIdentity.parse(#"{"v":1,"backendUrl":"https://self.host","anonKey":"a","syncKey":"k"}"#)
+        XCTAssertEqual(p?.backendUrl, "https://self.host")
+        XCTAssertEqual(p?.cloud, false)
+    }
 }
