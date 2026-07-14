@@ -76,6 +76,17 @@ begin
   end;
   assert failed, '21st creation from one real IP must be rejected (spoofed first element ignored)';
 
+  -- 5b. REJECTED attempts must not increment the counter — a retrying client
+  -- (Buddy polls every 1.5s) must not lock itself out of the NEXT window.
+  for i in 1..30 loop
+    begin
+      perform * from public.buddy_push('hard-test-ip-rej-' || i, b, 0, 'mac');
+    exception when others then null;   -- rejected, repeatedly
+    end;
+  end loop;
+  perform 1 from public.buddy_create_log where ip = '203.0.113.9' and n = 20;
+  assert found, 'counter must stay AT the cap after rejected attempts (found n<>20)';
+
   -- 6. The throttle only guards CREATION — updates from the same IP still work.
   select * into r from public.buddy_push('hard-test-ip-1', b, 1, 'mac');
   assert r.ok, 'updates must not be throttled';
