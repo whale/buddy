@@ -174,7 +174,10 @@ struct TodayView: View {
                 store.performRolloverIfNeeded()
                 sync?.syncOnForeground()                        // pull + go live on foreground
             }
-            else { sync?.pauseSync() }                          // stop polling in the background
+            else {
+                sync?.pauseSync()                               // stop polling in the background
+                BackgroundSync.schedule()                       // ask iOS for a refresh slot while closed
+            }
         }
     }
 

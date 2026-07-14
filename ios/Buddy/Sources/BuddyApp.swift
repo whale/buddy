@@ -6,6 +6,8 @@ struct BuddyApp: App {
         #if DEBUG
         GeistFontCheck.run()
         #endif
+        // Must register before the app finishes launching (Apple requirement).
+        BackgroundSync.register()
     }
 
     var body: some Scene {

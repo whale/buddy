@@ -65,6 +65,22 @@ async function pullBucket(url, anon, ownerId) {
   const row = Array.isArray(rows) && rows.length ? rows[0] : null;
   if (!row) return { version: 0, items: null, deferred: null, savedAt: null };
   const blob = row.blob || {};
+  // E2E (0.4.0+): the blob is an encrypted envelope the doctor CANNOT read — by
+  // design. Counts come from the plaintext `stats` column the clients publish
+  // beside the ciphertext ({active, done, deferred, historyDays} — numbers only).
+  // buddy_pull doesn't return stats, so fetch them via a second RPC-free read?
+  // No direct table reads exist (RLS) — extend the summary from what we have:
+  if (blob.enc === 1 && typeof blob.ct === "string") {
+    const s = row.stats || null;   // present if buddy_pull was extended; else null
+    return {
+      version: row.version,
+      encrypted: true,
+      items: s ? (s.active ?? 0) + (s.done ?? 0) : null,
+      activeItems: s ? s.active ?? 0 : null,
+      deferred: s ? s.deferred ?? null : null,
+      savedAt: null,               // savedAt lives inside the ciphertext now
+    };
+  }
   return {
     version: row.version,
     items: blob.today?.items?.length ?? 0,

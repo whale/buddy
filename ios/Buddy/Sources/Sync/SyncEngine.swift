@@ -23,6 +23,10 @@ final class SyncEngine {
     var lastError: String?
     var isSyncing = false
 
+    /// The UI-owned engine, reachable from a fired BGAppRefreshTask so a background
+    /// pass reuses the live BuddyStore (one writer) instead of constructing a second.
+    static weak var current: SyncEngine?
+
     private weak var store: BuddyStore?
     private var config: SyncConfig
     private var pending = false
@@ -36,7 +40,11 @@ final class SyncEngine {
         self.store = store
         self.config = config
         store.onLocalChange = { [weak self] in self?.localChanged() }
+        Self.current = self
     }
+
+    /// One pass for a BGAppRefreshTask — no polling, no debounce, just catch up.
+    func backgroundPass() async { await onePass() }
 
     // MARK: - Config
     func updateConfig(_ cfg: SyncConfig) {
