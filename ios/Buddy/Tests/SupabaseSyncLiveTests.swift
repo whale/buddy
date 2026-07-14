@@ -85,7 +85,9 @@ final class SupabaseSyncLiveTests: XCTestCase {
     // syncOnce. If any of those regress, Mac→iOS silently dies — this fails loudly instead.
     func testLiveMacRawBlobDecodesAndMergesAtOwnerId() async throws {
         _ = try await backendOrSkip()
-        let syncKey = "live-" + UUID().uuidString            // fresh key → fresh bucket per run
+        let syncKey = SyncIdentity.generateKey()             // fresh VALID key → fresh bucket per run
+                                                             // (must be real 43-char base64url now —
+                                                             // the store derives the E2E blob key from it)
         let ownerId = SyncIdentity.ownerId(for: syncKey)     // M2: the row key BOTH devices derive
 
         // Exactly what dist/index.html serialize() emits — note: NO historyDays; pinned present.
