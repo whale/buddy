@@ -52,12 +52,20 @@ begin
   assert found, 'stats must survive a push that omits them';
 
   -- 5. Per-IP creation throttle: simulate PostgREST headers with set_config.
-  -- The header carries a SPOOFED client-sent element first; only the LAST element
-  -- (appended by the proxy) may be used — so all of these count against 203.0.113.9.
+  -- Right-to-left scan for the first PUBLIC address: spoofed client-sent elements
+  -- (left) are ignored, and an ingress-appended INTERNAL hop (right) is skipped —
+  -- so all of these count against 203.0.113.9 regardless of header shape.
   delete from public.buddy_create_log where ip = '203.0.113.9';
   for i in 1..20 loop
-    perform set_config('request.headers',
-      '{"x-forwarded-for":"10.9.9.' || i || ', 203.0.113.9"}', true);
+    if i % 2 = 0 then
+      -- spoofed first element + real IP last
+      perform set_config('request.headers',
+        '{"x-forwarded-for":"10.9.9.' || i || ', 203.0.113.9"}', true);
+    else
+      -- real IP followed by an internal ingress hop (Kond/LB appends its own)
+      perform set_config('request.headers',
+        '{"x-forwarded-for":"203.0.113.9, 10.0.0.5"}', true);
+    end if;
     perform * from public.buddy_push('hard-test-ip-' || i, b, 0, 'mac');
   end loop;
   failed := false;

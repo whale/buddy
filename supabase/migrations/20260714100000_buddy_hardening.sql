@@ -88,20 +88,26 @@ begin
     -- Guard 2: per-IP creation throttle. PostgREST exposes the request headers;
     -- when they're absent (psql, tests, supabase db reset) the call is local and
     -- trusted, so the throttle is skipped.
-    -- Take the LAST x-forwarded-for element: the client can send its own header
-    -- (a spoofable FIRST element would be free throttle evasion); the proxy APPENDS
-    -- the real peer address, so only the last element is trustworthy.
+    -- Scan x-forwarded-for RIGHT TO LEFT and take the first PUBLIC address: the
+    -- client controls the leftmost elements (a spoofable first element would be
+    -- free throttle evasion), while proxies append on the right — but the ingress
+    -- may also append its own INTERNAL hop (10.x etc.), so "last element" alone
+    -- can be a private address and would silently disable the throttle. Private/
+    -- loopback addresses are skipped both as hops (keep scanning left) and as the
+    -- final answer (local dev stack + test harnesses are never throttled).
+    req_ip := '';
     fwd_parts := string_to_array(coalesce(
       current_setting('request.headers', true)::json ->> 'x-forwarded-for', ''), ',');
-    req_ip := trim(fwd_parts[coalesce(array_length(fwd_parts, 1), 1)]);
-    -- Private/loopback peers are the local dev stack and test harnesses (supabase
-    -- start, XCTest, sync:live) — not the public internet. Don't throttle them.
-    begin ip_inet := req_ip::inet; exception when others then ip_inet := null; end;
-    if ip_inet is not null and ip_inet <<= any (array[
-      '10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','127.0.0.0/8','169.254.0.0/16',
-      '::1/128','fc00::/7','fe80::/10']::inet[]) then
-      req_ip := '';
-    end if;
+    for i in reverse coalesce(array_length(fwd_parts, 1), 0) .. 1 loop
+      begin ip_inet := trim(fwd_parts[i])::inet; exception when others then continue; end;
+      if ip_inet <<= any (array[
+        '10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','127.0.0.0/8','169.254.0.0/16',
+        '::1/128','fc00::/7','fe80::/10']::inet[]) then
+        continue;   -- internal hop or local caller — keep scanning leftward
+      end if;
+      req_ip := host(ip_inet);
+      exit;
+    end loop;
     if req_ip <> '' then
       -- Opportunistic cleanup keeps the log tiny without pg_cron.
       delete from public.buddy_create_log where hr < now() - interval '48 hours';
