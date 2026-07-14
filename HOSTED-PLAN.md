@@ -1,6 +1,41 @@
 # Buddy — Open Source Project + Hosted Service
 
-**Status:** v4, 2026-07-14. Founder decisions folded in: **no accounts, ever** (no passwords, no emails); paid hosting arrives later via a purchase pass; updates flow through the existing auto-updater + a Ghost blog for release notes.
+**Status:** v5, 2026-07-15. **Phase 1 SHIPPED** (0.4.0 / TestFlight 29). This header section is the living roadmap — update it as things land.
+
+---
+
+## ROADMAP — where we are
+
+### ✅ Phase 1 — the split + the service foundation (SHIPPED 2026-07-14, v0.4.0)
+- ✅ One codebase, two editions (hosted config injected at build; clone = open edition)
+- ✅ E2E encryption on both platforms (server stores ciphertext; counts never content)
+- ✅ One-button hosted Settings, v2 QR, backend-aware bucket id, Erase cloud data
+- ✅ Server hardening live on prod: size cap, per-IP creation throttle (probed through the real proxy), delete RPC, stats columns
+- ✅ CI injection + daily abuse alarm workflow; README/TRADEMARK; adversarial review ×2 + two-device live gate vs prod
+- ✅ Mac v0.4.0 released (auto-update) · iOS build 29 on TestFlight · tester reconnect instructions sent
+
+### 🔲 Phase 1 loose ends (small, none blocking)
+- 🔲 **USER:** Supabase dashboard — disable Email auth provider + sign-ups; confirm Storage empty; `gh secret set SUPABASE_SERVICE_ROLE` (powers the daily alarm)
+- 🔲 `sync:doctor` reads the plaintext stats columns (E2E blinded its item counts — see JOURNAL 2026-07-14 §5)
+- 🔲 iOS **background refresh** (BGAppRefreshTask): phone syncs periodically while closed — addresses "it only syncs when open" (Apple permits scheduled background slots)
+- 🔲 Ghost blog for release notes + point the update banner's notes at it
+- 🔲 `buddy.whale.fyi` landing page (marketing + download; later: purchase)
+- 🔲 Staging Supabase project so `sync:live` never touches prod counters
+
+### 🔲 Phase 2 — money (build when ready to charge; all designed in §4)
+- 🔲 Decide: price · Lemon Squeezy vs Paddle (merchant of record) · `max_buckets`
+- 🔲 `passes` + `pass_buckets` tables (+ RLS!), `require_pass` flag, pass rides the v2 QR, distinguishable "hosting expired" error in both apps
+- 🔲 Checkout on buddy.whale.fyi → webhook → pass row → receipt email (merchant sends it)
+- 🔲 Paid Supabase tier BEFORE first sale · privacy policy · iOS App Privacy label update ("no data collected" is no longer true)
+- 🔲 Free-forever passes for beta testers · App Store proper release (out of TestFlight) with a demo pass in the review notes
+
+### 🔲 Phase 3 — only if growth demands
+- 🔲 Rotate to Supabase's new publishable-key system (the plumbing already supports rotation)
+- 🔲 Anything needing per-request entitlement logic beyond SQL (a thin proxy) — explicitly deferred; no current justification
+
+---
+
+**Founder decisions (locked):** **no accounts, ever** (no passwords, no emails); paid hosting arrives later via a purchase pass; updates flow through the existing auto-updater + a Ghost blog for release notes.
 **The product:** Buddy, a hosted service — pay (later), install, sync just works. Users never see a server, a key, a field, or a login.
 **The project:** the same code, MIT, on GitHub — ships with NO backend; the README tells a developer what to stand up themselves.
 

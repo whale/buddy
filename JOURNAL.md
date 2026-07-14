@@ -5,6 +5,54 @@ Newest first.
 
 ---
 
+## 2026-07-14 — 0.4.0: Buddy Cloud + E2E encryption (the Ghost split), and what the reviews caught
+
+The big architectural night: one codebase, two editions. The released app is the
+**hosted edition** (backend identifiers injected at build time via gitignored
+`dist/config.js` / fastlane-overwritten `BuddyCloud.swift`); a bare clone is the
+**open edition** (local-only, self-host fields). Tasks are now **E2E-encrypted
+on device** (HKDF(syncKey) → AES-256-GCM) — the server stores ciphertext plus
+integers-only stats. No accounts, ever; payment (later) will be a purchase pass.
+Decision record: `HOSTED-PLAN.md`.
+
+1. **Two builds is a smell; one build with a config seam is the pattern.** We
+   almost shipped a "secret" credentialed DMG. Zero of six comparable products
+   (Bitwarden, Ente, Joplin, Standard Notes, Anytype, Ghost itself) do that — a
+   publishable key is an *identifier*, not a secret, and anything in a shipped
+   binary is extractable anyway. Enforce server-side; hide nothing.
+2. **Resolve config at WRITE time, not read time.** A read-time fallback left
+   `raw.url` empty in localStorage — and the pairing QR is built from the RAW
+   config, so it would have encoded the literal string `"undefined"`, which iOS
+   *accepts* (`URL(string:"undefined")` is non-nil) and silently syncs to
+   nowhere. The adversarial review caught it pre-merge. Write the resolved
+   values on Connect; everything downstream stays dumb.
+3. **The mixed-version window is where sync upgrades die.** An old peer that
+   pulls an encrypted row tolerant-decodes it as *empty-with-extras*, merges its
+   plaintext in, and pushes a HYBRID (plaintext + stale `{enc,iv,ct}` echoed via
+   the extras bag). A naive new client decrypts the stale half and discards the
+   peer's edits — silent split-brain with both sides showing "Synced". New
+   clients read the plaintext half and strip envelope keys from extras forever
+   (`DROP_WIRE_KEYS` / `SyncWire.knownKeys`). The field report the same evening
+   ("phone wasn't kept up while closed") was exactly this window, self-healing
+   as designed once both devices updated.
+4. **A rate limiter + a retrying client = self-inflicted lockout.** The per-IP
+   creation throttle counted REJECTED attempts; Buddy retries every 1.5s, so one
+   throttle event re-filled the counter forever. Only the two-device live gate
+   against REAL prod caught it (unit tests with synthetic headers passed).
+   Counters must count *allowed* actions. Corollary: `x-forwarded-for` is
+   client-spoofable on the left and internally-polluted on the right — scan
+   right-to-left for the first public IP, and verify against the real proxy
+   chain, never just synthetic headers.
+5. **E2E blinds your own tooling too.** `sync:doctor` now reads `today=0` on a
+   healthy bucket — it can't decrypt (that's the point). It must learn to read
+   the plaintext stats columns. Budget for every observability tool to need the
+   same lesson.
+6. **Stacked-PR gotcha:** merging + deleting a stacked PR's base branch CLOSES
+   the child PR (GitHub won't retarget a closed one). Retarget children to main
+   FIRST, then delete branches.
+
+---
+
 ## 2026-07-10 — the field-report marathon: five lessons that now have guardrails
 
 1. **Sync "working" on both ends ≠ synced.** Dev Buddy and the iPhone were each
