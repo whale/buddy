@@ -9,8 +9,11 @@ final class SupabaseSyncLiveTests: XCTestCase {
     // Local CLI default publishable key. If it differs, the reachability probe 401s → skip.
     let key = "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH"
 
+    // Fixed syncKey so every store in a test run derives the same blob key (E2E).
+    let syncKey = String(repeating: "A", count: 43)
+
     private func backendOrSkip() async throws -> SupabaseCASStore {
-        guard let store = SupabaseCASStore(url: url, anonKey: key, device: "ios-test") else {
+        guard let store = SupabaseCASStore(url: url, anonKey: key, syncKey: syncKey, device: "ios-test") else {
             throw XCTSkip("could not construct store")
         }
         do { _ = try await store.pull("reachability-probe") }
@@ -82,7 +85,9 @@ final class SupabaseSyncLiveTests: XCTestCase {
     // syncOnce. If any of those regress, Mac→iOS silently dies — this fails loudly instead.
     func testLiveMacRawBlobDecodesAndMergesAtOwnerId() async throws {
         _ = try await backendOrSkip()
-        let syncKey = "live-" + UUID().uuidString            // fresh key → fresh bucket per run
+        let syncKey = SyncIdentity.generateKey()             // fresh VALID key → fresh bucket per run
+                                                             // (must be real 43-char base64url now —
+                                                             // the store derives the E2E blob key from it)
         let ownerId = SyncIdentity.ownerId(for: syncKey)     // M2: the row key BOTH devices derive
 
         // Exactly what dist/index.html serialize() emits — note: NO historyDays; pinned present.
@@ -100,8 +105,11 @@ final class SupabaseSyncLiveTests: XCTestCase {
         try await rawPush(key: ownerId, blob: macBlob)
 
         // 1) The typed iOS store pulls + decodes the Mac blob (B1 guard, over the live DB).
-        let store = SupabaseCASStore(url: url, anonKey: key, device: "ios-test")!
+        // The raw-pushed blob is PLAINTEXT → this also exercises the legacy-row path:
+        // pull flags it plain, and the syncOnce below re-pushes it as ciphertext.
+        let store = SupabaseCASStore(url: url, anonKey: key, syncKey: syncKey, device: "ios-test")!
         let pulled = try await store.pull(ownerId)
+        XCTAssertTrue(pulled.plain, "raw plaintext row must be flagged for the encrypt upgrade")
         XCTAssertEqual(pulled.blob?.today?.items.first?.text, "made on Mac")
         XCTAssertEqual(pulled.blob?.settings?.historyDays, BuddySettings.default.historyDays) // defaulted
         XCTAssertEqual(pulled.blob?.savedAt ?? 0, 1_750_000_000, accuracy: 1)

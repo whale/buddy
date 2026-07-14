@@ -1,35 +1,77 @@
 import Foundation
+import CryptoKit
 
 // MARK: - SupabaseCASStore (iOS) — the real network adapter behind the sync loop.
-// Swift mirror of makeSupabaseCASStore() in dist/index.html. Dumb transport only:
-// it POSTs to the buddy_pull / buddy_push RPCs and converts SyncSnapshot ↔ the
-// SyncWire JSON (epoch-ms) at the boundary, so iOS and Mac blobs are compatible.
-// All merge / conflict logic stays in BuddySync.syncOnce.
+// Swift mirror of makeSupabaseCASStore()+makeEncryptedStore() in dist/index.html.
+// Dumb transport only: it POSTs to the buddy_pull / buddy_push RPCs and converts
+// SyncSnapshot ↔ the SyncWire JSON (epoch-ms) at the boundary, so iOS and Mac blobs
+// are compatible. All merge / conflict logic stays in BuddySync.syncOnce.
+//
+// E2E: everything past this adapter speaks ciphertext — the wire blob is a BlobCrypto
+// envelope; the engine and merge only ever see plaintext snapshots. Legacy plaintext
+// rows decode fine and come back flagged `plain:true` so syncOnce re-pushes them
+// encrypted (the one-time upgrade).
 struct SupabaseCASStore: CASStore {
     let baseURL: URL
     let anonKey: String
     let device: String
+    let blobKey: SymmetricKey
+    // Reference-typed so the struct can remember a pre-hardening backend (no p_stats
+    // param) after the first PGRST202 and stop doubling every push with a retry.
+    private final class StatsSupport { var disabled = false }
+    private let statsSupport = StatsSupport()
 
-    init?(url: String, anonKey: String, device: String = "ios") {
+    init?(url: String, anonKey: String, syncKey: String, device: String = "ios") {
         let trimmed = url.hasSuffix("/") ? String(url.dropLast()) : url
-        guard let u = URL(string: trimmed), !anonKey.isEmpty else { return nil }
-        self.baseURL = u; self.anonKey = anonKey; self.device = device
+        guard let u = URL(string: trimmed), !anonKey.isEmpty,
+              let k = BlobCrypto.deriveKey(syncKey: syncKey) else { return nil }
+        self.baseURL = u; self.anonKey = anonKey; self.device = device; self.blobKey = k
     }
 
     func pull(_ key: String) async throws -> PullResult {
         let rows = try await rpc("buddy_pull", ["p_key": key])
         guard let row = rows.first else { return PullResult(blob: nil, version: 0) }
-        return PullResult(blob: try snapshot(from: row["blob"]), version: intValue(row["version"]))
+        let (snap, wasPlain) = try decode(row["blob"])
+        return PullResult(blob: snap, version: intValue(row["version"]), plain: wasPlain)
     }
 
     func push(_ key: String, blob: SyncSnapshot, expected: Int) async throws -> PushResult {
-        let wireObj = try JSONSerialization.jsonObject(with: JSONEncoder().encode(SyncWire(blob)))
-        let rows = try await rpc("buddy_push",
-            ["p_key": key, "p_blob": wireObj, "p_expected": expected, "p_device": device])
+        let wireData = try JSONEncoder().encode(SyncWire(blob))
+        let envelope = try BlobCrypto.encrypt(wireData, key: blobKey)
+        let base: [String: Any] = ["p_key": key, "p_blob": envelope,
+                                   "p_expected": expected, "p_device": device]
+        var rows: [[String: Any]]
+        if statsSupport.disabled {
+            rows = try await rpc("buddy_push", base)
+        } else {
+            do {
+                rows = try await rpc("buddy_push", base.merging(["p_stats": stats(of: blob)]) { $1 })
+            } catch {
+                // Self-hosted backend on the pre-hardening schema: buddy_push has no p_stats
+                // param, so PostgREST can't match the call (PGRST202/404). Retry without stats
+                // rather than bricking their sync until they re-run hosted-setup.sql — and
+                // remember, so their every push isn't doubled forever.
+                let msg = error.localizedDescription
+                if msg.contains("PGRST202") || msg.contains(" 404") {
+                    statsSupport.disabled = true
+                    rows = try await rpc("buddy_push", base)
+                } else { throw error }
+            }
+        }
         guard let row = rows.first else { return PushResult(ok: false, blob: nil, version: 0) }
+        let (snap, _) = try decode(row["blob"])   // CAS-conflict blob may be an envelope too
         return PushResult(ok: (row["ok"] as? Bool) ?? false,
-                          blob: try snapshot(from: row["blob"]),
+                          blob: snap,
                           version: intValue(row["version"]))
+    }
+
+    // Metrics beside the ciphertext: COUNTS, NEVER CONTENT (server also enforces
+    // numbers-only — same covenant as BuddyDiag). Mirror of the Mac's blobStats().
+    private func stats(of b: SyncSnapshot) -> [String: Int] {
+        let items = b.today?.items ?? []
+        let done = items.filter { $0.state == .done }.count
+        return ["active": items.count - done, "done": done,
+                "deferred": b.deferred.count, "historyDays": b.history.count]
     }
 
     // MARK: - transport
@@ -52,10 +94,21 @@ struct SupabaseCASStore: CASStore {
         return (try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []
     }
 
-    private func snapshot(from any: Any?) throws -> SyncSnapshot? {
-        guard let any = any, !(any is NSNull) else { return nil }
+    /// Wire value → (snapshot, wasPlaintext). Envelopes decrypt; legacy plaintext decodes
+    /// directly and is flagged for the encrypt-on-next-push upgrade. HYBRIDS (a pre-E2E
+    /// peer's plaintext with stale envelope keys echoed via extras) read as plaintext —
+    /// the plaintext half is that peer's newer merge; decrypting the stale ct would
+    /// silently discard it (mixed-version split-brain). SyncWire.knownKeys strips the
+    /// envelope keys so they never ride extras back onto the wire.
+    private func decode(_ any: Any?) throws -> (SyncSnapshot?, Bool) {
+        guard let any = any, !(any is NSNull) else { return (nil, false) }
+        if BlobCrypto.isEnvelope(any) {
+            let data = try BlobCrypto.decrypt(any as! [String: Any], key: blobKey)
+            return (try JSONDecoder().decode(SyncWire.self, from: data).toSnapshot(), false)
+        }
+        if BlobCrypto.isHybrid(any) { BuddyDiag.log("sync-hybrid-blob") }
         let data = try JSONSerialization.data(withJSONObject: any)
-        return try JSONDecoder().decode(SyncWire.self, from: data).toSnapshot()
+        return (try JSONDecoder().decode(SyncWire.self, from: data).toSnapshot(), true)
     }
     private func intValue(_ any: Any?) -> Int {
         if let n = any as? Int { return n }

@@ -11,7 +11,9 @@ import Foundation
 // local domain. (This is the timestamp-unit fix; the Mac needs no change.)
 
 // MARK: - Store contract (mirror of makeFakeCASStore / the buddy_push SQL)
-struct PullResult { let blob: SyncSnapshot?; let version: Int }   // version 0 / blob nil if absent
+// `plain` marks a legacy PLAINTEXT row (pre-E2E) pulled from the wire — syncOnce uses it
+// to force one push so the row gets re-written as ciphertext even when content is equal.
+struct PullResult { let blob: SyncSnapshot?; let version: Int; var plain: Bool = false }
 struct PushResult { let ok: Bool; let blob: SyncSnapshot?; let version: Int }
 
 protocol CASStore {
@@ -137,7 +139,10 @@ enum BuddySync {
         // Nothing new vs remote → adopt remote, don't churn the version. The caller
         // (SyncEngine) additionally skips the adopt when local == remote content, so an
         // idle 1.5s poll never rewrites state/disk (mirrors the Mac's applyWire skip).
-        if contentKey(merged) == contentKey(remote.blob) {
+        // EXCEPTION: remote.plain marks a legacy PLAINTEXT row (pre-E2E) — skipping the
+        // push would leave it readable on the server forever if content never changed,
+        // so fall through and push; the store re-writes it as ciphertext (mirrors Mac).
+        if contentKey(merged) == contentKey(remote.blob) && !remote.plain {
             return SyncResult(ok: true, noop: true, version: remote.version, merged: remote.blob ?? merged)
         }
 
@@ -335,9 +340,13 @@ struct SyncWire: Codable {
 
     // Tolerant decode: a missing key must NEVER throw and kill a sync pass. Swift's
     // synthesized decoder throws keyNotFound even for properties that HAVE a default,
-    // so decode every field defensively. Unknown keys land in `extras`.
+    // so decode every field defensively. Unknown keys land in `extras` — EXCEPT the
+    // E2E envelope keys (enc/iv/ct), which are listed as known-but-not-decoded so a
+    // hybrid blob's stale envelope is DROPPED, never re-emitted through extras
+    // (mirrors the Mac's DROP_WIRE_KEYS).
     static let knownKeys: Set<String> = ["version", "savedAt", "today", "history",
-                                         "deferred", "settings", "tombstones", "erasedAt"]
+                                         "deferred", "settings", "tombstones", "erasedAt",
+                                         "enc", "iv", "ct"]
     private enum CodingKeys: String, CodingKey {
         case version, savedAt, today, history, deferred, settings, tombstones, erasedAt
     }
