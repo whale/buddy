@@ -52,9 +52,12 @@ begin
   assert found, 'stats must survive a push that omits them';
 
   -- 5. Per-IP creation throttle: simulate PostgREST headers with set_config.
-  perform set_config('request.headers', '{"x-forwarded-for":"203.0.113.9"}', true);
+  -- The header carries a SPOOFED client-sent element first; only the LAST element
+  -- (appended by the proxy) may be used — so all of these count against 203.0.113.9.
   delete from public.buddy_create_log where ip = '203.0.113.9';
   for i in 1..20 loop
+    perform set_config('request.headers',
+      '{"x-forwarded-for":"10.9.9.' || i || ', 203.0.113.9"}', true);
     perform * from public.buddy_push('hard-test-ip-' || i, b, 0, 'mac');
   end loop;
   failed := false;
@@ -63,14 +66,22 @@ begin
   exception when others then
     failed := sqlerrm like 'buddy: too many new sync setups%';
   end;
-  assert failed, '21st creation from one IP in an hour must be rejected';
+  assert failed, '21st creation from one real IP must be rejected (spoofed first element ignored)';
 
   -- 6. The throttle only guards CREATION — updates from the same IP still work.
   select * into r from public.buddy_push('hard-test-ip-1', b, 1, 'mac');
   assert r.ok, 'updates must not be throttled';
+
+  -- 7. Private/loopback peers (local dev stack, test harnesses) are never throttled.
+  perform set_config('request.headers', '{"x-forwarded-for":"192.168.65.1"}', true);
+  for i in 1..25 loop
+    perform * from public.buddy_push('hard-test-priv-' || i, b, 0, 'mac');
+  end loop;
+  select * into r from public.buddy_push('hard-test-priv-26', b, 0, 'mac');
+  assert r.ok, 'private-range IPs must not be throttled (local dev/tests)';
   perform set_config('request.headers', '', true);
 
-  -- 7. buddy_delete removes the row; deleting again reports false.
+  -- 8. buddy_delete removes the row; deleting again reports false.
   assert public.buddy_delete('hard-test'), 'delete should report the row was removed';
   perform * from public.buddy_pull('hard-test');
   assert not found, 'row must be gone after delete';
@@ -78,7 +89,8 @@ begin
 
   delete from public.buddy_state where owner_id like 'hard-test%';
   delete from public.buddy_create_log where ip = '203.0.113.9';
-  raise notice 'hardening: all 7 checks passed';
+  delete from public.buddy_state where owner_id like 'hard-test%';
+  raise notice 'hardening: all 8 checks passed';
 end $$;
 
 \echo 'ALL HARDENING TESTS PASSED'
