@@ -340,9 +340,13 @@ struct SyncWire: Codable {
 
     // Tolerant decode: a missing key must NEVER throw and kill a sync pass. Swift's
     // synthesized decoder throws keyNotFound even for properties that HAVE a default,
-    // so decode every field defensively. Unknown keys land in `extras`.
+    // so decode every field defensively. Unknown keys land in `extras` — EXCEPT the
+    // E2E envelope keys (enc/iv/ct), which are listed as known-but-not-decoded so a
+    // hybrid blob's stale envelope is DROPPED, never re-emitted through extras
+    // (mirrors the Mac's DROP_WIRE_KEYS).
     static let knownKeys: Set<String> = ["version", "savedAt", "today", "history",
-                                         "deferred", "settings", "tombstones", "erasedAt"]
+                                         "deferred", "settings", "tombstones", "erasedAt",
+                                         "enc", "iv", "ct"]
     private enum CodingKeys: String, CodingKey {
         case version, savedAt, today, history, deferred, settings, tombstones, erasedAt
     }

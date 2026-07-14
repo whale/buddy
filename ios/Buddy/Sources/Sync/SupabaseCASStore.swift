@@ -16,6 +16,10 @@ struct SupabaseCASStore: CASStore {
     let anonKey: String
     let device: String
     let blobKey: SymmetricKey
+    // Reference-typed so the struct can remember a pre-hardening backend (no p_stats
+    // param) after the first PGRST202 and stop doubling every push with a retry.
+    private final class StatsSupport { var disabled = false }
+    private let statsSupport = StatsSupport()
 
     init?(url: String, anonKey: String, syncKey: String, device: String = "ios") {
         let trimmed = url.hasSuffix("/") ? String(url.dropLast()) : url
@@ -37,16 +41,22 @@ struct SupabaseCASStore: CASStore {
         let base: [String: Any] = ["p_key": key, "p_blob": envelope,
                                    "p_expected": expected, "p_device": device]
         var rows: [[String: Any]]
-        do {
-            rows = try await rpc("buddy_push", base.merging(["p_stats": stats(of: blob)]) { $1 })
-        } catch {
-            // Self-hosted backend on the pre-hardening schema: buddy_push has no p_stats
-            // param, so PostgREST can't match the call (PGRST202/404). Retry without stats
-            // rather than bricking their sync until they re-run hosted-setup.sql.
-            let msg = error.localizedDescription
-            if msg.contains("PGRST202") || msg.contains(" 404") {
-                rows = try await rpc("buddy_push", base)
-            } else { throw error }
+        if statsSupport.disabled {
+            rows = try await rpc("buddy_push", base)
+        } else {
+            do {
+                rows = try await rpc("buddy_push", base.merging(["p_stats": stats(of: blob)]) { $1 })
+            } catch {
+                // Self-hosted backend on the pre-hardening schema: buddy_push has no p_stats
+                // param, so PostgREST can't match the call (PGRST202/404). Retry without stats
+                // rather than bricking their sync until they re-run hosted-setup.sql — and
+                // remember, so their every push isn't doubled forever.
+                let msg = error.localizedDescription
+                if msg.contains("PGRST202") || msg.contains(" 404") {
+                    statsSupport.disabled = true
+                    rows = try await rpc("buddy_push", base)
+                } else { throw error }
+            }
         }
         guard let row = rows.first else { return PushResult(ok: false, blob: nil, version: 0) }
         let (snap, _) = try decode(row["blob"])   // CAS-conflict blob may be an envelope too
@@ -85,13 +95,18 @@ struct SupabaseCASStore: CASStore {
     }
 
     /// Wire value → (snapshot, wasPlaintext). Envelopes decrypt; legacy plaintext decodes
-    /// directly and is flagged for the encrypt-on-next-push upgrade.
+    /// directly and is flagged for the encrypt-on-next-push upgrade. HYBRIDS (a pre-E2E
+    /// peer's plaintext with stale envelope keys echoed via extras) read as plaintext —
+    /// the plaintext half is that peer's newer merge; decrypting the stale ct would
+    /// silently discard it (mixed-version split-brain). SyncWire.knownKeys strips the
+    /// envelope keys so they never ride extras back onto the wire.
     private func decode(_ any: Any?) throws -> (SyncSnapshot?, Bool) {
         guard let any = any, !(any is NSNull) else { return (nil, false) }
         if BlobCrypto.isEnvelope(any) {
             let data = try BlobCrypto.decrypt(any as! [String: Any], key: blobKey)
             return (try JSONDecoder().decode(SyncWire.self, from: data).toSnapshot(), false)
         }
+        if BlobCrypto.isHybrid(any) { BuddyDiag.log("sync-hybrid-blob") }
         let data = try JSONSerialization.data(withJSONObject: any)
         return (try JSONDecoder().decode(SyncWire.self, from: data).toSnapshot(), true)
     }

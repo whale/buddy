@@ -808,6 +808,10 @@ function parseRaw(raw){ if(raw==null) return null; try{ const b=JSON.parse(raw);
    `history`/`deferred`/`settings`. Returns null only if the blob isn't a Buddy
    blob at all. `hadToday` tells the caller whether today was usable or reset. */
 const KNOWN_WIRE_KEYS = ['version','savedAt','today','doneWordBag','history','deferred','settings','pinned','tombstones','erasedAt','restartStash'];
+// E2E envelope keys must NEVER ride the extras bag: a pre-E2E peer that pulled an
+// encrypted row echoes {enc,iv,ct} back through ITS extras (hybrid blob), and if we
+// re-emitted them the row would look encrypted forever while carrying plaintext.
+const DROP_WIRE_KEYS = ['enc','iv','ct'];
 function hydrate(blob){
   if(!blob) return null;
   const looksLikeBuddy = blob.version===1 || isValidToday(blob.today) || Array.isArray(blob.history);
@@ -824,7 +828,7 @@ function hydrate(blob){
         v:(typeof i.v==='number'&&i.v>0)?i.v:1 })) }   // legacy items pre-v default to 1
     : null;
   const extras={};
-  for(const k of Object.keys(blob)) if(!KNOWN_WIRE_KEYS.includes(k)) extras[k]=blob[k];
+  for(const k of Object.keys(blob)) if(!KNOWN_WIRE_KEYS.includes(k) && !DROP_WIRE_KEYS.includes(k)) extras[k]=blob[k];
   return {
     today,
     hadToday: !!today,
@@ -1294,6 +1298,7 @@ function makeFakeCASStore(seed){
    contract as makeFakeCASStore + the buddy_cas.sql RPCs. Dumb transport only; all merge /
    conflict logic stays in syncOnce(). Mirror of ios SupabaseCASStore.swift. */
 function makeSupabaseCASStore(baseUrl, anonKey, device){
+  let noStats = false;   // pre-hardening self-hosted backend detected — stop retrying stats
   // 10s abort: a fetch with NO timeout can hang forever on a dropped connection
   // (sleep/wake, network change) — and a hung pass wedges `syncing=true`, killing
   // sync until relaunch (field report 2026-07-08). Abort → throw → normal retry path.
@@ -1317,12 +1322,13 @@ function makeSupabaseCASStore(baseUrl, anonKey, device){
     async push(key, blob, expected, stats){
       const base = { p_key:key, p_blob:blob, p_expected:expected, p_device:device||'web' };
       let rows;
-      try{ rows = await rpc('buddy_push', stats ? { ...base, p_stats:stats } : base); }
+      try{ rows = await rpc('buddy_push', (stats && !noStats) ? { ...base, p_stats:stats } : base); }
       catch(e){
         // Self-hosted backend on the pre-hardening schema: buddy_push has no p_stats
         // param, so PostgREST can't match the call (PGRST202/404). Retry without stats
-        // rather than bricking their sync until they re-run hosted-setup.sql.
-        if(stats && /PGRST202|404/.test(String(e&&e.message))) rows = await rpc('buddy_push', base);
+        // rather than bricking their sync until they re-run hosted-setup.sql — and
+        // remember, so their every push isn't doubled forever.
+        if(stats && !noStats && /PGRST202|404/.test(String(e&&e.message))){ noStats = true; rows = await rpc('buddy_push', base); }
         else throw e;
       }
       const r = row0(rows);
@@ -1379,8 +1385,11 @@ async function initSync(){
   // Display id is BACKEND-AWARE (url|syncKey): two devices showing the same 6 chars
   // are on the same bucket AND the same backend. The plain syncKey hash lied the
   // moment two backends could exist — Mac on Cloud + phone on old backend showed
-  // identical ids while split-brained.
-  syncDisplayId = (await deriveOwnerId(url + '|' + cfg.syncKey)).slice(0,6);
+  // identical ids while split-brained. The url is NORMALIZED (trailing slashes,
+  // case) because the Mac's copy comes from config.js/typed input while the
+  // phone's comes from fastlane env — one stray "/" would make a HEALTHY pairing
+  // show two different ids (the diagnostic crying wolf). Mirrors SyncIdentity.swift.
+  syncDisplayId = (await deriveOwnerId(String(url).replace(/\/+$/,'').toLowerCase() + '|' + cfg.syncKey)).slice(0,6);
   diag('sync-owner', {bucket: syncOwnerId.slice(0,8)});   // which bucket THIS device talks to (split-brain forensics)
   return true;
 }
@@ -1514,7 +1523,13 @@ async function syncResyncFromUI(){
 let eraseArmed=false;
 async function syncEraseFromUI(){
   const err=$('#syncError'); if(err){ err.classList.add('hidden'); err.textContent=''; }
-  if(!eraseArmed){ eraseArmed=true; renderSyncUI(); return; }
+  if(!eraseArmed){
+    eraseArmed=true; renderSyncUI();
+    // Be honest about the one thing erase can't do: a still-paired phone will
+    // re-upload its copy on its next pass, recreating the row (review finding 3).
+    if(err){ err.textContent='Heads up: if your iPhone is still linked, it will re-upload — unlink it there first.'; err.classList.remove('hidden'); }
+    return;
+  }
   eraseArmed=false;
   try{
     if(syncStore && syncOwnerId) await syncStore.erase(syncOwnerId);
@@ -1584,7 +1599,14 @@ function parsePairingPayload(s){
    syncTest()/BlobCryptoTests (derive from 32 zero bytes → encrypt {"probe":1} with a
    zero IV). Parameters: HKDF-SHA256, empty salt, info "buddy-blob-v1" → AES-256-GCM. */
 const BLOB_ENC_INFO = 'buddy-blob-v1';
-function b64uEncodeBytes(a){ return btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function b64uEncodeBytes(a){
+  // Chunked: String.fromCharCode(...a) spreads the array as CALL ARGUMENTS and
+  // throws RangeError above ~64K elements — a heavy history hits that well below
+  // the server's 256 KB blob cap, which would hard-crash every push.
+  let bin='';
+  for(let i=0;i<a.length;i+=8192) bin+=String.fromCharCode.apply(null, a.subarray(i, i+8192));
+  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
 function b64uDecodeBytes(s){
   const bin=atob(String(s).replace(/-/g,'+').replace(/_/g,'/'));
   const a=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i);
@@ -1606,7 +1628,18 @@ async function decryptBlob(blobKey, env){
   const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:b64uDecodeBytes(env.iv)}, blobKey, b64uDecodeBytes(env.ct));
   return JSON.parse(new TextDecoder().decode(pt));
 }
-function isEncryptedBlob(b){ return !!(b && b.enc===1 && typeof b.iv==='string' && typeof b.ct==='string'); }
+// A PURE envelope has ONLY {enc,iv,ct}. A pre-E2E peer that pulls an encrypted row
+// tolerant-decodes it as an empty snapshot with {enc,iv,ct} in extras, merges its
+// plaintext in, and pushes a HYBRID: plaintext today/history + stale envelope keys.
+// Reading the stale ct there would silently discard that peer's edits while both
+// devices show "Synced" — so a blob carrying plaintext markers is PLAINTEXT.
+function isEncryptedBlob(b){
+  return !!(b && b.enc===1 && typeof b.iv==='string' && typeof b.ct==='string'
+    && !('today' in b) && !('savedAt' in b));
+}
+function isHybridBlob(b){
+  return !!(b && b.enc===1 && typeof b.ct==='string' && ('today' in b || 'savedAt' in b));
+}
 // Metrics beside the ciphertext: COUNTS, NEVER CONTENT (the server also rejects any
 // non-numeric value — same covenant as the diagnostics log).
 function blobStats(b){
@@ -1625,6 +1658,14 @@ function makeEncryptedStore(store, blobKey){
       if(isEncryptedBlob(r.blob)){
         try{ return { blob: await decryptBlob(blobKey, r.blob), version:r.version }; }
         catch(e){ throw new Error('blob decrypt failed'); }   // never echo content into errors
+      }
+      // Hybrid (pre-E2E peer round-tripped an envelope through its extras): the
+      // PLAINTEXT half is the newer truth — the stale ct predates that peer's merge.
+      // Strip the envelope keys (hydrate also drops them) and take the plaintext.
+      if(isHybridBlob(r.blob)){
+        const { enc, iv, ct, ...plainBlob } = r.blob;
+        diag('sync-hybrid-blob', {v:r.version});   // mixed-version window forensics
+        return { blob:plainBlob, version:r.version, plain:true };
       }
       return { blob:r.blob, version:r.version, plain:true };  // legacy row → upgrade on push
     },
@@ -2905,6 +2946,7 @@ function closeSettings(){
   settingsSheet.setAttribute('data-open','false');
   settingsSheet.setAttribute('aria-hidden','true');
   syncShowQR=false;   // once you've closed Settings you've paired — next open shows the linked view
+  eraseArmed=false;   // an armed erase must not survive the sheet closing (review finding 6)
   syncChrome();
 }
 gearBtn.addEventListener('click', e=>{ e.stopPropagation();
@@ -3841,6 +3883,38 @@ window.__buddy = {
       const st=blobStats({today:{items:[{state:'neutral'},{state:'done'}]}, deferred:[{}], history:[{},{}]});
       ok('blobStats counts only', st.active===1 && st.done===1 && st.deferred===1 && st.historyDays===2
         && Object.values(st).every(v=>typeof v==='number'));
+      // 12f. MIXED-VERSION WINDOW: a pre-E2E peer pulls an encrypted row, tolerant-
+      // decodes it as empty-with-extras, merges its plaintext in, and pushes a HYBRID
+      // (plaintext today/history + stale {enc,iv,ct} echoed via extras). The new
+      // client must read the PLAINTEXT half — decrypting the stale ct would discard
+      // that peer's edits while both devices show "Synced" (silent split-brain).
+      const staleEnv=await encryptBlob(bk, {today:{date:'2026-07-13',items:[{id:'old',text:'STALE',state:'neutral',v:1}]}});
+      const hybrid={ ...staleEnv, version:1, savedAt:Date.now(),
+        today:{date:'2026-07-14', items:[{id:'ph1',text:'PHONE EDIT',state:'neutral',v:2}], morningDone:true},
+        history:[], deferred:[], tombstones:{} };
+      const hinner=makeFakeCASStore({key:'k', blob:hybrid, version:7});
+      const hstore=makeEncryptedStore(hinner, bk);
+      const hp=await hstore.pull('k');
+      ok('hybrid blob reads as PLAINTEXT (peer edits win over stale ct)',
+        hp.plain===true && JSON.stringify(hp.blob).includes('PHONE EDIT') && !JSON.stringify(hp.blob).includes('STALE'));
+      await syncOnce(hstore,'k');
+      const hrow=hinner._rows()['k'];
+      const hwire=JSON.stringify(hrow.blob);
+      ok('hybrid row re-encrypts clean (no plaintext, no echoed envelope keys)',
+        hrow.version===8 && isEncryptedBlob(hrow.blob) && !hwire.includes('PHONE EDIT'));
+      const hback=await hstore.pull('k');
+      ok('re-encrypted row still contains the peer edit',
+        JSON.stringify(hback.blob).includes('PHONE EDIT') && !('enc' in hback.blob));
+      // 12g. hydrate() drops envelope keys from extras so they can never be re-emitted.
+      const hyd=hydrate({version:1, savedAt:1, today:{date:'2026-07-14',items:[]}, enc:1, iv:'x', ct:'y', someFutureField:true});
+      const rewire=hydratedToWire(hyd);
+      ok('hydrate drops enc/iv/ct but keeps real future fields',
+        !('enc' in rewire) && !('iv' in rewire) && !('ct' in rewire) && rewire.someFutureField===true);
+      // 12h. big-blob encode survives (chunked base64 — the spread version threw RangeError)
+      const bigBlob={pad:'x'.repeat(150000)};
+      const bigEnv=await encryptBlob(bk, bigBlob);
+      const bigBack=await decryptBlob(bk, bigEnv);
+      ok('150KB blob encrypts + round-trips (chunked b64)', bigBack.pad.length===150000);
 
       // 13. Buddy Cloud (hosted) plumbing — config.js driven, none of it baked in.
       const hadCloud=window.BUDDY_CLOUD;
