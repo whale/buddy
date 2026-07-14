@@ -28,7 +28,7 @@ Buddy is a **menu-bar app**, so it won't show in your Dock. Click the sticker ic
 
 The released app pairs with **Buddy for iPhone** (TestFlight, App Store soon): open Settings → **Connect & show QR**, scan it with your phone, done. No account, no password, no email.
 
-**Privacy, plainly:** your tasks are **encrypted on your device before they sync** — the sync service stores scrambled data it cannot read, and we couldn't peek if we wanted to. The only things visible server-side are counts (how many tasks, how often you sync), never words. There's an **Erase cloud data** button in Settings that deletes your synced copy from the server on the spot. One honest caveat: sync is a *convenience copy*, not a backup — if you ever lose every device at once, your history starts fresh.
+**Privacy, plainly:** your tasks are **encrypted on your device before they sync** — the sync service stores scrambled data it cannot read, and we couldn't peek if we wanted to. The only things visible server-side are counts (how many tasks, how often you sync), never words. There's an **Erase cloud data** button in Settings that deletes your synced copy from the server (unlink your iPhone first — a still-paired device re-uploads its copy on its next sync). One honest caveat: sync is a *convenience copy*, not a backup — if you ever lose every device at once, your history starts fresh.
 
 ### Updates are automatic
 Buddy checks for new versions on its own (at launch, every few hours, and when it regains focus). When one's ready, a banner slides in offering **Install & Relaunch** — one click and you're up to date.
