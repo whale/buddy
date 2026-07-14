@@ -11,7 +11,9 @@ import Foundation
 // local domain. (This is the timestamp-unit fix; the Mac needs no change.)
 
 // MARK: - Store contract (mirror of makeFakeCASStore / the buddy_push SQL)
-struct PullResult { let blob: SyncSnapshot?; let version: Int }   // version 0 / blob nil if absent
+// `plain` marks a legacy PLAINTEXT row (pre-E2E) pulled from the wire — syncOnce uses it
+// to force one push so the row gets re-written as ciphertext even when content is equal.
+struct PullResult { let blob: SyncSnapshot?; let version: Int; var plain: Bool = false }
 struct PushResult { let ok: Bool; let blob: SyncSnapshot?; let version: Int }
 
 protocol CASStore {
@@ -137,7 +139,10 @@ enum BuddySync {
         // Nothing new vs remote → adopt remote, don't churn the version. The caller
         // (SyncEngine) additionally skips the adopt when local == remote content, so an
         // idle 1.5s poll never rewrites state/disk (mirrors the Mac's applyWire skip).
-        if contentKey(merged) == contentKey(remote.blob) {
+        // EXCEPTION: remote.plain marks a legacy PLAINTEXT row (pre-E2E) — skipping the
+        // push would leave it readable on the server forever if content never changed,
+        // so fall through and push; the store re-writes it as ciphertext (mirrors Mac).
+        if contentKey(merged) == contentKey(remote.blob) && !remote.plain {
             return SyncResult(ok: true, noop: true, version: remote.version, merged: remote.blob ?? merged)
         }
 

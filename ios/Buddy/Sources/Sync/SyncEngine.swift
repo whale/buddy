@@ -89,7 +89,8 @@ final class SyncEngine {
 
     private func onePass() async {
         guard let store, config.isSyncable,
-              let cas = SupabaseCASStore(url: config.backendUrl, anonKey: config.anonKey, device: "ios")
+              let cas = SupabaseCASStore(url: config.backendUrl, anonKey: config.anonKey,
+                                         syncKey: config.syncKey, device: "ios")
         else { return }
         let key = SyncIdentity.ownerId(for: config.syncKey)   // M2: hash, not the raw key
         let local = store.snapshot()

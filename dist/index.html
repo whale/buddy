@@ -1232,14 +1232,17 @@ async function syncOnce(store, key){
   // Nothing new vs remote → adopt remote, don't churn the version. Only re-apply (and
   // re-render) when our LOCAL copy is actually behind remote — otherwise the 1.5s poll
   // would applyWire→render on every tick and visibly jitter the UI (esp. the Done page).
-  if(blobContentKey(mergedBlob) === blobContentKey(remote.blob)){
+  // EXCEPTION: remote.plain marks a legacy PLAINTEXT row (pre-E2E) — skipping the push
+  // would leave it readable on the server forever if content never changed, so push
+  // anyway; the encrypted store re-writes it as ciphertext at the same content.
+  if(blobContentKey(mergedBlob) === blobContentKey(remote.blob) && !remote.plain){
     if(remote.blob && blobContentKey(localBlob) !== blobContentKey(remote.blob)) applyWire(remote.blob);
     return { ok:true, pushed:false, noop:true, version:remote.version };
   }
 
   let expected = remote.version || 0;
   for(let attempt=0; attempt<SYNC_MAX_RETRY; attempt++){
-    const res = await store.push(key, mergedBlob, expected);
+    const res = await store.push(key, mergedBlob, expected, blobStats(mergedBlob));
     if(res && res.ok){ applyWire(mergedBlob); return { ok:true, pushed:true, version:res.version, attempts:attempt+1 }; }
     // Someone wrote between our pull and push → fold their blob in and retry CAS.
     mergedBlob = mergeWire(mergedBlob, res && res.blob);
@@ -1294,8 +1297,18 @@ function makeSupabaseCASStore(baseUrl, anonKey, device){
       const r = row0(await rpc('buddy_pull', { p_key:key }));
       return r ? { blob:r.blob, version:r.version } : { blob:null, version:0 };
     },
-    async push(key, blob, expected){
-      const r = row0(await rpc('buddy_push', { p_key:key, p_blob:blob, p_expected:expected, p_device:device||'web' }));
+    async push(key, blob, expected, stats){
+      const base = { p_key:key, p_blob:blob, p_expected:expected, p_device:device||'web' };
+      let rows;
+      try{ rows = await rpc('buddy_push', stats ? { ...base, p_stats:stats } : base); }
+      catch(e){
+        // Self-hosted backend on the pre-hardening schema: buddy_push has no p_stats
+        // param, so PostgREST can't match the call (PGRST202/404). Retry without stats
+        // rather than bricking their sync until they re-run hosted-setup.sql.
+        if(stats && /PGRST202|404/.test(String(e&&e.message))) rows = await rpc('buddy_push', base);
+        else throw e;
+      }
+      const r = row0(rows);
       return r ? { ok:r.ok, blob:r.blob, version:r.version } : { ok:false, blob:null, version:0 };
     },
   };
@@ -1327,7 +1340,9 @@ function syncConfigured(){ return !!readSyncCfg(); }
 async function initSync(){
   const cfg = readSyncCfg();
   if(!cfg){ syncStore=null; syncOwnerId=null; return false; }
-  syncStore   = makeSupabaseCASStore(cfg.url, cfg.key, NATIVE ? 'mac' : 'web');
+  // E2E: everything past this line speaks ciphertext; the raw store is never held.
+  syncStore   = makeEncryptedStore(makeSupabaseCASStore(cfg.url, cfg.key, NATIVE ? 'mac' : 'web'),
+                                   await deriveBlobKey(cfg.syncKey));
   syncOwnerId = await deriveOwnerId(cfg.syncKey);   // M2: hash, not the raw key
   diag('sync-owner', {bucket: syncOwnerId.slice(0,8)});   // which bucket THIS device talks to (split-brain forensics)
   return true;
@@ -1470,6 +1485,74 @@ function parsePairingPayload(s){
        if(o && typeof o.syncKey==='string' && typeof o.backendUrl==='string' && typeof o.anonKey==='string')
          return { backendUrl:o.backendUrl, anonKey:o.anonKey, syncKey:o.syncKey }; }catch{}
   return null;
+}
+
+/* ---- E2E blob encryption ----
+   The synced document is encrypted ON DEVICE before it reaches the wire; the server
+   stores ciphertext it cannot read. The key is derived from the syncKey — which the
+   server NEVER sees (only sha256(syncKey) travels as owner_id) — so this rides the
+   existing capability model: same QR, same pairing, nothing new to lose. Wrong-key
+   decrypt "can't happen" in normal operation (a different syncKey addresses a
+   different row), so a decrypt failure means corruption/tampering, and it must fail
+   the pass loudly rather than adopt garbage.
+   Envelope on the wire: { enc:1, iv:<b64url 12B>, ct:<b64url ciphertext+GCM tag> }.
+   Legacy plaintext rows are readable and get re-pushed encrypted on the first pass
+   (see the `plain` flag + the upgrade branch in syncOnce).
+   Mac and iOS MUST agree byte-for-byte — pinned by the HKDF/AES-GCM test vector in
+   syncTest()/BlobCryptoTests (derive from 32 zero bytes → encrypt {"probe":1} with a
+   zero IV). Parameters: HKDF-SHA256, empty salt, info "buddy-blob-v1" → AES-256-GCM. */
+const BLOB_ENC_INFO = 'buddy-blob-v1';
+function b64uEncodeBytes(a){ return btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function b64uDecodeBytes(s){
+  const bin=atob(String(s).replace(/-/g,'+').replace(/_/g,'/'));
+  const a=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i);
+  return a;
+}
+async function deriveBlobKey(syncKey){
+  const ikm = await crypto.subtle.importKey('raw', b64uDecodeBytes(syncKey), 'HKDF', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name:'HKDF', hash:'SHA-256', salt:new Uint8Array(0), info:new TextEncoder().encode(BLOB_ENC_INFO) },
+    ikm, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
+}
+async function encryptBlob(blobKey, blob, ivOverride){          // ivOverride: test vector only
+  const iv = ivOverride || crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, blobKey,
+    new TextEncoder().encode(JSON.stringify(blob))));
+  return { enc:1, iv:b64uEncodeBytes(iv), ct:b64uEncodeBytes(ct) };
+}
+async function decryptBlob(blobKey, env){
+  const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:b64uDecodeBytes(env.iv)}, blobKey, b64uDecodeBytes(env.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+function isEncryptedBlob(b){ return !!(b && b.enc===1 && typeof b.iv==='string' && typeof b.ct==='string'); }
+// Metrics beside the ciphertext: COUNTS, NEVER CONTENT (the server also rejects any
+// non-numeric value — same covenant as the diagnostics log).
+function blobStats(b){
+  const items=(b && b.today && b.today.items)||[];
+  const doneToday=items.filter(i=>i && i.state==='done').length;
+  return { active:items.length-doneToday, done:doneToday,
+    deferred:((b&&b.deferred)||[]).length, historyDays:((b&&b.history)||[]).length };
+}
+/* Store decorator: syncOnce stays plaintext-pure; ciphertext exists ONLY at the wire.
+   Wraps any {pull,push} CAS store (real Supabase or the in-memory fake in tests). */
+function makeEncryptedStore(store, blobKey){
+  return {
+    async pull(key){
+      const r = await store.pull(key);
+      if(!r || !r.blob) return r;
+      if(isEncryptedBlob(r.blob)){
+        try{ return { blob: await decryptBlob(blobKey, r.blob), version:r.version }; }
+        catch(e){ throw new Error('blob decrypt failed'); }   // never echo content into errors
+      }
+      return { blob:r.blob, version:r.version, plain:true };  // legacy row → upgrade on push
+    },
+    async push(key, blob, expected, stats){
+      const r = await store.push(key, await encryptBlob(blobKey, blob), expected, stats);
+      // CAS conflict hands back the CURRENT remote blob for re-merge — decrypt that too.
+      if(r && !r.ok && isEncryptedBlob(r.blob)) r.blob = await decryptBlob(blobKey, r.blob);
+      return r;
+    },
+  };
 }
 
 let bootHadStored=false, bootUsable=false, recoveredFromBak=false, lsHydrated=null, bakHydrated=null;
@@ -3045,6 +3128,8 @@ window.__buddy = {
   syncOnce, makeFakeCASStore, makeSupabaseCASStore,   // sync step 5: CAS loop + reference + live store
   setSync, syncNow, syncConfigured, isValidSyncKey,   // auto-sync engine (opt-in)
   generateSyncKey, deriveOwnerId, pairingPayload, parsePairingPayload,   // QR pairing core
+  deriveBlobKey, encryptBlob, decryptBlob, isEncryptedBlob, makeEncryptedStore, blobStats,  // E2E crypto
+
   openDrawer, closeDrawer,
   showMorning, render,
   renderWeather, wxKey, updateWeather,
@@ -3643,6 +3728,36 @@ window.__buddy = {
       const round=parsePairingPayload(pairingPayload('https://x.supabase.co', 'anon-abc', key));
       ok('pairing payload round-trips', round && round.syncKey===key && round.backendUrl==='https://x.supabase.co' && round.anonKey==='anon-abc');
       ok('pairing payload rejects garbage', parsePairingPayload('not json')===null && parsePairingPayload('{}')===null && parsePairingPayload('{"backendUrl":"x","syncKey":"y"}')===null);
+
+      // 12. E2E encryption: the wire holds ciphertext, the engine sees plaintext.
+      const zeroKey='A'.repeat(43);                                  // 32 zero bytes, valid base64url syncKey
+      const bk=await deriveBlobKey(zeroKey);
+      // 12a. Cross-platform vector (MUST match BlobCryptoTests on iOS): HKDF-SHA256
+      // (empty salt, info buddy-blob-v1) of 32 zero bytes → AES-256-GCM, zero IV,
+      // pt {"probe":1}. Pinned ciphertext+tag, base64url.
+      const vec=await encryptBlob(bk, {probe:1}, new Uint8Array(12));
+      ok('E2E vector matches the shared JS↔Swift pin', vec.ct==='dwuU613APPxtAVftrUOhEcoNMm60PbSF04gQ', 'ct='+vec.ct);
+      // 12b. Round-trip.
+      const rt=await decryptBlob(bk, await encryptBlob(bk, {today:{date:'2026-07-14',items:[]}}));
+      ok('E2E round-trips a blob', rt && rt.today && rt.today.date==='2026-07-14');
+      // 12c. Through the store decorator: pushed rows are envelopes, pulls decrypt.
+      // Keep a handle on the raw fake store so we can inspect what actually hit the wire.
+      const inner=makeFakeCASStore(); const estore=makeEncryptedStore(inner, bk);
+      setLocal([{id:'e1',text:'SECRET TASK',state:'neutral',v:1}]); await syncOnce(estore,'k');
+      const wire=inner._rows()['k'];
+      ok('wire row is an envelope (enc/iv/ct), not plaintext', wire && isEncryptedBlob(wire.blob) && !JSON.stringify(wire.blob).includes('SECRET TASK'));
+      const pulled=await estore.pull('k');
+      ok('pull decrypts back to the task', pulled.blob && JSON.stringify(pulled.blob).includes('SECRET TASK'));
+      // 12d. Legacy plaintext row upgrades to ciphertext on the next pass, same content.
+      const inner2=makeFakeCASStore({key:'k', blob:JSON.parse(serialize()), version:3});
+      const estore2=makeEncryptedStore(inner2, bk);
+      await syncOnce(estore2,'k');
+      const up=inner2._rows()['k'];
+      ok('plaintext row upgrades to ciphertext on first pass', up.version===4 && isEncryptedBlob(up.blob), 'v='+up.version);
+      // 12e. Stats are counts, never content.
+      const st=blobStats({today:{items:[{state:'neutral'},{state:'done'}]}, deferred:[{}], history:[{},{}]});
+      ok('blobStats counts only', st.active===1 && st.done===1 && st.deferred===1 && st.historyDays===2
+        && Object.values(st).every(v=>typeof v==='number'));
     }catch(e){ ok('syncTest ran without throwing', false, e&&(e.message+' @ '+(e.stack||'').split('\n')[1])); }
     state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
     state.tombstones=snap.tombstones||{}; state.erasedAt=(typeof snap.erasedAt==='number')?snap.erasedAt:null;
