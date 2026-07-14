@@ -24,6 +24,12 @@ On that page, grab the **`Buddy_…_universal.dmg`** file.
 ### Where did it go?
 Buddy is a **menu-bar app**, so it won't show in your Dock. Click the sticker icon up top to show/hide it, open settings, or quit. The drawer also reveals when you move your mouse to the **right edge** of your screen.
 
+### Sync with your iPhone
+
+The released app pairs with **Buddy for iPhone** (TestFlight, App Store soon): open Settings → **Connect & show QR**, scan it with your phone, done. No account, no password, no email.
+
+**Privacy, plainly:** your tasks are **encrypted on your device before they sync** — the sync service stores scrambled data it cannot read, and we couldn't peek if we wanted to. The only things visible server-side are counts (how many tasks, how often you sync), never words. There's an **Erase cloud data** button in Settings that deletes your synced copy from the server on the spot. One honest caveat: sync is a *convenience copy*, not a backup — if you ever lose every device at once, your history starts fresh.
+
 ### Updates are automatic
 Buddy checks for new versions on its own (at launch, every few hours, and when it regains focus). When one's ready, a banner slides in offering **Install & Relaunch** — one click and you're up to date.
 
@@ -57,7 +63,12 @@ Buddy is fully driveable from the keyboard:
 
 ## For developers & contributors
 
-Buddy is **MIT-licensed and open source**. The Mac app is the shipped product; the iOS companion ships via TestFlight and live-syncs with it. Everything is **local-first** — it works fully offline, and sync is opt-in (below), so you can clone, build, and run with **no backend and no secrets**.
+Buddy is **MIT-licensed and open source**, and follows the Ghost model — one codebase, two ways to run it:
+
+- **The released app** (the DMG above + the iPhone app) is the **hosted edition**: it ships with the address of Buddy's sync service inside, so sync is one button. That address + publishable key are *identifiers, not secrets* ([Supabase documents them as safe to ship in clients](https://supabase.com/docs/guides/api/api-keys)); everything privileged is enforced server-side, and task content is end-to-end encrypted so the service can't read it either way.
+- **A clone of this repo** builds the **open edition**: fully local-only, no backend, no keys, no accounts — Settings shows self-host fields instead of the one-button connect. Bring your own Supabase (below) and you own the whole stack.
+
+The hosted parts live *in this repo*, dormant — they activate only when a gitignored `dist/config.js` / injected `BuddyCloud.swift` is present at build time (see `RELEASE-UPDATER.md`). Nothing about the open edition is crippled; it's the same app pointed at nothing.
 
 ### Repository layout
 
@@ -97,13 +108,14 @@ To run it on **your own iPhone**, open the project in Xcode and set the signing 
 cd ios && fastlane beta    # needs ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH set
 ```
 
-### Sync (live — opt-in, local-first)
+### Sync (live — opt-in, local-first, end-to-end encrypted)
 
 Buddy stores your data **on your own machine** and works fully offline. Cross-device sync (Mac ⇄ iPhone) is **opt-in** and live:
 
-- A **Supabase** backend you supply yourself (URL + anon key; schema in `supabase/`). Nothing is baked into the app — a fork runs **local-only by default**, so cloning and building needs no accounts.
-- Devices pair by **scanning a QR code** carrying an auto-generated sync key — no login, no email. One synced document with a deterministic symmetric merge (same test vectors on both platforms) and local backups.
-- Settings on each device shows the sync **bucket id** ("Synced 12:04 · ab12cd") — two devices showing the same code are provably paired. If devices ever stop converging, run `pnpm sync:doctor` for a verdict.
+- **E2E encryption:** the synced document is encrypted on-device (HKDF of the pairing key → AES-256-GCM) before it reaches the wire; the server stores ciphertext plus integer counts (`{active, done, …}`) it enforces as numbers-only. The pairing key never leaves your devices — only its hash travels, as the row id. Same rule as the diagnostics log: **counts, never content**.
+- **Self-hosting (open edition):** create a free Supabase project, paste `supabase/hosted-setup.sql` into its SQL editor (schema + RLS + the abuse guards — tunables at the top), then enter your Project URL + anon key in Buddy's Settings. That's the entire stack. The schema denies all direct table access; the two `SECURITY DEFINER` RPCs can only touch the single row your key addresses.
+- Devices pair by **scanning a QR code** carrying an auto-generated 256-bit sync key — no login, no email. One synced document with a deterministic symmetric merge (same test vectors on both platforms) and local backups. **Sync is a convenience copy, not a backup** — lose every device at once and the ciphertext is unrecoverable by design.
+- Settings on each device shows the sync **bucket id** ("Synced 12:04 · ab12cd"), derived from backend + key — two devices showing the same code are provably paired *to the same backend*. If devices ever stop converging, run `pnpm sync:doctor` for a verdict. **Erase cloud data** in Settings deletes your server row immediately.
 
 ### Bug reports
 
