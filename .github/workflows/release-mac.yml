@@ -122,6 +122,26 @@ jobs:
           printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/apple-api-key/AuthKey.p8"
           echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/apple-api-key/AuthKey.p8" >> "$GITHUB_ENV"
 
+      # Buddy Cloud config — THE hosted/open split. dist/config.js is gitignored and
+      # exists only in builds made with these secrets; a fork without them produces
+      # the open-source edition (local-only, self-host Settings). The values are
+      # publishable identifiers, not secrets — kept out of the repo by policy
+      # (nothing hosted in the source), not for confidentiality.
+      - name: Inject Buddy Cloud config (hosted build)
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          BUDDY_CLOUD_URL: ${{ secrets.BUDDY_CLOUD_URL }}
+          BUDDY_CLOUD_ANON_KEY: ${{ secrets.BUDDY_CLOUD_ANON_KEY }}
+        shell: bash
+        run: |
+          if [ -n "$BUDDY_CLOUD_URL" ] && [ -n "$BUDDY_CLOUD_ANON_KEY" ]; then
+            printf 'window.BUDDY_CLOUD = { url: "%s", anon: "%s" };\n' \
+              "$BUDDY_CLOUD_URL" "$BUDDY_CLOUD_ANON_KEY" > dist/config.js
+            echo "Hosted build: Buddy Cloud config injected."
+          else
+            echo "No BUDDY_CLOUD_* secrets — building the open edition (local-only)."
+          fi
+
       - name: Build signed, notarized universal app
         if: steps.existing.outputs.exists != 'true'
         env:
