@@ -16,6 +16,7 @@ struct SettingsView: View {
     // Sync section state
     @State private var showScanner = false
     @State private var manualExpanded = false
+    @State private var scannedCloud = false   // pairing came from a v2 (Buddy Cloud) QR
     @State private var fURL = ""
     @State private var fAnon = ""
     @State private var fKey = ""
@@ -85,8 +86,14 @@ struct SettingsView: View {
                                 }
                             }
                             if manualExpanded && !isConnected {
-                                syncField("Backend URL", text: $fURL, keyboard: .URL)
-                                syncField("Anon key", text: $fAnon)
+                                // Hosted builds (BuddyCloud present) never show server
+                                // tooling — the backend is part of the service. Manual
+                                // entry is just the sync key (camera-broken fallback).
+                                // Server fields are the open-source edition's UI.
+                                if !BuddyCloud.present {
+                                    syncField("Backend URL", text: $fURL, keyboard: .URL)
+                                    syncField("Anon key", text: $fAnon)
+                                }
                                 syncField("Sync key (43 characters)", text: $fKey)
                                 syncPillRow { pill("Connect") { connect() }; Spacer() }
                             }
@@ -169,8 +176,18 @@ struct SettingsView: View {
         // Bucket id prefix (the Mac shows the same 6 chars): two devices showing
         // the same suffix are provably on the same sync bucket — split-brain
         // pairings sync "fine" but never see each other (field report 2026-07-10).
-        let bucket = sync.currentConfig.isSyncable
-            ? " · " + String(SyncIdentity.ownerId(for: sync.currentConfig.syncKey).prefix(6)) : ""
+        // BACKEND-AWARE display id (sha256(url|syncKey), Mac parity): same 6 chars on
+        // two devices now proves same bucket AND same backend — the raw syncKey hash
+        // showed identical ids on split-brained pairings once two backends existed.
+        // The url is NORMALIZED (trailing slashes, case) exactly like the Mac's
+        // syncDisplayId: the two devices' copies come from different provisioning
+        // paths (config.js vs fastlane env), and one stray "/" would make a healthy
+        // pairing show two different ids.
+        let live = sync.currentConfig.resolved
+        var normUrl = live.backendUrl.lowercased()
+        while normUrl.hasSuffix("/") { normUrl.removeLast() }
+        let bucket = live.isSyncable
+            ? " · " + String(SyncIdentity.ownerId(for: normUrl + "|" + live.syncKey).prefix(6)) : ""
         if sync.currentConfig.enabled, sync.lastError != nil, sync.lastSyncedAt == nil { return "Error" + bucket }
         if let t = sync.lastSyncedAt { return "Synced \(Self.hm.string(from: t))" + bucket }
         if sync.currentConfig.isSyncable { return "Connected" + bucket }
@@ -184,14 +201,21 @@ struct SettingsView: View {
             pairError = "That QR code isn’t a Buddy pairing code."; manualExpanded = true; return
         }
         fURL = p.backendUrl; fAnon = p.anonKey; fKey = p.syncKey
+        scannedCloud = p.cloud
         connect()
     }
 
     private func connect() {
+        // Manual entry on a hosted build: the user only typed the sync key — fill the
+        // backend from BuddyCloud (the fields aren't shown; see manualExpanded above).
+        if BuddyCloud.present && fURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            fURL = BuddyCloud.url!; fAnon = BuddyCloud.anon!; scannedCloud = true
+        }
         let cfg = SyncConfig(backendUrl: fURL.trimmingCharacters(in: .whitespacesAndNewlines),
                              anonKey: fAnon.trimmingCharacters(in: .whitespacesAndNewlines),
                              syncKey: fKey.trimmingCharacters(in: .whitespacesAndNewlines),
-                             enabled: true)
+                             enabled: true,
+                             cloud: scannedCloud)
         guard cfg.isSyncable else {
             pairError = SyncConfig.isValidSyncKey(cfg.syncKey)
                 ? "Check the backend URL and anon key."

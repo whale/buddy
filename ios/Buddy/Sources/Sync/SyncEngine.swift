@@ -88,9 +88,12 @@ final class SyncEngine {
     }
 
     private func onePass() async {
-        guard let store, config.isSyncable,
-              let cas = SupabaseCASStore(url: config.backendUrl, anonKey: config.anonKey,
-                                         syncKey: config.syncKey, device: "ios")
+        // .resolved: cloud pairings re-read url/key from BuddyCloud each pass, so a
+        // rotated hosted key takes effect on the next app update without re-pairing.
+        let live = config.resolved
+        guard let store, live.isSyncable,
+              let cas = SupabaseCASStore(url: live.backendUrl, anonKey: live.anonKey,
+                                         syncKey: live.syncKey, device: "ios")
         else { return }
         let key = SyncIdentity.ownerId(for: config.syncKey)   // M2: hash, not the raw key
         let local = store.snapshot()

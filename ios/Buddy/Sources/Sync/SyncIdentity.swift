@@ -21,22 +21,47 @@ enum SyncIdentity {
         SHA256.hash(data: Data(syncKey.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
-    // The QR payload carries everything the phone needs to sync: where the backend is
-    // (backendUrl), how to authenticate (anonKey — publishable by design, safe to embed),
-    // and the capability key (syncKey). Mac and iOS MUST agree on these JSON keys.
-    struct Pairing: Codable, Equatable { var v: Int = 1; var backendUrl: String; var anonKey: String; var syncKey: String }
+    // The QR payload. v1 (self-host) carries everything the phone needs: backendUrl,
+    // anonKey (publishable by design, safe to embed), and the capability syncKey.
+    // v2 (hosted) carries ONLY the syncKey — the phone resolves the backend from its
+    // own baked-in BuddyCloud config, which keeps the hosted key rotatable (a v1 QR
+    // would freeze the anon key into the phone at pairing time). Mirror of
+    // pairingPayload()/parsePairingPayload() in dist/index.html.
+    struct Pairing: Codable, Equatable {
+        var v: Int = 1; var backendUrl: String; var anonKey: String; var syncKey: String
+        var cloud: Bool = false   // local decode flag, not part of the wire payload
+        private enum CodingKeys: String, CodingKey { case v, backendUrl, anonKey, syncKey }
+        init(v: Int = 1, backendUrl: String, anonKey: String, syncKey: String, cloud: Bool = false) {
+            self.v = v; self.backendUrl = backendUrl; self.anonKey = anonKey
+            self.syncKey = syncKey; self.cloud = cloud
+        }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            v          = (try? c.decodeIfPresent(Int.self, forKey: .v)) ?? 1
+            backendUrl = (try? c.decodeIfPresent(String.self, forKey: .backendUrl)) ?? ""
+            anonKey    = (try? c.decodeIfPresent(String.self, forKey: .anonKey)) ?? ""
+            syncKey    = (try? c.decodeIfPresent(String.self, forKey: .syncKey)) ?? ""
+        }
+    }
 
-    /// The QR payload: {v, backendUrl, anonKey, syncKey} JSON.
+    /// The v1 QR payload: {v:1, backendUrl, anonKey, syncKey} JSON.
     static func payload(backendUrl: String, anonKey: String, syncKey: String) -> String {
         let p = Pairing(backendUrl: backendUrl, anonKey: anonKey, syncKey: syncKey)
         return (try? String(data: JSONEncoder().encode(p), encoding: .utf8) ?? "") ?? ""
     }
 
-    /// Parse a scanned payload; nil if malformed or missing required fields.
+    /// Parse a scanned payload; nil if malformed, missing required fields, or a v2
+    /// (hosted) code scanned by a build that has no BuddyCloud config to resolve it.
     static func parse(_ s: String) -> Pairing? {
         guard let data = s.data(using: .utf8),
-              let p = try? JSONDecoder().decode(Pairing.self, from: data),
-              !p.syncKey.isEmpty, !p.backendUrl.isEmpty, !p.anonKey.isEmpty else { return nil }
+              var p = try? JSONDecoder().decode(Pairing.self, from: data),
+              !p.syncKey.isEmpty else { return nil }
+        if p.v == 2 {
+            guard BuddyCloud.present else { return nil }
+            p.backendUrl = BuddyCloud.url!; p.anonKey = BuddyCloud.anon!; p.cloud = true
+            return p
+        }
+        guard !p.backendUrl.isEmpty, !p.anonKey.isEmpty else { return nil }
         return p
     }
 }

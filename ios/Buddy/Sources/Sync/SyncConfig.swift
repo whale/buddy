@@ -11,6 +11,18 @@ struct SyncConfig: Equatable {
     var anonKey: String
     var syncKey: String
     var enabled: Bool
+    // Paired to Buddy Cloud (v2 QR): url/anon are refreshed from BuddyCloud on every
+    // engine pass, so the hosted publishable key can rotate without re-pairing. The
+    // stored backendUrl/anonKey are just the snapshot from pairing day.
+    var cloud: Bool = false
+
+    /// The config to actually connect with: cloud pairings read the live BuddyCloud
+    /// values (when this build has them); self-host pairings use what was stored.
+    var resolved: SyncConfig {
+        guard cloud, BuddyCloud.present else { return self }
+        var r = self; r.backendUrl = BuddyCloud.url!; r.anonKey = BuddyCloud.anon!
+        return r
+    }
 
     /// A valid sync key is exactly a 43-char base64url string (256-bit key, no padding).
     /// This MUST be enforced before enabling sync: deriveOwnerId("") is a constant hash, so a
@@ -31,6 +43,7 @@ enum SyncConfigStore {
     private static let dURL = "buddy.sync.backendUrl"
     private static let dAnon = "buddy.sync.anonKey"
     private static let dEnabled = "buddy.sync.enabled"
+    private static let dCloud = "buddy.sync.cloud"
     private static let keychainAccount = "buddy.sync.syncKey"
 
     static func load() -> SyncConfig {
@@ -39,7 +52,8 @@ enum SyncConfigStore {
             backendUrl: d.string(forKey: dURL) ?? "",
             anonKey:    d.string(forKey: dAnon) ?? "",
             syncKey:    Keychain.get(keychainAccount) ?? "",
-            enabled:    d.bool(forKey: dEnabled))
+            enabled:    d.bool(forKey: dEnabled),
+            cloud:      d.bool(forKey: dCloud))
     }
 
     /// Persist. Rejects an enabled config with an invalid key (fail-closed) — returns false so the
@@ -51,6 +65,7 @@ enum SyncConfigStore {
         d.set(cfg.backendUrl, forKey: dURL)
         d.set(cfg.anonKey, forKey: dAnon)
         d.set(cfg.enabled, forKey: dEnabled)
+        d.set(cfg.cloud, forKey: dCloud)
         if cfg.syncKey.isEmpty { Keychain.delete(keychainAccount) }
         else { Keychain.set(cfg.syncKey, account: keychainAccount) }
         return true
@@ -58,7 +73,7 @@ enum SyncConfigStore {
 
     static func clear() {
         let d = UserDefaults.standard
-        [dURL, dAnon, dEnabled].forEach { d.removeObject(forKey: $0) }
+        [dURL, dAnon, dEnabled, dCloud].forEach { d.removeObject(forKey: $0) }
         Keychain.delete(keychainAccount)
     }
 }
