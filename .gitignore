@@ -39,3 +39,7 @@ AuthKey_*
 # Buddy Cloud config — present ONLY in hosted builds (CI injects it from a secret).
 # A clone runs local-only without it: that IS the open-source edition.
 dist/config.js
+
+# Claude session plumbing — machine-local symlinks + worktree state, never shared
+# (.claude/skills symlinks into ~/Projects/.agents — dangles on any other machine)
+.claude/
