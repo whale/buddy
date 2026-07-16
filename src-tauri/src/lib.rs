@@ -216,25 +216,54 @@ fn hide_morning_window(app: AppHandle) {
 // ONLY the burst.
 static PENDING_CELEBRATE: std::sync::Mutex<Option<i32>> = std::sync::Mutex::new(None);
 
+// Rust-side breadcrumb into the same diagnostics log the web layer uses —
+// bypasses webview IPC entirely, so it records the overlay lifecycle even when
+// the overlay webview itself is broken/deaf. Same privacy rules: no content.
+fn diag_native(app: &AppHandle, evt: &str, extra: &str) {
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let comma = if extra.is_empty() { "" } else { "," };
+    let _ = append_event(app.clone(), format!("{{\"t\":\"{t}\",\"evt\":\"{evt}\"{comma}{extra}}}"));
+}
+
 #[tauri::command]
 fn celebrate_fullscreen(app: AppHandle, intensity: i32) {
     *PENDING_CELEBRATE.lock().unwrap() = Some(intensity);
+    let existing = app.get_webview_window("confetti").is_some();
+    diag_native(&app, "confetti-invoke", &format!("\"existing\":{existing}"));
     let win = match app.get_webview_window("confetti") {
         Some(w) => w,
         None => match WebviewWindowBuilder::new(&app, "confetti", WebviewUrl::App("index.html".into()))
             .title("Buddy")
-            .transparent(true)
+            // DIAGNOSTIC (temporary): opaque — if parrots appear on a white sheet,
+            // the bug is runtime-created TRANSPARENT windows never painting.
+            .transparent(false)
             .decorations(false)
             .resizable(false)
             .always_on_top(true)
-            .visible(false)
+            // BORN VISIBLE, deliberately: WKWebView never starts its renderer for
+            // a window created hidden and only shown later (the second half of the
+            // invisible-celebration bug). The window is transparent + click-through,
+            // so "visible" costs nothing to the user.
+            .visible(true)
             .focused(false)
             .shadow(false)
             .accept_first_mouse(false)
+            // THE celebration-invisibility fix: a fully-transparent, never-key,
+            // click-through window reads as "hidden/occluded" to WebKit, which
+            // suspends rAF — the burst renders 120 particles frozen at opacity 0.
+            // Disabling background throttling keeps the animation clock running.
+            .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
             .build()
         {
             Ok(w) => w,
-            Err(e) => { eprintln!("[buddy] confetti window failed: {e}"); return; }
+            Err(e) => {
+                eprintln!("[buddy] confetti window failed: {e}");
+                diag_native(&app, "confetti-window-failed", &format!("\"err\":\"{}\"", e.to_string().replace('"', "'")));
+                return;
+            }
         },
     };
     // Cover the screen the drawer lives on (fall back to primary).
@@ -249,17 +278,67 @@ fn celebrate_fullscreen(app: AppHandle, intensity: i32) {
     #[cfg(target_os = "macos")]
     allow_over_fullscreen(&win);
     let _ = win.show();
+    // DIAGNOSTIC (temporary): does key-window status start the renderer?
+    let _ = win.set_focus();
+    // show() alone leaves this never-key, click-through window in a state the
+    // window server reports as non-visible — WKWebView then never starts
+    // compositing (the invisible-celebration bug). orderFrontRegardless forces
+    // real window-server visibility WITHOUT stealing key/focus from the user.
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSWindow;
+        if let Ok(ptr) = win.ns_window() {
+            if !ptr.is_null() {
+                unsafe {
+                    if let Some(ns) = (ptr as *const NSWindow).as_ref() {
+                        ns.orderFrontRegardless();
+                    }
+                }
+            }
+        }
+    }
     // Existing window (webview already booted): deliver now. A FRESH window's
     // webview isn't listening yet — it collects the pending burst via
     // confetti_ready when it boots.
-    let _ = app.emit_to("confetti", "buddy://celebrate", intensity);
+    let emitted = app.emit_to("confetti", "buddy://celebrate", intensity);
+    let vis = win.is_visible().unwrap_or(false);
+    let pos = win.outer_position().map(|p| format!("{},{}", p.x, p.y)).unwrap_or_else(|_| "?".into());
+    let size = win.outer_size().map(|s| format!("{}x{}", s.width, s.height)).unwrap_or_else(|_| "?".into());
+    diag_native(&app, "confetti-shown", &format!(
+        "\"emitOk\":{},\"visible\":{vis},\"pos\":\"{pos}\",\"size\":\"{size}\"",
+        emitted.is_ok()
+    ));
+    // AppKit ground truth: does the WINDOW SERVER think this window is drawable?
+    // occ bit 2 = NSWindowOcclusionState.visible; without it WebKit suspends
+    // compositing + the display link (the invisible-celebration bug).
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSWindow;
+        if let Ok(ptr) = win.ns_window() {
+            if !ptr.is_null() {
+                unsafe {
+                    if let Some(ns) = (ptr as *const NSWindow).as_ref() {
+                        let occ = ns.occlusionState().0;
+                        let alpha = ns.alphaValue();
+                        let on_space = ns.isOnActiveSpace();
+                        let level = ns.level();
+                        diag_native(&app, "confetti-nswindow", &format!(
+                            "\"occ\":{occ},\"alpha\":{alpha},\"onSpace\":{on_space},\"level\":{level}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Called by the confetti webview once its listener is live — replays the
 /// burst that triggered the window's creation (the direct emit predates boot).
 #[tauri::command]
 fn confetti_ready(app: AppHandle) {
-    if let Some(i) = PENDING_CELEBRATE.lock().unwrap().take() {
+    let pending = PENDING_CELEBRATE.lock().unwrap().take();
+    diag_native(&app, "confetti-ready", &format!("\"pending\":{}", pending.is_some()));
+    if let Some(i) = pending {
         let _ = app.emit_to("confetti", "buddy://celebrate", i);
     }
 }
@@ -267,6 +346,37 @@ fn confetti_ready(app: AppHandle) {
 #[tauri::command]
 fn hide_confetti_window(app: AppHandle) {
     if let Some(w) = app.get_webview_window("confetti") { let _ = w.hide(); }
+}
+
+// ============ App-icon cache refresh (macOS) ============
+// After an update swaps the bundle on disk, Finder / Cmd-Tab / the Dock keep
+// showing the OLD app icon out of the icon-services cache. Re-registering the
+// bundle with LaunchServices (plus a bundle mtime touch) makes the system
+// re-read the .icns — no terminal, nothing for the user to do. Runs once per
+// app version (marker file in the app data dir), off the main thread.
+#[cfg(target_os = "macos")]
+fn refresh_app_icon_cache(app: &AppHandle) {
+    let version = env!("CARGO_PKG_VERSION");
+    let Some(marker) = app.path().app_data_dir().ok().map(|d| d.join("icon-refreshed-for")) else { return };
+    if std::fs::read_to_string(&marker).map(|v| v.trim() == version).unwrap_or(false) {
+        return; // already refreshed for this version
+    }
+    let Ok(exe) = std::env::current_exe() else { return };
+    // …/Buddy.app/Contents/MacOS/buddy → …/Buddy.app
+    let Some(bundle) = exe.ancestors().nth(3).map(|p| p.to_path_buf()) else { return };
+    if bundle.extension().and_then(|e| e.to_str()) != Some("app") {
+        return; // bare dev binary, no bundle to re-register
+    }
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("/usr/bin/touch").arg(&bundle).status();
+        let _ = std::process::Command::new(
+            "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+        )
+        .arg("-f")
+        .arg(&bundle)
+        .status();
+        let _ = std::fs::write(&marker, version);
+    });
 }
 
 /// Re-fit Morning to the current macOS screen's usable area. Called when the
@@ -962,6 +1072,23 @@ pub fn run() {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).
             let handle = app.handle().clone();
+
+            // Nudge the macOS icon-services cache once per version so updates
+            // show the current app icon without any user action.
+            #[cfg(target_os = "macos")]
+            refresh_app_icon_cache(&handle);
+
+            // DEV ONLY: auto-fire a celebration a few seconds after launch so the
+            // overlay pipeline can be debugged/verified without clicking tasks.
+            #[cfg(debug_assertions)]
+            {
+                let h2 = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(4));
+                    let h3 = h2.clone();
+                    let _ = h2.run_on_main_thread(move || celebrate_fullscreen(h3, 100));
+                });
+            }
 
             // --- Menu-bar (tray) icon + menu ---
             let toggle_item = MenuItemBuilder::with_id("toggle", "Show / Hide Buddy").build(app)?;
