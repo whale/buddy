@@ -189,8 +189,26 @@
   /* ---- row hover affordance (gated behind real hover — §3.4) ---- */
   .buddy-row{ transition:background-color .1s ease; }
   @media (hover:hover) and (pointer:fine){
-    /* OKLCH darken (vivid on red); !important beats the lvl2 resting-red !important below */
-    .row-neutral:hover{ background-color:var(--surface-hover) !important; }
+    /* OKLCH darken (vivid on red). Both this and the lvl2 resting-red rule below are
+       !important at EQUAL specificity — the extra .buddy-row class here is what makes
+       the hover rule win (source order alone had the resting rule beating it, which
+       silently killed the lvl2 row hover). */
+    .buddy-row.row-neutral:hover{ background-color:var(--surface-hover) !important; }
+    /* Icons INSIDE a hovered row: the row already darkened to --surface-hover, so the
+       icon circle pops back to the surface's resting colour (white / white / red) —
+       nested hover stays visible instead of grey-on-grey. */
+    .row-neutral:hover .ihover:hover{ background-color:var(--card); }
+    /* Squeezed rows (whale 2026-07-16): under ~112px the vertical 3-icon column no
+       longer fits. Icons go HORIZONTAL on a gradient scrim — solid on the right,
+       fading out left — in the row's HOVER colour (icons only exist while hovering),
+       so the text underneath dissolves instead of clashing. Same tokens → adapts to
+       all three escalation levels for free. right:0 !important beats the inline
+       ICON_RIGHT; the trailing padding keeps the trio on the sheet-✕ gutter line. */
+    .squeezed .row-acts{
+      flex-direction:row; gap:2px; top:0; bottom:0; transform:none; right:0 !important;
+      padding:0 1.25rem 0 3.5rem;
+      background:linear-gradient(to right, transparent 0, var(--surface-hover) 3.25rem);
+    }
   }
   .lvl2 .buddy-row{ background-color:var(--red) !important; }
   /* Future rows ride --ink/--ink-dim directly — no per-level overrides needed
@@ -258,6 +276,9 @@
   /* The dedicated full-screen overlay window renders ONLY the burst: hide the
      whole app UI and stay transparent. */
   body.confetti-surface > :not(#confetti){ display:none !important; }
+  /* NOT fully transparent: a sub-perceptual 0.4%-alpha wash keeps macOS from
+     classifying the overlay window as occluded (occluded → WebKit suspends
+     rAF → the burst freezes at opacity 0 — the invisible-celebration bug). */
   body.confetti-surface, html:has(body.confetti-surface){ background:transparent !important; }
   .parrot{
     position:absolute; width:24px; height:24px; line-height:24px;
@@ -2068,7 +2089,12 @@ if(morningList){ morningList.style.setProperty('--fs','22px'); morningList.style
 // forever. Only the OBSERVER is gated on height; every content change re-fits directly via
 // render()'s rAF(fitToday), so this can't skip a needed fit.
 let _lastFitH=-1;
-function fitToday(){ fitWrap(todayWrap); _lastFitH=todayWrap.clientHeight; }
+function fitToday(){ fitWrap(todayWrap); _lastFitH=todayWrap.clientHeight;
+  // Squeezed mode: flip the row-action column horizontal (gradient scrim) once
+  // rows are too short for the vertical trio (3×30px + gaps ≈ 112px).
+  const firstRow=todayWrap.querySelector('.row-neutral[data-flip]');
+  todayWrap.classList.toggle('squeezed', !!firstRow && firstRow.clientHeight < 112);
+}
 new ResizeObserver(()=>{ if(todayWrap.clientHeight===_lastFitH) return; requestAnimationFrame(fitToday); }).observe(todayWrap);
 window.addEventListener('resize',()=>{ _lastFitH=-1; requestAnimationFrame(fitToday); });
 
@@ -2271,8 +2297,8 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     // (no pencil). Complete = a checkmark icon at the top, where the pencil used to be,
     // with the same 30px round-hover treatment as Sleep + Remove.
     const acts=document.createElement('div');
-    acts.className='absolute top-1/2 -translate-y-1/2 flex flex-col items-center gap-[5px] opacity-0 group-hover:opacity-100 transition-opacity';
-    acts.style.right=ICON_RIGHT;    // aligns with the sheet ✕
+    acts.className='row-acts absolute top-1/2 -translate-y-1/2 flex flex-col items-center gap-[5px] opacity-0 group-hover:opacity-100 transition-opacity';
+    acts.style.right=ICON_RIGHT;    // aligns with the sheet ✕ (squeezed mode overrides to 0)
     const mkBtn=(icon,title,fn)=>{ const b=document.createElement('button'); b.title=title;
       b.className='size-[30px] grid place-items-center rounded-full ihover icon-ink';   // --glyph adapts per level (grey → red → light)
       b.innerHTML=icon; muteIconPointerEvents(b);
