@@ -1995,7 +1995,7 @@ function removeItem(id){ tombstone(id); state.items=state.items.filter(x=>x.id!=
 // done rows can pile up without blocking new work. (Raw .length still bounds
 // nothing here; the cap is on active work.)
 const activeCount = () => state.items.filter(i => i.state!=='done').length;
-const DONEZO_DELAY = 2000;          // savor beat before a done row morphs to a "done" word
+const DONEZO_DELAY = 1200;          // savor beat before a done row morphs to a "done" word (was 2000 — read as lag, whale 2026-07-16)
 let donezoEnterId = null;           // one-shot: the row that just became a Donezo (enter anim)
 // Rotating "done" labels shown on every completed row.
 const DONE_WORDS = ['Donezo!','Done!','Done & Dusted!','Sorted!','Wrapped!','Handled!','Bagged!','Squared Away!','Locked In!','Ticked Off!','Checked Off!','Buttoned Up!','All Set!','Good To Go!','Cleared!','Settled!','Tidied!','Put To Bed!','Golden!','There It Is!','Ta-Da!','Voilà!','Finito!','Fin!','Shipped!'];
@@ -2182,7 +2182,11 @@ function render(){
   // (the completed row gliding to the top, and the rows that shift to fill the gap)
   // glides smoothly to its new spot instead of jumping.
   const flipPrev = (!state.histOpen && !prevHistOpen && !morningUp()) ? captureFlip(todayWrap) : null;
-  renderToday(); renderHist(); renderHistHeader();
+  // History sheet DOM only rebuilds while it's actually open (the open transition
+  // below also renders) — rebuilding it hidden on EVERY render was a large slice
+  // of the check-off stall that made the Donezo glide stutter.
+  renderToday();
+  if(state.histOpen || state.histOpen!==prevHistOpen){ renderHist(); renderHistHeader(); }
   if(!todayWrap.isConnected) listEl.append(todayWrap);   // today stays mounted; history is its own sheet
   const toggled = state.histOpen!==prevHistOpen;
   // Day-groups stagger in ONLY on the open transition — replaying the entrance
@@ -2194,6 +2198,10 @@ function render(){
     histSheet.setAttribute('data-open', state.histOpen?'true':'false');
     histSheet.setAttribute('aria-hidden', state.histOpen?'false':'true');
   }
+  // Fit BEFORE the FLIP glide starts: fitWrap's probe loop forces reflows and can
+  // change row heights — running it on the next frame (as before) landed exactly
+  // when the glide transitions began and shifted the layout mid-animation.
+  if(!state.histOpen && flipPrev) fitToday();
   if(!state.histOpen && flipPrev) playFlip(todayWrap, flipPrev);
   prevHistOpen=state.histOpen;
   // Donezo catch-up: isDonezo is TIME-based, but a done item adopted via SYNC
@@ -2337,8 +2345,14 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
         e.preventDefault(); e.stopPropagation();
         const act=state.items.filter(x=>x.state!=='done');
         const at=act.findIndex(x=>x.id===it.id);
-        const next=act[(at+(e.shiftKey?-1:1)+act.length)%act.length];
+        // Tab past the LAST task chains into a fresh Add (opt-in — whale 2026-07-16)
+        // instead of wrapping to the top. Only when this row has text: an emptied
+        // row deletes itself on blur, and Tab there shouldn't spawn another blank.
+        const last = !e.shiftKey && at===act.length-1;
+        const hasText = !!txt.textContent.trim();
         txt.blur();                                        // commit (may delete an emptied row)
+        if(last){ if(hasText) requestAnimationFrame(()=>addAndEdit()); return; }
+        const next=act[(at+(e.shiftKey?-1:1)+act.length)%act.length];
         if(next && next.id!==it.id) requestAnimationFrame(()=>startEdit(next.id));
       }
     });
