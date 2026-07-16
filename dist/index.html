@@ -291,10 +291,10 @@
   /* The dedicated full-screen overlay window renders ONLY the burst: hide the
      whole app UI and stay transparent. */
   body.confetti-surface > :not(#confetti){ display:none !important; }
-  /* NOT fully transparent: a sub-perceptual 0.4%-alpha wash keeps macOS from
-     classifying the overlay window as occluded (occluded → WebKit suspends
-     rAF → the burst freezes at opacity 0 — the invisible-celebration bug). */
-  body.confetti-surface, html:has(body.confetti-surface){ background:transparent !important; }
+  /* NOT fully transparent: a sub-perceptual 0.4%-alpha wash so macOS never
+     classifies the (now correctly shown) overlay as fully-clear/occluded —
+     belt-and-suspenders alongside the clearConfetti(hideWin) fix. */
+  body.confetti-surface, html:has(body.confetti-surface){ background:rgba(0,0,0,.004) !important; }
   .parrot{
     position:absolute; width:24px; height:24px; line-height:24px;
     font-size:22px; text-align:center; will-change:transform, opacity;
@@ -2866,12 +2866,20 @@ const PARROT_CANDIDATES=['parrot','parrotdad','aussieparrot','cowboyparrot','dea
   });
 })();
 
-function clearConfetti(){
+/* hideWin: ONLY the end-of-burst paths (natural dry-out, the backstop) pass true.
+   THE 0.3.34→0.4.5 invisible-celebration bug: burstNow() starts by calling this
+   as its "single burst in flight" reset, and this used to hide the overlay window
+   UNCONDITIONALLY — so every burst hid its own window milliseconds after it was
+   shown, macOS suspended the hidden webview, and the parrots animated (frozen,
+   invisible) inside a window that was no longer on screen. Found by adversarial
+   review 2026-07-16. */
+let burstGen=0;   // generation of the burst this overlay is playing (guards stale hides)
+function clearConfetti(hideWin){
   clearTimeout(confettiTimer); confettiTimer=null;
   confettiEl.innerHTML='';
   celebParts=[]; if(celebRAF){ cancelAnimationFrame(celebRAF); celebRAF=null; }
-  // Overlay window: the burst is over — get out of the way (hidden, not closed).
-  if(IS_CONFETTI_WINDOW){ try{ window.__TAURI__.core.invoke('hide_confetti_window'); }catch(_){} }
+  // Overlay window: burst OVER (never at burst start) — get out of the way (hidden, not closed).
+  if(IS_CONFETTI_WINDOW && hideWin){ try{ window.__TAURI__.core.invoke('hide_confetti_window', {gen:burstGen}); }catch(_){} }
 }
 
 /* Intensity 0..100 drives count, thumb↔parrot mix, and variety.
@@ -2928,13 +2936,17 @@ function fireConfetti(anchorEl){
   }
   burstNow(lvl);
 }
+const GIF_CAP = 30;   // animated-GIF <img> nodes decode independently — cap them and
+                      // fill the rest with emoji (indistinguishable in a 3s burst,
+                      // saves a real CPU spike at 120 particles in WKWebView)
 function burstNow(lvl){
-  clearConfetti();                             // single burst in flight
+  clearConfetti(false);                        // single burst in flight — NEVER hides the window
   const i=lvl/100;
   const count = Math.max(3, Math.round(i*i*CELEB.count));
   const kinds = Math.max(2, Math.round(2 + i*(CELEB_POOL.length-2)));
   const pool = CELEB_POOL.slice(0, kinds);
   const useGif = parrotMode==='gif';
+  let gifs = 0;
   const rad = d => d*Math.PI/180;
   const now = performance.now();
   // Bottom-RIGHT of the screen, flying up-LEFT — full lab speed, no width
@@ -2944,7 +2956,7 @@ function burstNow(lvl){
   for(let k=0;k<count;k++){
     const glyph = pool[Math.floor(Math.random()*pool.length)];
     let el;
-    if(glyph==='🦜' && useGif && PARROTS.length){ el=document.createElement('img'); el.src='assets/'+PARROTS[Math.floor(Math.random()*PARROTS.length)]; el.alt=''; }
+    if(glyph==='🦜' && useGif && PARROTS.length && gifs<GIF_CAP){ gifs++; el=document.createElement('img'); el.src='assets/'+PARROTS[Math.floor(Math.random()*PARROTS.length)]; el.alt=''; }
     else { el=document.createElement('span'); el.textContent=glyph; }
     el.className='parrot'; el.style.animation='none';
     const size = CELEB.sizeMin + Math.random()*(CELEB.sizeMax-CELEB.sizeMin);
@@ -2962,9 +2974,11 @@ function burstNow(lvl){
   celebLastT = now;
   if(!celebRAF) celebRAF = requestAnimationFrame(celebTick);
   clearTimeout(confettiTimer);
-  confettiTimer=setTimeout(clearConfetti, (CELEB.life + CELEB.stagger/1000 + 0.5)*1000);   // backstop
+  confettiTimer=setTimeout(()=>clearConfetti(true), (CELEB.life + CELEB.stagger/1000 + 0.5)*1000);   // backstop → END of burst, ok to hide
 }
+let celebTicks=0;
 function celebTick(now){
+  celebTicks++;
   const dt = Math.min(0.033, (now - celebLastT)/1000); celebLastT = now;
   const drag = Math.max(0, 1 - CELEB.drag*dt);
   const H = innerHeight;
@@ -2981,6 +2995,9 @@ function celebTick(now){
     return true;
   });
   celebRAF = celebParts.length ? requestAnimationFrame(celebTick) : null;
+  // Natural dry-out (gravity clears the screen ~3s in, well before the backstop):
+  // hide the overlay window as soon as the show is actually over.
+  if(!celebRAF && IS_CONFETTI_WINDOW) clearConfetti(true);
 }
 
 /* ====================================================================
@@ -4103,9 +4120,24 @@ if(NATIVE){
   // (field report 2026-07-10). The morning window listens ONLY for morning-open;
   // the confetti overlay ONLY for celebrate.
   if(IS_CONFETTI_WINDOW){
-    ev.listen('buddy://celebrate', e=>{ burstNow(Math.max(1, +e.payload || 100)); });
-    // Boot happened AFTER the creating emit — pull the pending burst.
-    try{ window.__TAURI__.core.invoke('confetti_ready'); }catch(_){}
+    // Payload is {i, gen}: gen guards the backstop race — a stale hide from burst
+    // A must not orderOut a live burst B (Rust no-ops hides with an old gen).
+    ev.listen('buddy://celebrate', e=>{
+      const p=e.payload;
+      const inten=(p && typeof p==='object') ? (+p.i||100) : (+p||100);
+      burstGen=(p && p.gen)||0;
+      diag('confetti-received', {intensity:inten, gen:burstGen});
+      burstNow(Math.max(1, inten));
+      // rAF health breadcrumb: ≥30 ticks in the first second = the window is truly
+      // on screen and animating (the self-hide bug showed 0-1 here).
+      const t0=celebTicks;
+      setTimeout(()=>diag('confetti-ticks', {n:celebTicks-t0}), 1000);
+    })
+    // Pull the pending burst ONLY once the listener is confirmed armed — invoking
+    // confetti_ready before listen() resolves can replay the burst into the void
+    // (the fresh-window race: boot happens after the creating emit).
+    .then(()=>{ diag('confetti-listen-armed'); return window.__TAURI__.core.invoke('confetti_ready'); })
+    .catch(err=>diag('confetti-listen-error', {err:String((err&&err.message)||err).slice(0,120)}));
   } else if(!IS_MORNING_WINDOW){
     ev.listen('buddy://reveal', ()=>{ if(morningUp()||state.pinned) return; clearTimeout(closeTimer); openDrawer(); });
     ev.listen('buddy://hide',   ()=>{ if(morningUp()||state.pinned) return; clearTimeout(openTimer); closeDrawer(); });

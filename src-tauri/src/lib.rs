@@ -214,11 +214,29 @@ fn hide_morning_window(app: AppHandle) {
 // window (same second-window pattern as Morning). Created lazily, hidden when
 // the burst ends. The webview boots with surface label "confetti" and renders
 // ONLY the burst.
-static PENDING_CELEBRATE: std::sync::Mutex<Option<i32>> = std::sync::Mutex::new(None);
+static PENDING_CELEBRATE: std::sync::Mutex<Option<(i32, u64)>> = std::sync::Mutex::new(None);
+// Burst generation: each celebrate bumps it; hide_confetti_window no-ops on a stale
+// gen so burst A's end-of-life hide can never orderOut a live burst B.
+static CELEB_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+// Rust-side breadcrumb into the same diagnostics log the web layer uses — records
+// the overlay lifecycle even if the overlay webview is broken/deaf (RULE 3; this
+// class of bug shipped invisible for six days). Privacy rules apply: no content.
+fn diag_native(app: &AppHandle, evt: &str, extra: &str) {
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let comma = if extra.is_empty() { "" } else { "," };
+    let _ = append_event(app.clone(), format!("{{\"t\":\"{t}\",\"evt\":\"{evt}\"{comma}{extra}}}"));
+}
 
 #[tauri::command]
 fn celebrate_fullscreen(app: AppHandle, intensity: i32) {
-    *PENDING_CELEBRATE.lock().unwrap() = Some(intensity);
+    let gen = CELEB_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    *PENDING_CELEBRATE.lock().unwrap() = Some((intensity, gen));
+    let existing = app.get_webview_window("confetti").is_some();
+    diag_native(&app, "confetti-invoke", &format!("\"gen\":{gen},\"existing\":{existing}"));
     let win = match app.get_webview_window("confetti") {
         Some(w) => w,
         None => match WebviewWindowBuilder::new(&app, "confetti", WebviewUrl::App("index.html".into()))
@@ -231,10 +249,17 @@ fn celebrate_fullscreen(app: AppHandle, intensity: i32) {
             .focused(false)
             .shadow(false)
             .accept_first_mouse(false)
+            // Never let WebKit park the burst's animation clock for a click-through,
+            // never-key overlay window.
+            .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
             .build()
         {
             Ok(w) => w,
-            Err(e) => { eprintln!("[buddy] confetti window failed: {e}"); return; }
+            Err(e) => {
+                eprintln!("[buddy] confetti window failed: {e}");
+                diag_native(&app, "confetti-window-failed", "");
+                return;
+            }
         },
     };
     // Cover the screen the drawer lives on (fall back to primary).
@@ -252,20 +277,32 @@ fn celebrate_fullscreen(app: AppHandle, intensity: i32) {
     // Existing window (webview already booted): deliver now. A FRESH window's
     // webview isn't listening yet — it collects the pending burst via
     // confetti_ready when it boots.
-    let _ = app.emit_to("confetti", "buddy://celebrate", intensity);
+    let _ = app.emit_to("confetti", "buddy://celebrate", serde_json::json!({"i": intensity, "gen": gen}));
+    diag_native(&app, "confetti-shown", &format!("\"gen\":{gen},\"visible\":{}", win.is_visible().unwrap_or(false)));
 }
 
 /// Called by the confetti webview once its listener is live — replays the
 /// burst that triggered the window's creation (the direct emit predates boot).
 #[tauri::command]
 fn confetti_ready(app: AppHandle) {
-    if let Some(i) = PENDING_CELEBRATE.lock().unwrap().take() {
-        let _ = app.emit_to("confetti", "buddy://celebrate", i);
+    let pending = PENDING_CELEBRATE.lock().unwrap().take();
+    diag_native(&app, "confetti-ready", &format!("\"pending\":{}", pending.is_some()));
+    if let Some((i, gen)) = pending {
+        let _ = app.emit_to("confetti", "buddy://celebrate", serde_json::json!({"i": i, "gen": gen}));
     }
 }
 
+/// The overlay asks to be hidden when its burst ENDS. `gen` guards the backstop
+/// race: if a new burst started since (gen is stale), the hide is ignored —
+/// otherwise burst A's cleanup could orderOut a live burst B. (And the historic
+/// bug: this used to be invoked at burst START via clearConfetti — every
+/// celebration hid itself. See dist/index.html clearConfetti.)
 #[tauri::command]
-fn hide_confetti_window(app: AppHandle) {
+fn hide_confetti_window(app: AppHandle, gen: Option<u64>) {
+    let current = CELEB_GEN.load(std::sync::atomic::Ordering::SeqCst);
+    let stale = gen.map(|g| g < current).unwrap_or(false);
+    diag_native(&app, "confetti-hide", &format!("\"gen\":{},\"stale\":{stale}", gen.unwrap_or(0)));
+    if stale { return; }
     if let Some(w) = app.get_webview_window("confetti") { let _ = w.hide(); }
 }
 
@@ -998,6 +1035,18 @@ pub fn run() {
             // show the current app icon without any user action.
             #[cfg(target_os = "macos")]
             refresh_app_icon_cache(&handle);
+
+            // DEV ONLY: auto-fire a celebration a few seconds after launch so the
+            // overlay pipeline can be verified without clicking tasks.
+            #[cfg(debug_assertions)]
+            {
+                let h2 = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(4));
+                    let h3 = h2.clone();
+                    let _ = h2.run_on_main_thread(move || celebrate_fullscreen(h3, 100));
+                });
+            }
 
             // --- Menu-bar (tray) icon + menu ---
             let toggle_item = MenuItemBuilder::with_id("toggle", "Show / Hide Buddy").build(app)?;
