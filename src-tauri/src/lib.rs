@@ -269,6 +269,37 @@ fn hide_confetti_window(app: AppHandle) {
     if let Some(w) = app.get_webview_window("confetti") { let _ = w.hide(); }
 }
 
+// ============ App-icon cache refresh (macOS) ============
+// After an update swaps the bundle on disk, Finder / Cmd-Tab / the Dock keep
+// showing the OLD app icon out of the icon-services cache. Re-registering the
+// bundle with LaunchServices (plus a bundle mtime touch) makes the system
+// re-read the .icns — no terminal, nothing for the user to do. Runs once per
+// app version (marker file in the app data dir), off the main thread.
+#[cfg(target_os = "macos")]
+fn refresh_app_icon_cache(app: &AppHandle) {
+    let version = env!("CARGO_PKG_VERSION");
+    let Some(marker) = app.path().app_data_dir().ok().map(|d| d.join("icon-refreshed-for")) else { return };
+    if std::fs::read_to_string(&marker).map(|v| v.trim() == version).unwrap_or(false) {
+        return; // already refreshed for this version
+    }
+    let Ok(exe) = std::env::current_exe() else { return };
+    // …/Buddy.app/Contents/MacOS/buddy → …/Buddy.app
+    let Some(bundle) = exe.ancestors().nth(3).map(|p| p.to_path_buf()) else { return };
+    if bundle.extension().and_then(|e| e.to_str()) != Some("app") {
+        return; // bare dev binary, no bundle to re-register
+    }
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("/usr/bin/touch").arg(&bundle).status();
+        let _ = std::process::Command::new(
+            "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+        )
+        .arg("-f")
+        .arg(&bundle)
+        .status();
+        let _ = std::fs::write(&marker, version);
+    });
+}
+
 /// Re-fit Morning to the current macOS screen's usable area. Called when the
 /// web layer notices the active monitor changed while Morning is already open.
 #[tauri::command]
@@ -962,6 +993,11 @@ pub fn run() {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).
             let handle = app.handle().clone();
+
+            // Nudge the macOS icon-services cache once per version so updates
+            // show the current app icon without any user action.
+            #[cfg(target_os = "macos")]
+            refresh_app_icon_cache(&handle);
 
             // --- Menu-bar (tray) icon + menu ---
             let toggle_item = MenuItemBuilder::with_id("toggle", "Show / Hide Buddy").build(app)?;
