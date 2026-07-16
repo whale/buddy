@@ -105,6 +105,7 @@
        The chroma boost that keeps red vivid is applied per-level below, only
        where the base colour actually IS red. */
     --surface-hover: oklch(from var(--card) calc(l - 0.05) c h);
+    --surface-hover-2: oklch(from var(--card) calc(l - 0.09) c h);   /* secondary-button hover: one step past --surface-hover */
     --cta-hover:     oklch(from var(--sel-bg) calc(l - 0.05) c h);
   }
   #drawer.lvl1, #morning.lvl1{
@@ -116,6 +117,7 @@
     --card:var(--red); --ink:#fff; --ink-dim:rgba(255,255,255,.6);
     --chrome-ink:#fff; --chrome-hover:rgba(0,0,0,.18);
     --surface-hover:oklch(from var(--card) calc(l - 0.05) calc(c + 0.015) h);   /* red card: keep it vivid */
+    --surface-hover-2:oklch(from var(--card) calc(l - 0.09) calc(c + 0.015) h);
     --sel-bg:#fff; --sel-ink:var(--red); --seg-track:rgba(255,255,255,.20); --line:rgba(255,255,255,.30);
     --addtxt:rgba(255,255,255,.60); --addtxt-hover:#fff; --glyph:rgba(255,255,255,.92); }
 
@@ -219,6 +221,19 @@
   /* keyboard cursor = a darker background, no border/box */
   .cursor-ring{ background-color: rgba(0,0,0,.06); }
   .lvl2 .cursor-ring{ background-image: linear-gradient(rgba(0,0,0,.10),rgba(0,0,0,.10)); }
+
+  /* ---- Boss Mode row: appears when the Donezo pile hits 5+ — clears finished
+     work off Today so it stops crowding live tasks. The button is a SECONDARY
+     action: same surface as the row-hover token, one step darker on its own
+     hover. Everything token-driven, so it follows lvl0/1/2 for free. ---- */
+  .bossrow{ animation:bossin .45s cubic-bezier(.34,1.4,.64,1) both; }
+  @keyframes bossin{ from{ transform:translateY(-6px); opacity:0; } to{ transform:none; opacity:1; } }
+  .boss-btn{ background:var(--surface-hover); color:var(--ink);
+             transition:background-color .15s ease, transform .12s ease; }
+  @media (hover:hover) and (pointer:fine){ .boss-btn:hover{ background:var(--surface-hover-2); } }
+  .boss-btn:active{ transform:scale(.96); }
+  .boss-leaving{ transform:translateX(110%) !important; opacity:0 !important;
+                 transition:transform .35s cubic-bezier(.4,0,.2,1), opacity .3s ease !important; }
 
   /* ---- Add + shade per level, full-opacity on hover ---- */
   .addtxt{ transition:color .1s ease; }
@@ -1957,8 +1972,10 @@ function applyPinnedUI(){
 // single tap on the row's checkbox; tap again to undo.)
 function cycle(it){
   const was=it.state;
-  if(it.state!=='done'){ it.state='done'; it.doneAt=Date.now(); if(!it.doneWord) it.doneWord=pickDoneWord(); }
-  else { if(activeCount()>=HARD_CAP) return; it.state='neutral'; delete it.doneAt; }   // done → restore (capped)
+  // clearedAt is one completion's Boss-Mode flag — any state change resets it, or a
+  // re-completed task would skip Today and land straight in the cleared pile.
+  if(it.state!=='done'){ it.state='done'; it.doneAt=Date.now(); delete it.clearedAt; if(!it.doneWord) it.doneWord=pickDoneWord(); }
+  else { if(activeCount()>=HARD_CAP) return; it.state='neutral'; delete it.doneAt; delete it.clearedAt; }   // done → restore (capped)
   touch(it);
   if(was!=='done' && it.state==='done'){
     // Anchor the celebration (quiet pop) to the row's ✓ button — "floats up
@@ -2005,6 +2022,42 @@ function backfillDoneWords(){
 }
 // A done row shows as its struck self for DONEZO_DELAY, then becomes a Donezo row.
 const isDonezo = it => it.state==='done' && it.doneAt && (Date.now()-it.doneAt) >= DONEZO_DELAY;
+
+/* ---- Boss Mode (whale 2026-07-16): at BOSS_MIN+ visible Donezos, Today offers a
+   one-tap sweep so finished work stops crowding live tasks. Sweeping stamps
+   clearedAt on each pile item (hidden from Today only — the Done tab, rollover
+   and sync see the items unchanged; iOS carries the field via its extras bag).
+   Any state change deletes clearedAt (see cycle/restoreItem). The freshly-checked
+   task keeps its 2s savor beat — only post-beat Donezos are ever swept. ---- */
+const BOSS_MIN=5;
+function buildBossRow(n){
+  const row=document.createElement('div');
+  row.className='bossrow bd border-t border-[#d9d9d9] flex items-center justify-between gap-3';
+  row.style.cssText='flex:0 0 auto; padding:12px var(--px);';
+  const msg=document.createElement('div');
+  const t1=document.createElement('div'); t1.className='font-medium tracking-[-0.3px] text-[15px]'; t1.style.color='var(--ink)'; t1.textContent=n+' done today.';
+  const t2=document.createElement('div'); t2.className='text-[14px] tracking-[-0.2px]'; t2.style.color='var(--ink-dim)'; t2.textContent='Move to done, and make room for more?';
+  msg.append(t1,t2);
+  const btn=document.createElement('button');
+  btn.className='boss-btn pressable shrink-0 px-4 py-1.5 rounded-full text-[14px] font-semibold tracking-[-0.2px]';
+  btn.textContent='move';
+  btn.addEventListener('mousedown',e=>e.preventDefault());
+  btn.addEventListener('click',e=>{ e.stopPropagation(); bossMove(); });
+  row.append(msg,btn);
+  return row;
+}
+function bossMove(){
+  const pile=state.items.filter(it=>isDonezo(it) && !it.clearedAt);
+  if(!pile.length) return;
+  diag('boss-move', {n:pile.length});
+  const finish=()=>{ const now=Date.now(); pile.forEach(it=>{ it.clearedAt=now; touch(it); }); render(); };
+  if(reducedMotion()) return finish();
+  // Sweep: rows glide out right one after another, then the real state change
+  // lands and FLIP glides the survivors up into the freed space.
+  const rows=pile.map(it=>todayWrap.querySelector('[data-flip="'+it.id+'"]')).filter(Boolean);
+  rows.forEach((r,i)=> setTimeout(()=> r.classList.add('boss-leaving'), i*40));
+  setTimeout(finish, rows.length*40+340);
+}
 // 2s after a completion, slide the struck row out and re-render it as a Donezo row.
 // Purely visual — the `done` state was already set + saved synchronously, so a
 // reload / rollover / another completion during the window can't corrupt anything.
@@ -2020,7 +2073,7 @@ function restoreItem(id){
   const it=state.items.find(x=>x.id===id);
   if(!it || it.state!=='done') return;
   if(activeCount()>=HARD_CAP) return;                       // already full of active work
-  it.state='neutral'; delete it.doneAt; touch(it);
+  it.state='neutral'; delete it.doneAt; delete it.clearedAt; touch(it);
   render();
 }
 function reducedMotion(){ try{ return matchMedia('(prefers-reduced-motion: reduce)').matches; }catch(_){ return false; } }
@@ -2244,8 +2297,11 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
     ? 'flex:0 0 auto; min-height:120px; padding:0 var(--px);'   // tall enough for the row's edit/sleep/remove icon stack
     : 'flex:1 1 auto; min-height:0; padding:var(--vpad) var(--px);';
   // Donezo (completed past the savor beat) sort to the TOP, newest first; active work below.
-  const donez=state.items.filter(it=>isDonezo(it)).sort((a,b)=>(b.doneAt||0)-(a.doneAt||0));
-  const order=[...donez, ...state.items.filter(it=>!isDonezo(it))];
+  // Boss-Mode-cleared completions (clearedAt) are hidden from Today — they still live in
+  // state.items, so the Done tab, rollover and sync all see them unchanged.
+  const shown=state.items.filter(it=>!(it.state==='done' && it.clearedAt));
+  const donez=shown.filter(it=>isDonezo(it)).sort((a,b)=>(b.doneAt||0)-(a.doneAt||0));
+  const order=[...donez, ...shown.filter(it=>!isDonezo(it))];
   order.forEach((it,i)=>{
     const idx=state.items.indexOf(it);
     if(isDonezo(it)){ wrap.appendChild(buildDonezoRow(it, i, morning)); return; }
@@ -2259,7 +2315,7 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
 
     const txt=document.createElement('div');
     txt.dataset.tid=it.id; txt.dataset.ph='Untitled'; txt.style.fontSize='var(--fs)';
-    txt.style.paddingRight='44px';   // reserve room for the right action column
+    txt.style.paddingRight='44px';   // reserve room for the right action column (boss row inserted after the loop)
     txt.style.color = it.state==='done' ? 'var(--ink-dim)' : 'var(--ink)';   // both ride the level-driven ink tokens (black → red → white)
     txt.className='flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2] '+(it.state==='done'?'line-through':(' cursor-text'));
     txt.textContent=it.text||''; if(!it.text)txt.classList.add('empty');
@@ -2312,6 +2368,14 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
 
     wrap.appendChild(row);
   });
+
+  // Boss Mode row: after the Donezo pile, before live tasks. Drawer only — the
+  // morning planner shows a 3-slot preview the pile can't crowd.
+  if(!morning && donez.length>=BOSS_MIN){
+    // Every `order` entry appended exactly one row, so children[donez.length] is
+    // the first live row (or null → the row lands after the pile at the end).
+    wrap.insertBefore(buildBossRow(donez.length), wrap.children[donez.length]||null);
+  }
 
   // Empty-list restore row (before the Add rows). MORNING ONLY — the side drawer
   // never shows it (per design: the drawer is today's working surface; recovery of
