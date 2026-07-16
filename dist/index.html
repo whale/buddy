@@ -99,18 +99,23 @@
     --chrome-ink:rgba(0,0,0,.45); --chrome-hover:rgba(0,0,0,.06);
     --sel-bg:#000; --sel-ink:#fff; --seg-track:rgba(0,0,0,.05); --line:#d9d9d9;
     --addtxt:rgba(0,0,0,.20); --addtxt-hover:#000; --glyph:#8c8c8c;
-    /* Hover/selection darken — ONE shade, derived from the surface in OKLCH so the red
-       stays vivid (a flat black overlay goes muddy). Auto-adapts per level via --card. */
-    --surface-hover: oklch(from var(--card) calc(l - 0.05) calc(c + 0.015) h);
-    --cta-hover:     oklch(from var(--sel-bg) calc(l - 0.05) calc(c + 0.04) h);
+    /* Hover/selection darken — ONE shade, derived from the surface in OKLCH.
+       Achromatic surfaces (white card, white CTA) darken by LIGHTNESS ONLY —
+       adding chroma to white resolves to hue 0-ish and reads as a pink cast.
+       The chroma boost that keeps red vivid is applied per-level below, only
+       where the base colour actually IS red. */
+    --surface-hover: oklch(from var(--card) calc(l - 0.05) c h);
+    --cta-hover:     oklch(from var(--sel-bg) calc(l - 0.05) c h);
   }
   #drawer.lvl1, #morning.lvl1{
     --ink:var(--red); --ink-dim:rgba(229,72,77,.65);
     --chrome-ink:var(--red); --sel-bg:var(--red); --sel-ink:#fff;
+    --cta-hover:oklch(from var(--sel-bg) calc(l - 0.05) calc(c + 0.04) h);   /* red CTA: darker AND more saturated */
     --addtxt:rgba(229,72,77,.45); --addtxt-hover:var(--red); --glyph:var(--red); }
   #drawer.lvl2, #morning.lvl2{
     --card:var(--red); --ink:#fff; --ink-dim:rgba(255,255,255,.6);
     --chrome-ink:#fff; --chrome-hover:rgba(0,0,0,.18);
+    --surface-hover:oklch(from var(--card) calc(l - 0.05) calc(c + 0.015) h);   /* red card: keep it vivid */
     --sel-bg:#fff; --sel-ink:var(--red); --seg-track:rgba(255,255,255,.20); --line:rgba(255,255,255,.30);
     --addtxt:rgba(255,255,255,.60); --addtxt-hover:#fff; --glyph:rgba(255,255,255,.92); }
 
