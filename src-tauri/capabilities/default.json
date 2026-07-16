@@ -4,7 +4,8 @@
   "description": "Core permissions for Buddy's window control, tray, and global shortcut.",
   "windows": [
     "main",
-    "morning"
+    "morning",
+    "confetti"
   ],
   "permissions": [
     "core:default",
