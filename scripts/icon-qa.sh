@@ -25,9 +25,8 @@ xcrun actool "$ICONS/Buddy.icon" --compile "$WORK/car" \
   > "$WORK/actool.log" 2>&1 || { cat "$WORK/actool.log"; exit 1; }
 
 cp "$WORK/car/Assets.car" "$ICONS/Assets.car"
-cp "$WORK/car/Buddy.icns" "$ICONS/icon.icns"
 rsync -a --delete "$ICONS/Buddy.icon/" ios/Buddy/Resources/AppIcon.icon/
-echo "→ refreshed $ICONS/Assets.car, $ICONS/icon.icns, ios AppIcon.icon"
+echo "→ refreshed $ICONS/Assets.car, ios AppIcon.icon (icon.icns packed after render below)"
 
 # Throwaway app with a unique bundle id so icon services can't serve a stale render.
 APP="$WORK/IconQA-$STAMP.app"
@@ -57,7 +56,8 @@ codesign --force -s - "$APP" 2>/dev/null
 echo "→ rendering through NSWorkspace (the same pipeline Dock/Finder/Spotlight use)"
 cat > "$WORK/render.swift" <<EOF
 import AppKit
-for size in [1024, 128] {
+
+func render(_ size: Int) -> NSBitmapImageRep {
     let icon = NSWorkspace.shared.icon(forFile: "$APP")
     icon.size = NSSize(width: size, height: size)
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size,
@@ -67,11 +67,53 @@ for size in [1024, 128] {
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
     icon.draw(in: NSRect(x: 0, y: 0, width: size, height: size))
     NSGraphicsContext.restoreGraphicsState()
+    return rep
+}
+
+// Icon services registers the fresh bundle asynchronously — the first fetches
+// can return the generic document icon. Warm up until real artwork appears.
+var warmed = false
+for _ in 0..<10 {
+    let rep = render(1024)
+    outer: for y in stride(from: 0, to: 1024, by: 8) {
+        for x in stride(from: 0, to: 1024, by: 8) {
+            if let c = rep.colorAt(x: x, y: y),
+               c.alphaComponent > 0.8, c.redComponent < 0.35,
+               c.greenComponent < 0.35, c.blueComponent < 0.35 {
+                warmed = true; break outer
+            }
+        }
+    }
+    if warmed { break }
+    Thread.sleep(forTimeInterval: 1)
+}
+guard warmed else { fputs("icon never warmed — still generic after 10s\n", stderr); exit(1) }
+
+for size in [16, 32, 64, 128, 256, 512, 1024] {
+    let rep = render(size)
     try! rep.representation(using: .png, properties: [:])!
         .write(to: URL(fileURLWithPath: "$WORK/render-\(size).png"))
 }
 EOF
 swift "$WORK/render.swift"
+
+# Full-resolution .icns fallback (16→1024) packed from the SYSTEM's own renders,
+# so icns-backed surfaces (Get Info, DMG, pre-Tahoe macOS) match Tahoe exactly.
+# actool's own fallback icns caps at 256px and upscales soft — never ship it.
+ISET="$WORK/Buddy.iconset"
+mkdir -p "$ISET"
+cp "$WORK/render-16.png"   "$ISET/icon_16x16.png"
+cp "$WORK/render-32.png"   "$ISET/icon_16x16@2x.png"
+cp "$WORK/render-32.png"   "$ISET/icon_32x32.png"
+cp "$WORK/render-64.png"   "$ISET/icon_32x32@2x.png"
+cp "$WORK/render-128.png"  "$ISET/icon_128x128.png"
+cp "$WORK/render-256.png"  "$ISET/icon_128x128@2x.png"
+cp "$WORK/render-256.png"  "$ISET/icon_256x256.png"
+cp "$WORK/render-512.png"  "$ISET/icon_256x256@2x.png"
+cp "$WORK/render-512.png"  "$ISET/icon_512x512.png"
+cp "$WORK/render-1024.png" "$ISET/icon_512x512@2x.png"
+iconutil -c icns "$ISET" -o "$ICONS/icon.icns"
+echo "→ packed full-res icon.icns (16-1024) from system renders"
 
 python3 - "$WORK/render-1024.png" <<'PY'
 import sys
@@ -139,5 +181,29 @@ print("previews: " + sys.argv[1] + " (open to eyeball)")
 sys.exit(1 if fails else 0)
 PY
 STATUS=$?
+
+# icns must carry the full ladder up to 1024 and stay crisp — the 256-capped
+# actool fallback is exactly the blur users reported at large sizes.
+python3 - "$ICONS/icon.icns" <<'PY'
+import subprocess, sys, tempfile, os
+from PIL import Image
+out = tempfile.mkdtemp()
+subprocess.run(["iconutil", "-c", "iconset", sys.argv[1], "-o", out + "/i.iconset"], check=True)
+names = os.listdir(out + "/i.iconset")
+ok1024 = "icon_512x512@2x.png" in names
+print(("PASS " if ok1024 else "FAIL ") + "icns-1024 — reps: " + ",".join(sorted(names)))
+im = Image.open(out + "/i.iconset/icon_512x512@2x.png").convert("RGBA")
+W = im.size[0]; px = im.load()
+xs = [x for y in range(0, W, 8) for x in range(W) if px[x, y][3] > 200 and max(px[x, y][:3]) < 90]
+mid_dark_x = min(xs)
+row_y = next(y for y in range(0, W, 8) for x in [min(xs)] if px[x, y][3] > 200 and max(px[x, y][:3]) < 90)
+vals = [max(px[x, row_y][:3]) for x in range(max(0, mid_dark_x - 12), mid_dark_x + 14)]
+trans = sum(1 for v in vals if 40 < v < 215)
+sharp = trans <= 4
+print(("PASS " if sharp else "FAIL ") + f"icns-sharpness — {trans} transition px at 1024 (>4 = upscaled blur)")
+sys.exit(0 if (ok1024 and sharp) else 1)
+PY
+ICNS_STATUS=$?
+[ $STATUS -eq 0 ] && STATUS=$ICNS_STATUS
 echo "renders in: $WORK"
 exit $STATUS
