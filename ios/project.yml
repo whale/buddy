@@ -82,6 +82,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: fyi.whale.buddy
         PRODUCT_NAME: Buddy
         GENERATE_INFOPLIST_FILE: NO
+        # macOS-26/iOS-26 era icon: AppIcon.icon (Icon Composer package) in
+        # Resources is the single source; actool derives the legacy renditions
+        # for iOS 17/18 and the 1024 marketing icon from it.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: YES
         SWIFT_EMIT_LOC_STRINGS: YES
 

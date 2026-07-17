@@ -4,8 +4,9 @@
        as a "black border" inside the system squircle (whale 2026-07-17). -->
   <rect x="0" y="0" width="1024" height="1024" fill="#FFFFFF"/>
   <!-- Lucide "sticker" glyph centered: 24-grid (visual box 19.02 units incl. stroke)
-       scaled 44.4795x -> glyph 846px, padding 89px (60% less than the old 222px). -->
-  <g transform="translate(-21.754,-21.754) scale(44.4795)">
+       scaled 38.8013x -> glyph 738px, padding 143px = 14% per side (whale's mock 2026-07-17:
+       glyph fills 72% of the canvas). -->
+  <g transform="translate(46.3849,46.3849) scale(38.8013)">
     <!-- Red folded corner flap — outer edge follows the black outline's curve exactly so no white seam shows -->
     <path d="M15 3v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 15 3Z" fill="#FF4342"/>
     <!-- Black outline + fold + face -->
