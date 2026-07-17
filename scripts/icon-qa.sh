@@ -148,6 +148,18 @@ row = [px[x, mid] for x in range(x0, x0 + int(gw * 0.15))]
 darkest = min(max(p[0], p[1], p[2]) for p in row if p[3] > 200)
 check("stroke-is-black", darkest <= 40, f"darkest outline channel={darkest} (glass relighting pushes this to 70+)")
 
+# 1b. STROKE WEIGHT: whale's design = stroke 5.36% of the sticker width. The
+#     system SVG renderer once drew it at ~3% (half-weight, "wiry" icon) — a
+#     raster layer avoids that, and this assertion pins it forever.
+runlen = 0; runs = []
+for x in range(max(0, x0 - 6), x1):
+    p = px[x, mid]
+    if p[3] > 200 and max(p[0], p[1], p[2]) < 80: runlen += 1
+    elif runlen: runs.append(runlen); runlen = 0
+stroke_frac = (runs[0] / gw) if runs else 0
+check("stroke-weight", 0.045 <= stroke_frac <= 0.063,
+      f"stroke/sticker={stroke_frac:.4f}, design spec 0.0536 (thin render = SVG stroke bug)")
+
 # 2. RED FOLD: #FF4342 within tolerance somewhere in the glyph's top-right.
 best = None
 for y in range(y0, y0 + int(gw * 0.35), 2):
