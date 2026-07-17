@@ -2062,11 +2062,81 @@ function bossMove(){
 // Purely visual — the `done` state was already set + saved synchronously, so a
 // reload / rollover / another completion during the window can't corrupt anything.
 function scheduleDonezo(id){
+  const doneAt0 = (state.items.find(x=>x.id===id)||{}).doneAt;   // this completion, not a later redo
   setTimeout(()=>{
     const it=state.items.find(x=>x.id===id);
     if(!it || it.state!=='done' || !it.doneAt) return;     // un-done during the window → never morph
-    donezoEnterId=id; render();                            // FLIP glides it up to the Donezo group
+    if(it.doneAt!==doneAt0) return;                        // undone + re-done → the NEW completion's timer owns the morph
+    morphToDonezo(id);
   }, DONEZO_DELAY);
+}
+
+/* "Fade through" morph (whale picked variant D in the motion lab, 2026-07-16):
+   the savoring row fades out where it sits, its space closes gently (the flex
+   reflow carries the neighbours, no FLIP needed), then the done row
+   fades/expands in at the top of the pile. No travel: the old all-at-once
+   glide moved + squeezed + content-swapped simultaneously, which read as
+   jitter no matter how clean the frame rate was.
+   Durations live in ONE place — the stage timers are derived from them, so
+   tuning a transition can't desync the choreography (review 2026-07-16). */
+const MORPH_FADE=140, MORPH_CLOSE=240, MORPH_ENTER=220;
+function morphToDonezo(id){
+  const row = todayWrap.querySelector('[data-flip="'+id+'"]');
+  if(!row || reducedMotion() || state.histOpen || morningUp()){ donezoEnterId=id; render(); return; }
+  // Own the morph window: the completion render armed donezoCatchupTimer for
+  // ~60ms into this animation — without clearing it, that full rebuild replaces
+  // the fading row EVERY time (deterministic double-animation; review find).
+  // Our render() at the end re-arms catch-up for any other savoring items.
+  clearTimeout(donezoCatchupTimer);
+  row.style.transition='opacity '+MORPH_FADE+'ms ease';
+  row.style.opacity='0';
+  row.style.pointerEvents='none';   // invisible must not be clickable (a tap here silently un-completed)
+  setTimeout(()=>{
+    // A foreign render (sync pull, edit blur, resize) rebuilt the list mid-fade:
+    // it already shows the final state — stand down instead of animating orphans.
+    if(!row.isConnected) return;
+    row.style.height=row.offsetHeight+'px'; row.style.flex='0 0 auto'; row.style.overflow='hidden';
+    requestAnimationFrame(()=>{
+      row.style.transition='height '+MORPH_CLOSE+'ms var(--ease-drawer)';
+      row.style.height='0px'; row.style.borderTopWidth='0'; row.style.paddingTop='0'; row.style.paddingBottom='0';
+    });
+    setTimeout(()=>{
+      // Undone mid-fade? Just render honestly — no enter-pop on a live row.
+      const it2=state.items.find(x=>x.id===id);
+      if(!it2 || it2.state!=='done'){ render(); return; }
+      if(!row.isConnected){ render(); return; }   // foreign render took over mid-close — converge, no enter-pop
+      // NOTE: suppressFlipOnce is a whole-render switch — if a SECOND row also
+      // moved in this same rebuild (synced-in item), it snaps rather than glides.
+      // Accepted: rare, and half-animated is worse than plain for that row.
+      suppressFlipOnce=true;              // the close already reflowed the list — FLIP would double-animate
+      render();
+      const nr = todayWrap.querySelector('[data-flip="'+id+'"]');
+      if(nr){
+        const h = nr.offsetHeight;
+        const cs = getComputedStyle(nr);
+        const pt = cs.paddingTop, pb = cs.paddingBottom;
+        // SNAPSHOT the whole style attribute and restore it VERBATIM afterwards.
+        // Touching padding longhands explodes the builder's `padding:… var(--px)`
+        // shorthand, and per-side var() can't be re-serialized — the browser
+        // silently DROPS the side paddings (the squashed-Donezo bug). Only an
+        // attribute-level restore is safe against that CSSOM gotcha.
+        const styleSnapshot = nr.getAttribute('style') || '';
+        // Padding collapses with the height (border-box keeps a padded row
+        // ~2×--vpad tall at height:0 — the "empty band" review find).
+        nr.style.cssText += ';height:0px;padding-top:0;padding-bottom:0;opacity:0;overflow:hidden;flex:0 0 auto;border-top-width:0';
+        requestAnimationFrame(()=>{
+          nr.style.transition='height '+MORPH_ENTER+'ms var(--ease-drawer), padding-top '+MORPH_ENTER+'ms var(--ease-drawer), padding-bottom '+MORPH_ENTER+'ms var(--ease-drawer), opacity '+MORPH_ENTER+'ms ease 60ms';
+          nr.style.height=h+'px'; nr.style.paddingTop=pt; nr.style.paddingBottom=pb; nr.style.opacity='1';
+        });
+        setTimeout(()=>{
+          nr.setAttribute('style', styleSnapshot);
+          // Re-fit at natural heights: render's rAF(fitToday) measured while this
+          // row was pinned at 0px, sizing fonts/padding one row short (review find).
+          fitToday();
+        }, MORPH_ENTER+80);
+      }
+    }, MORPH_CLOSE+10);
+  }, MORPH_FADE+10);
 }
 // ↩ undo: restore a done task to the active list (reuses its id; blocked at the cap).
 function restoreItem(id){
@@ -2153,18 +2223,41 @@ window.addEventListener('resize',()=>{ _lastFitH=-1; requestAnimationFrame(fitTo
 
 /* --------------------------- rendering --------------------------- */
 let prevHistOpen=false;          // detect the open↔close transition for the crossfade
+let suppressFlipOnce=false;      // one render without FLIP (the fade-through morph pre-animates the reflow)
 // FLIP helpers: capture row tops by id before a rebuild; after, translate each
 // moved row back to its old spot and transition to 0 so it glides.
 function captureFlip(wrap){ const m=new Map();
-  if(wrap) for(const el of wrap.children){ if(el.dataset&&el.dataset.flip) m.set(el.dataset.flip, el.getBoundingClientRect().top); }
+  if(wrap) for(const el of wrap.children){ if(el.dataset&&el.dataset.flip) m.set(el.dataset.flip, {top:el.getBoundingClientRect().top, h:el.offsetHeight}); }
   return m; }
 function playFlip(wrap, prev){
   if(!prev || !wrap || reducedMotion()) return;
   for(const el of wrap.children){ const tid=el.dataset&&el.dataset.flip; if(!tid||!prev.has(tid)) continue;
-    const delta = prev.get(tid) - el.getBoundingClientRect().top;
-    if(Math.abs(delta)<2) continue;
-    el.style.transform='translateY('+delta+'px)'; el.style.transition='none';
-    requestAnimationFrame(()=>{ el.style.transition='transform .34s var(--ease-drawer)'; el.style.transform=''; });
+    const p=prev.get(tid);
+    const r=el.getBoundingClientRect();
+    const delta=p.top-r.top, dh=p.h-Math.round(r.height);
+    if(Math.abs(delta)<2 && Math.abs(dh)<2) continue;
+    // Position AND height glide together — a row that changes SIZE across a
+    // rebuild used to snap its shape while only its position animated, which
+    // read as jitter at any frame rate. RESTORE (don't clear) flex/overflow
+    // afterwards: rows carry inline flex from rowStyle, and wiping it once let
+    // the Add row absorb the whole panel (field report 2026-07-16).
+    // Threshold: ONLY morph-scale height changes animate. Adding/removing a row
+    // redistributes every row by ~10-25px — animating all of them at once made
+    // add-a-task feel busy (field report). Those small deltas snap like before.
+    const grow = Math.abs(dh)>=28;
+    const targetH = Math.round(r.height);
+    const prevFlex=el.style.flex, prevOverflow=el.style.overflow;
+    el.style.transition='none';
+    el.style.transform='translateY('+delta+'px)';
+    if(grow){ el.style.height=p.h+'px'; el.style.flex='0 0 auto'; el.style.overflow='hidden'; }
+    requestAnimationFrame(()=>{
+      el.style.transition='transform .34s var(--ease-drawer)'+(grow?', height .34s var(--ease-drawer)':'');
+      el.style.transform='';
+      if(grow) el.style.height=targetH+'px';
+    });
+    if(grow) setTimeout(()=>{ el.style.transition=''; el.style.height=''; el.style.flex=prevFlex; el.style.overflow=prevOverflow;
+      fitToday();   // the render-time rAF fit may have measured mid-animation heights — refit at rest (review find)
+    }, 380);
   }
 }
 function render(){
@@ -2181,7 +2274,8 @@ function render(){
   // FLIP: remember where each row was, so after the rebuild every row that moved
   // (the completed row gliding to the top, and the rows that shift to fill the gap)
   // glides smoothly to its new spot instead of jumping.
-  const flipPrev = (!state.histOpen && !prevHistOpen && !morningUp()) ? captureFlip(todayWrap) : null;
+  const flipPrev = (!suppressFlipOnce && !state.histOpen && !prevHistOpen && !morningUp()) ? captureFlip(todayWrap) : null;
+  suppressFlipOnce=false;
   // History sheet DOM only rebuilds while it's actually open (the open transition
   // below also renders) — rebuilding it hidden on EVERY render was a large slice
   // of the check-off stall that made the Donezo glide stutter.
@@ -3480,6 +3574,36 @@ window.__buddy = {
       const ht=hitTargetAudit();
       ok('hit targets: visible controls have aligned clickable areas', ht.ok, JSON.stringify(ht.issues));
       settingsOpen=false; closeSettings();
+      // Visual-integrity guards (2026-07-16 field reports): the layout system is
+      // fit-solver + flex + async animation choreography — inline-style leaks and
+      // shorthand/longhand CSSOM damage don't crash anything, they just quietly
+      // squash rows. Assert the VALUES, not just the structure.
+      // (a) A full fade-through morph must leave the Donezo row at its natural
+      //     height with an intact style attribute (the padding-shorthand bug).
+      state.today.items=[{id:'vg1',text:'morph me',state:'neutral',v:1},{id:'vg2',text:'bystander',state:'neutral',v:1}];
+      state.pinned=false; render();
+      cycle(state.items.find(x=>x.id==='vg1'));
+      await new Promise(r=>setTimeout(r, DONEZO_DELAY+MORPH_FADE+MORPH_CLOSE+MORPH_ENTER+260));
+      let vg=todayWrap.querySelector('[data-flip="vg1"]');
+      const vgH=vg?vg.offsetHeight:0;
+      render();                                            // rebuilt row = ground truth
+      vg=todayWrap.querySelector('[data-flip="vg1"]');
+      const vgTruth=vg?vg.offsetHeight:0;
+      ok('morph leaves the Donezo row at its natural size (no style-attr damage)',
+         vgTruth>0 && Math.abs(vgH-vgTruth)<=2, 'after-morph='+vgH+' rebuilt='+vgTruth);
+      // (b) After adding a task, all active rows settle to EQUAL heights and no
+      //     row is left carrying animation inline styles (the giant-Add-row bug).
+      addAndEdit();
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+      const vgAe=document.activeElement;
+      if(vgAe&&vgAe.dataset&&vgAe.dataset.tid) vgAe.textContent='vg added';   // keep the row (empty deletes on blur)
+      if(vgAe&&vgAe.blur) vgAe.blur();
+      await new Promise(r=>setTimeout(r, 450));
+      const hs=[...todayWrap.querySelectorAll('.row-neutral')].map(x=>x.offsetHeight);
+      const leaks=[...todayWrap.children].filter(x=>x.style.height||x.style.opacity==='0').length;
+      ok('rows settle to equal heights after add (no inline-style leaks)',
+         hs.length>0 && (Math.max(...hs)-Math.min(...hs))<=8 && leaks===0,
+         'heights='+JSON.stringify(hs)+' leaks='+leaks);
       // Escalation legibility: at lvl2 (red bg) the done/Donezo text MUST adapt to
       // light via --ink-dim, not stay dark. Catches hardcoded text-black on red.
       const dn=Date.now()-5000;
