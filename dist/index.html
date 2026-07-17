@@ -2393,15 +2393,26 @@ function fillFromRestartStash(){
 // behaviours (cycle/edit/sleep/remove, escalation colours) in both places.
 function renderToday(wrap=todayWrap, morning=false){
   wrap.innerHTML='';
-  // Drawer rows fill the panel height; morning rows are a fixed comfortable
-  // height so the box stays compact and scrolls only when it gets long.
-  const rowStyle = morning
-    ? 'flex:0 0 auto; min-height:120px; padding:0 var(--px);'   // tall enough for the row's edit/sleep/remove icon stack
-    : 'flex:1 1 auto; min-height:0; padding:var(--vpad) var(--px);';
   // Donezo (completed past the savor beat) sort to the TOP, newest first; active work below.
   // Boss-Mode-cleared completions (clearedAt) are hidden from Today — they still live in
   // state.items, so the Done tab, rollover and sync all see them unchanged.
-  const shown=state.items.filter(it=>!(it.state==='done' && it.clearedAt));
+  // MORNING: done tasks don't appear at all — the planner is for planning the day,
+  // not savoring it (whale 2026-07-17). They stay in state for the drawer/Done tab.
+  const shown=state.items.filter(it=> morning ? it.state!=='done' : !(it.state==='done' && it.clearedAt));
+  // Drawer rows fill the panel height; morning rows shrink from their comfortable
+  // 120px (and scale their text with them) so the whole plan fits the 70vh box
+  // instead of clipping (whale 2026-07-17).
+  let rowH=120, fsScale=1;
+  if(morning){
+    const avail=Math.floor(window.innerHeight*0.7)-36;   // 70vh box minus borders/row dividers slack
+    const rows=shown.length + (activeCount()<HARD_CAP ? 1 : 0);   // + trailing Add
+    rowH=Math.max(64, Math.min(120, Math.floor(avail/Math.max(rows,1))));
+    fsScale=Math.max(.72, rowH/120);
+  }
+  const morningFs = fsScale<1 ? `calc(var(--fs)*${fsScale.toFixed(3)})` : 'var(--fs)';
+  const rowStyle = morning
+    ? `flex:0 0 auto; min-height:${rowH}px; padding:0 var(--px);`   // tall enough for the row's edit/sleep/remove icon stack
+    : 'flex:1 1 auto; min-height:0; padding:var(--vpad) var(--px);';
   const donez=shown.filter(it=>isDonezo(it)).sort((a,b)=>(b.doneAt||0)-(a.doneAt||0));
   const order=[...donez, ...shown.filter(it=>!isDonezo(it))];
   order.forEach((it,i)=>{
@@ -2416,7 +2427,7 @@ function renderToday(wrap=todayWrap, morning=false){
     row.dataset.idx=idx;
 
     const txt=document.createElement('div');
-    txt.dataset.tid=it.id; txt.dataset.ph='Untitled'; txt.style.fontSize='var(--fs)';
+    txt.dataset.tid=it.id; txt.dataset.ph='Untitled'; txt.style.fontSize=morning?morningFs:'var(--fs)';
     txt.style.paddingRight='44px';   // reserve room for the right action column (boss row inserted after the loop)
     txt.style.color = it.state==='done' ? 'var(--ink-dim)' : 'var(--ink)';   // both ride the level-driven ink tokens (black → red → white)
     txt.className='flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2] '+(it.state==='done'?'line-through':(' cursor-text'));
@@ -2507,12 +2518,12 @@ function renderToday(wrap=todayWrap, morning=false){
   // (full red — there is no 7th).
   const addRows = activeCount()<HARD_CAP ? 1 : 0;
   for(let k=0;k<addRows;k++){
-    const first = state.items.length===0 && !showRestore && k===0;
+    const first = order.length===0 && !showRestore && k===0;
     const add=document.createElement('div');
     add.style.cssText=rowStyle;
     const addRing = (k===0 && kbActive && cursor===state.items.length) ? ' cursor-ring' : '';
     add.className='buddy-row addrow pressable row-neutral bd'+addRing+' group relative flex items-center cursor-pointer overflow-hidden '+(first?'':'border-t border-[#d9d9d9]');
-    add.innerHTML='<div class="addtxt flex gap-[18px] font-medium tracking-[-0.48px]" style="font-size:var(--fs)"><span>Add</span><span>+</span></div>';
+    add.innerHTML='<div class="addtxt flex gap-[18px] font-medium tracking-[-0.48px]" style="font-size:'+(morning?morningFs:'var(--fs)')+'"><span>Add</span><span>+</span></div>';
     add.addEventListener('mousedown',e=>e.preventDefault());   // keep the click from stealing focus
     add.addEventListener('click',()=>{ addAndEdit(); });
     wrap.appendChild(add);
