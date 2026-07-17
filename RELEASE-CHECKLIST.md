@@ -16,6 +16,12 @@ touches colors" still runs the interaction pass on its platform — the
       simulator: tap-to-edit stays in place · keyboard reveal · Future scrolls
       · **swipe tray actions FIRE** (not just show) · sheet pass
 - [ ] `cd src-tauri && cargo check`
+- [ ] `pnpm icons:qa` — if the release touches app icons: compiles `Buddy.icon`,
+      renders it through the REAL macOS icon pipeline (NSWorkspace), and asserts
+      flat black strokes (no liquid-glass relighting), the exact fold red, white
+      body, glyph proportion, and no legacy icon jail. File inspection is NOT
+      icon verification — only a system render is (learned 2026-07-17, three
+      broken icon releases in one day).
 
 ## 2 · Mac interactive pass (browser, `python3 -m http.server` over dist/)
 
