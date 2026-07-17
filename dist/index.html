@@ -2269,7 +2269,7 @@ function render(){
   edgeBar.classList.toggle('edge-alert', lvl>=1);   // escalation shows on the hidden tab too
   syncChrome();                                     // pin / calendar / settings selected states
   if(settingsOpen) syncReserve();                  // reserve switch color follows red/normal theme live
-  if(morningUp()){ renderToday(morningList, 3, true); renderMorningUndone(); }
+  if(morningUp()){ renderToday(morningList, true); renderMorningUndone(); }
 
   // FLIP: remember where each row was, so after the rebuild every row that moved
   // (the completed row gliding to the top, and the rows that shift to fill the gap)
@@ -2388,10 +2388,10 @@ function fillFromRestartStash(){
   render(); save();
 }
 
-// Renders the live task list into `wrap`. minRows pads empty "Add" rows so the
-// morning shows ≥3 slots; the drawer passes 1 (just one Add row). Same rows,
-// same behaviours (cycle/edit/sleep/remove, escalation colours) in both places.
-function renderToday(wrap=todayWrap, minRows=1, morning=false){
+// Renders the live task list into `wrap`. Exactly ONE empty "Add" row trails the
+// list in both the drawer and the morning (whale 2026-07-17). Same rows, same
+// behaviours (cycle/edit/sleep/remove, escalation colours) in both places.
+function renderToday(wrap=todayWrap, morning=false){
   wrap.innerHTML='';
   // Drawer rows fill the panel height; morning rows are a fixed comfortable
   // height so the box stays compact and scrolls only when it gets long.
@@ -2478,7 +2478,7 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
   });
 
   // Boss Mode row: after the Donezo pile, before live tasks. Drawer only — the
-  // morning planner shows a 3-slot preview the pile can't crowd.
+  // morning planner stays a compact preview the pile can't crowd.
   if(!morning && donez.length>=BOSS_MIN){
     // Every `order` entry appended exactly one row, so children[donez.length] is
     // the first live row (or null → the row lands after the pile at the end).
@@ -2503,10 +2503,9 @@ function renderToday(wrap=todayWrap, minRows=1, morning=false){
   }
   if(showRestore) wrap.appendChild(restoreRow);
 
-  // Empty "Add" rows — one in the drawer, padded to minRows in the morning. None
-  // at the hard cap (full red — there is no 7th).
-  const occupiedRows = state.items.length + (showRestore ? 1 : 0);
-  const addRows = activeCount()<HARD_CAP ? Math.max(1, minRows-occupiedRows) : 0;
+  // Empty "Add" row — always exactly one, everywhere. None at the hard cap
+  // (full red — there is no 7th).
+  const addRows = activeCount()<HARD_CAP ? 1 : 0;
   for(let k=0;k<addRows;k++){
     const first = state.items.length===0 && !showRestore && k===0;
     const add=document.createElement('div');
