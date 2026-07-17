@@ -9,6 +9,7 @@
     "dev": "tauri dev",
     "build": "tauri build",
     "icons": "python3 src-tauri/gen-icons.py",
+    "icons:mac": "cd src-tauri/icons && rm -rf .car-build && mkdir .car-build && xcrun actool Buddy.icon --compile .car-build --output-format human-readable-text --errors --output-partial-info-plist .car-build/partial.plist --app-icon Buddy --include-all-app-icons --enable-on-demand-resources NO --development-region en --target-device mac --minimum-deployment-target 26.0 --platform macosx && cp .car-build/Assets.car Assets.car && cp .car-build/Buddy.icns icon.icns && rm -rf .car-build && echo 'Regenerated Assets.car + icon.icns from Buddy.icon'",
     "ui:smoke": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-ui-smoke.spec.js --reporter=line",
     "sync:live": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-two-device.spec.js --reporter=line",
     "diag": "scripts/buddy-diag.sh",

@@ -5,6 +5,11 @@
   <!-- Menu-bar utility: no Dock icon. -->
   <key>LSUIElement</key>
   <true/>
+  <!-- macOS 26 native icon: points at the Icon Composer icon compiled into
+       Resources/Assets.car (source: icons/Buddy.icon, regen: pnpm icons:mac).
+       Without this, Tahoe shrinks the legacy .icns into the grey "icon jail". -->
+  <key>CFBundleIconName</key>
+  <string>Buddy</string>
   <!-- Shown in the permission prompt when Buddy opens a bug-report email in Apple Mail. -->
   <key>NSAppleEventsUsageDescription</key>
   <string>Buddy uses this to open a pre-filled bug-report email in Apple Mail.</string>
