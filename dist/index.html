@@ -99,6 +99,9 @@
     --chrome-ink:rgba(0,0,0,.45); --chrome-hover:rgba(0,0,0,.06);
     --sel-bg:#000; --sel-ink:#fff; --seg-track:rgba(0,0,0,.05); --line:#d9d9d9;
     --addtxt:rgba(0,0,0,.20); --addtxt-hover:#000; --glyph:#8c8c8c;
+    /* Settings inset cards (RULE 1): grey group fill on white, a translucent-light
+       panel on the lvl2 red bg. Buttons sit white on the card, translucent on red. */
+    --set-card:#f4f4f5; --set-hair:rgba(0,0,0,.07); --set-btn:#fff;
     /* Hover/selection darken — ONE shade, derived from the surface in OKLCH.
        Achromatic surfaces (white card, white CTA) darken by LIGHTNESS ONLY —
        adding chroma to white resolves to hue 0-ish and reads as a pink cast.
@@ -119,7 +122,8 @@
     --surface-hover:oklch(from var(--card) calc(l - 0.05) calc(c + 0.015) h);   /* red card: keep it vivid */
     --surface-hover-2:oklch(from var(--card) calc(l - 0.09) calc(c + 0.015) h);
     --sel-bg:#fff; --sel-ink:var(--red); --seg-track:rgba(255,255,255,.20); --line:rgba(255,255,255,.30);
-    --addtxt:rgba(255,255,255,.60); --addtxt-hover:#fff; --glyph:rgba(255,255,255,.92); }
+    --addtxt:rgba(255,255,255,.60); --addtxt-hover:#fff; --glyph:rgba(255,255,255,.92);
+    --set-card:rgba(255,255,255,.10); --set-hair:rgba(255,255,255,.18); --set-btn:rgba(255,255,255,.14); }
 
   /* Header chrome icons (pin / calendar / settings): identical default, hover and
      selected looks, all driven by the variables above. */
@@ -187,6 +191,23 @@
   .lvl2 #settings .buddy-range::-webkit-slider-runnable-track{ background:rgba(255,255,255,.30); }
   .lvl2 #settings .buddy-range::-moz-range-thumb{ background:#fff; }
   .lvl2 #settings .buddy-range::-moz-range-track{ background:rgba(255,255,255,.30); }
+
+  /* ---- Settings V2: grouped inset cards ----
+     Section labels + row labels share ONE left rail (32px). Dividers live only
+     INSIDE a card, between its rows; groups are separated by whitespace, never a
+     full-width line. Fills/hairlines/button bg are all token-driven so the whole
+     sheet re-themes across lvl0/1/2 for free (RULE 1). */
+  .set-body{ padding:8px 16px 20px; }
+  .set-glabel{ font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    margin:22px 0 10px; padding-left:16px; }        /* 16(body)+16(card pad) = 32 rail */
+  .set-glabel:first-child{ margin-top:8px; }
+  .set-card{ background:var(--set-card); border-radius:16px; overflow:hidden; transition:background-color .2s ease; }
+  .set-item{ padding:16px; }
+  .set-item + .set-item{ border-top:1px solid var(--set-hair); }
+  .set-btn{ display:flex; align-items:center; justify-content:center; width:100%; height:44px;
+    border-radius:9999px; background:var(--set-btn); font-size:15px; letter-spacing:-0.3px; transition:background-color .15s ease; }
+  .set-split{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .set-stack{ display:flex; flex-direction:column; gap:8px; }
 
   /* ---- row hover affordance (gated behind real hover — §3.4) ---- */
   .buddy-row{ transition:background-color .1s ease; }
@@ -437,89 +458,124 @@
       </div>
       <!-- scrollable body: top-aligned, scrolls only when it overflows -->
       <div class="flex-1 min-h-0 overflow-y-auto no-sb">
-        <div class="border-b border-[#d9d9d9] px-8 py-5">
-          <div class="text-[18px] text-black/60 tracking-[-0.36px] mb-3">Celebrate completed tasks</div>
-          <div class="flex items-center gap-3">
-            <span class="text-[20px] leading-none">👍🏼</span>
-            <input id="celebrateSlider" type="range" min="0" max="100" value="100" class="flex-1 buddy-range cursor-pointer">
-            <span class="text-[20px] leading-none">🦜</span>
-          </div>
-          <p id="confettiOverride" class="mt-3 text-[14px] text-black/40 leading-snug hidden">Off while your system is set to reduce motion.</p>
-        </div>
-        <div class="border-b border-[#d9d9d9] px-8 py-5">
-          <button id="reserveBtn" role="switch" aria-checked="false" class="pressable tap-target w-full flex items-center justify-between">
-            <span class="text-[18px] text-black/60 tracking-[-0.36px] text-left">Give Buddy room</span>
-            <span id="reserveTrack" class="relative shrink-0 w-[44px] h-[26px] rounded-full bg-black/15 transition-colors">
-              <span id="reserveKnob" class="absolute top-[3px] left-[3px] size-[20px] rounded-full bg-white shadow transition-transform"></span>
-            </span>
-          </button>
-          <p class="mt-2 text-[14px] text-black/35 tracking-[-0.26px] leading-snug">Pushes other windows out of Buddy's column. Asks for Accessibility permission the first time.</p>
-          <!-- Shown when the toggle is ON but macOS doesn't trust THIS build (a
-               re-signed update invalidates the old grant — toggling the stale row
-               in System Settings does nothing; it must be removed and re-added). -->
-          <p id="reserveHint" class="hidden mt-2 text-[14px] tracking-[-0.26px] leading-snug" style="color:var(--red)">Permission lost after an update. Open System Settings → Privacy &amp; Security → Accessibility, remove Buddy with −, then add it back with +.</p>
-        </div>
-        <!-- Sync with iPhone — three states: setup → pairing (QR) → linked -->
-        <div class="border-b border-[#d9d9d9] px-8 py-5">
-          <div class="mb-3">
-            <span class="text-[18px] text-black/60 tracking-[-0.36px]">Sync with iPhone</span>
-          </div>
+        <div class="set-body">
 
-          <!-- STATE 1a: not paired, HOSTED build (window.BUDDY_CLOUD present) — one
-               button, no server fields. Self-host tooling is the open-source
-               edition's UI, never shown here (founder decision 2026-07-14). -->
-          <div id="syncSetupCloud" class="hidden my-3">
-            <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Tasks are encrypted on this Mac before they sync — Buddy can’t read them.</p>
-            <button id="syncConnectCloudBtn" class="pressable tap-target self-start inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Connect &amp; show QR</button>
-          </div>
-
-          <!-- STATE 1b: not paired, OPEN-SOURCE build — backend fields + Connect -->
-          <div id="syncSetup" class="hidden flex flex-col gap-2 my-3">
-            <input id="syncUrl" placeholder="Backend URL" spellcheck="false" autocapitalize="off"
-              style="color:#000;-webkit-text-fill-color:#000;color-scheme:light"
-              class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] bg-white outline-none focus:border-black/40">
-            <input id="syncAnon" placeholder="Anon (publishable) key" spellcheck="false" autocapitalize="off"
-              style="color:#000;-webkit-text-fill-color:#000;color-scheme:light"
-              class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] bg-white outline-none focus:border-black/40">
-            <button id="syncConnectBtn" class="pressable tap-target self-start inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Connect &amp; show QR</button>
-          </div>
-
-          <!-- STATE 2: pairing — QR the phone scans -->
-          <div id="syncPairing" class="hidden flex items-center gap-4 my-3">
-            <div id="syncQR" class="shrink-0 leading-none rounded-[8px] overflow-hidden"></div>
-            <div class="flex-1 min-w-0">
-              <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Scan this in Buddy on your iPhone: Settings → “Scan QR to pair”.</p>
-              <button id="syncUnlinkBtnP" class="pressable tap-target inline-flex items-center px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Unlink iPhone</button>
+          <!-- ============ BEHAVIOR ============ -->
+          <div class="set-glabel text-black/30">Behavior</div>
+          <div class="set-card">
+            <!-- Celebrate -->
+            <div class="set-item">
+              <div class="text-[18px] text-black/60 tracking-[-0.36px] mb-3">Celebrate completed tasks</div>
+              <div class="flex items-center gap-3">
+                <span class="text-[20px] leading-none">👍🏼</span>
+                <input id="celebrateSlider" type="range" min="0" max="100" value="100" class="flex-1 buddy-range cursor-pointer">
+                <span class="text-[20px] leading-none">🦜</span>
+              </div>
+              <p id="confettiOverride" class="mt-3 text-[14px] text-black/40 leading-snug hidden">Off while your system is set to reduce motion.</p>
+            </div>
+            <!-- Give Buddy room -->
+            <div class="set-item">
+              <button id="reserveBtn" role="switch" aria-checked="false" class="pressable w-full flex items-center justify-between">
+                <span class="text-[18px] text-black/60 tracking-[-0.36px] text-left">Give Buddy room</span>
+                <span id="reserveTrack" class="relative shrink-0 w-[44px] h-[26px] rounded-full bg-black/15 transition-colors">
+                  <span id="reserveKnob" class="absolute top-[3px] left-[3px] size-[20px] rounded-full bg-white shadow transition-transform"></span>
+                </span>
+              </button>
+              <p class="mt-2 text-[14px] text-black/35 tracking-[-0.26px] leading-snug">Pushes other windows out of Buddy's column. Asks for Accessibility permission the first time.</p>
+              <!-- Shown when the toggle is ON but macOS doesn't trust THIS build (a
+                   re-signed update invalidates the old grant — toggling the stale row
+                   in System Settings does nothing; it must be removed and re-added). -->
+              <p id="reserveHint" class="hidden mt-2 text-[14px] tracking-[-0.26px] leading-snug" style="color:var(--red)">Permission lost after an update. Open System Settings → Privacy &amp; Security → Accessibility, remove Buddy with −, then add it back with +.</p>
+            </div>
+            <!-- Open at login — real macOS LaunchAgent via tauri-plugin-autostart -->
+            <div class="set-item">
+              <button id="loginBtn" role="switch" aria-checked="false" class="pressable w-full flex items-center justify-between">
+                <span class="text-[18px] text-black/60 tracking-[-0.36px] text-left">Open at login<span class="ml-2 inline-flex items-center h-[17px] px-[6px] rounded-full text-[10px] font-bold uppercase tracking-[.04em] text-black/50 align-middle" style="background:rgba(0,0,0,.06)">New</span></span>
+                <span id="loginTrack" class="relative shrink-0 w-[44px] h-[26px] rounded-full bg-black/15 transition-colors">
+                  <span id="loginKnob" class="absolute top-[3px] left-[3px] size-[20px] rounded-full bg-white shadow transition-transform"></span>
+                </span>
+              </button>
+              <p class="mt-2 text-[14px] text-black/35 tracking-[-0.26px] leading-snug">Launch Buddy automatically when you log in to your Mac.</p>
             </div>
           </div>
 
-          <!-- STATE 3: linked — synced; unlink or resync. Buttons side by side,
-               the sync status on its own line BELOW (it wrapped awkwardly beside
-               the pills — field report 2026-07-10). -->
-          <div id="syncLinked" class="hidden my-3">
-            <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Your iPhone is linked — changes sync automatically.</p>
-            <div class="flex items-center gap-2 flex-wrap">
-              <button id="syncUnlinkBtn" class="pressable tap-target inline-flex items-center whitespace-nowrap px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Unlink iPhone</button>
-              <button id="syncResyncBtn" class="pressable tap-target inline-flex items-center whitespace-nowrap px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Resync</button>
-              <!-- Two-tap confirm (NEVER a browser confirm() — it wedges the webview).
-                   First tap arms, second tap erases the cloud row + unlinks. -->
-              <button id="syncEraseBtn" class="pressable tap-target inline-flex items-center whitespace-nowrap px-4 rounded-full border border-[#d9d9d9] text-[14px] text-black/70 tracking-[-0.3px] ihover">Erase cloud data</button>
+          <!-- ============ IPHONE ============ -->
+          <div class="set-glabel text-black/30">iPhone</div>
+          <div class="set-card">
+            <div class="set-item">
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-[18px] text-black/60 tracking-[-0.36px]">Sync</span>
+                <span id="syncStatus" class="text-[14px] text-black/35 shrink-0">Off</span>
+              </div>
+
+              <!-- STATE 1a: not paired, HOSTED build (window.BUDDY_CLOUD present) — one
+                   button, no server fields. Self-host tooling is the open-source
+                   edition's UI, never shown here (founder decision 2026-07-14). -->
+              <div id="syncSetupCloud" class="hidden mt-4">
+                <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Tasks are encrypted on this Mac before they sync — Buddy can’t read them.</p>
+                <button id="syncConnectCloudBtn" class="set-btn pressable ihover border border-[#d9d9d9] text-black/70">Connect &amp; show QR</button>
+              </div>
+
+              <!-- STATE 1b: not paired, OPEN-SOURCE build — backend fields + Connect -->
+              <div id="syncSetup" class="hidden flex flex-col gap-2 mt-4">
+                <input id="syncUrl" placeholder="Backend URL" spellcheck="false" autocapitalize="off"
+                  style="color:#000;-webkit-text-fill-color:#000;color-scheme:light"
+                  class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] bg-white outline-none focus:border-black/40">
+                <input id="syncAnon" placeholder="Anon (publishable) key" spellcheck="false" autocapitalize="off"
+                  style="color:#000;-webkit-text-fill-color:#000;color-scheme:light"
+                  class="w-full px-3 py-2 rounded-[10px] border border-[#d9d9d9] text-[14px] bg-white outline-none focus:border-black/40">
+                <button id="syncConnectBtn" class="set-btn pressable ihover border border-[#d9d9d9] text-black/70 mt-1">Connect &amp; show QR</button>
+              </div>
+
+              <!-- STATE 2: pairing — QR the phone scans -->
+              <div id="syncPairing" class="hidden flex items-center gap-4 mt-4">
+                <div id="syncQR" class="shrink-0 leading-none rounded-[8px] overflow-hidden"></div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Scan this in Buddy on your iPhone: Settings → “Scan QR to pair”.</p>
+                  <button id="syncUnlinkBtnP" class="set-btn pressable ihover border border-[#d9d9d9] text-black/70">Unlink iPhone</button>
+                </div>
+              </div>
+
+              <!-- STATE 3: linked — Unlink/Resync split 50/50, Erase full-width below. -->
+              <div id="syncLinked" class="hidden mt-4">
+                <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Your iPhone is linked — changes sync automatically.</p>
+                <div class="set-stack">
+                  <div class="set-split">
+                    <button id="syncUnlinkBtn" class="set-btn pressable ihover border border-[#d9d9d9] text-black/70">Unlink</button>
+                    <button id="syncResyncBtn" class="set-btn pressable ihover border border-[#d9d9d9] text-black/70">Resync</button>
+                  </div>
+                  <!-- Two-tap confirm (NEVER a browser confirm() — it wedges the webview).
+                       First tap arms, second tap erases the cloud row + unlinks. -->
+                  <button id="syncEraseBtn" class="set-btn pressable ihover border border-[#d9d9d9] text-black/70">Erase cloud data</button>
+                </div>
+              </div>
+
+              <p id="syncError" class="hidden text-[13px] leading-snug mt-2"></p>
             </div>
-            <div id="syncStatus" class="mt-2 text-[14px] text-black/35">Off</div>
           </div>
 
-          <p id="syncError" class="hidden text-[13px] leading-snug mb-1"></p>
+          <!-- ============ YOUR DATA ============ -->
+          <div class="set-glabel text-black/30">Your data</div>
+          <div class="set-card">
+            <div class="set-item">
+              <button id="exportBtn" class="set-btn pressable ihover border border-[#d9d9d9] text-black/70">Export my done tasks</button>
+              <div class="mt-4 text-[14px] text-black/35 tracking-[-0.26px]"><span id="exportCount"></span></div>
+            </div>
+          </div>
+
+          <!-- ============ APP ============ -->
+          <div class="set-glabel text-black/30">App</div>
+          <div class="set-card">
+            <div class="set-item">
+              <div class="set-split">
+                <button id="quitBtn" class="set-btn pressable ihover border border-[#d9d9d9] text-black/70">Quit Buddy</button>
+                <button id="restartBtn" class="set-btn pressable ihover border border-[#d9d9d9] text-black/70">Restart Buddy</button>
+              </div>
+              <div class="mt-4 text-[14px] text-black/30 tracking-[-0.26px]">Buddy Version <span id="appVersion">—</span> (basically a toddler)</div>
+            </div>
+          </div>
+
         </div>
-        <button id="exportBtn" class="pressable w-full px-8 py-5 text-[18px] text-black/60 tracking-[-0.36px] border-b border-[#d9d9d9] ihover flex items-center justify-between gap-3 text-left">
-          <span>Export my done tasks</span>
-          <span id="exportCount" class="text-[15px] text-black/35 shrink-0"></span>
-        </button>
-        <!-- Quit / Restart: matching pill buttons at the bottom -->
-        <div class="flex items-center gap-3 px-8 py-5 border-b border-[#d9d9d9]">
-          <button id="quitBtn" class="pressable tap-target inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] ihover">Quit Buddy</button>
-          <button id="restartBtn" class="pressable tap-target inline-flex items-center px-5 rounded-full border border-[#d9d9d9] text-[15px] text-black/70 tracking-[-0.3px] ihover">Restart Buddy</button>
-        </div>
-        <div class="px-8 pt-5 pb-7 text-[14px] text-black/30 tracking-[-0.26px]">Buddy <span id="appVersion">—</span></div>
       </div>
     </div>
   </div>
@@ -3149,6 +3205,33 @@ async function syncReserveTrust(){
   el.classList.toggle('hidden', !!trusted);
   diag('reserve-status',{ on:true, pinned:!!state.pinned, trusted:!!trusted });
 }
+// "Open at login" — a real macOS login item via tauri-plugin-autostart. It's an OS
+// setting (not synced task state), so the PLUGIN is the source of truth: read
+// is_enabled on open and reflect it; the toggle calls enable/disable then re-reads.
+let loginEnabled=false;
+function syncLogin(){
+  const t=$('#loginTrack'), k=$('#loginKnob'), b=$('#loginBtn'); if(!b) return;
+  b.setAttribute('aria-checked', loginEnabled?'true':'false');
+  // Same escalation colours as the reserve switch: black → red → deep-red on lvl2.
+  const wl=warnLevel();
+  const onColor = wl===2 ? '#b92f34' : wl===1 ? 'var(--red)' : '#000';
+  t.style.backgroundColor = loginEnabled ? onColor : (wl===2 ? 'rgba(255,255,255,.30)' : wl===1 ? 'rgba(229,72,77,.25)' : 'rgba(0,0,0,.15)');
+  k.style.transform = loginEnabled ? 'translateX(18px)' : 'translateX(0)';
+}
+async function refreshLogin(){
+  if(!NATIVE){ loginEnabled=false; syncLogin(); return; }
+  try{ loginEnabled = !!(await window.__TAURI__.core.invoke('plugin:autostart|is_enabled')); }catch(_){ /* keep last known */ }
+  syncLogin();
+}
+async function toggleLogin(){
+  const next=!loginEnabled;
+  loginEnabled=next; syncLogin();                 // optimistic flip
+  if(!NATIVE) return;
+  try{ await window.__TAURI__.core.invoke(next ? 'plugin:autostart|enable' : 'plugin:autostart|disable'); }
+  catch(_){ loginEnabled=!next; syncLogin(); }     // revert if the OS refused
+  diag('login-item',{ on:loginEnabled });
+  refreshLogin();                                  // reconcile with the real state
+}
 // Total completed tasks the Export will write (today + every archived day) — shown
 // to the right of the Export row.
 function doneCount(){
@@ -3156,10 +3239,11 @@ function doneCount(){
   (state.history||[]).forEach(d=>{ n+=(d.items||[]).filter(it=>it.done).length; });
   return n;
 }
-function syncExportCount(){ const el=$('#exportCount'); if(el) el.textContent=String(doneCount()); }
+function exportCountLabel(){ const n=doneCount(); return n+' done task'+(n===1?'':'s'); }
+function syncExportCount(){ const el=$('#exportCount'); if(el) el.textContent=exportCountLabel(); }
 function flashExportStatus(text){
   const el=$('#exportCount'); if(!el) return;
-  const prev=String(doneCount()); el.textContent=text;
+  const prev=exportCountLabel(); el.textContent=text;
   setTimeout(()=>{ if(settingsOpen) el.textContent=prev; }, 1800);
 }
 function openSettings(){
@@ -3167,7 +3251,7 @@ function openSettings(){
   settingsSheet.classList.remove('closing');
   settingsSheet.setAttribute('data-open','true');
   settingsSheet.setAttribute('aria-hidden','false');
-  syncCelebrate(); syncReserve(); syncReserveTrust(); syncExportCount(); syncChrome();
+  syncCelebrate(); syncReserve(); syncReserveTrust(); syncLogin(); refreshLogin(); syncExportCount(); syncChrome();
   renderSyncUI();   // reflect the current pairing state (setup / pairing / linked)
 }
 function closeSettings(){
@@ -3198,6 +3282,8 @@ $('#reserveBtn')?.addEventListener('click', e=>{ e.stopPropagation();
   state.settings.reserveSpace = !state.settings.reserveSpace;
   syncReserve(); save(); applyReserve(); syncReserveTrust();
 });
+// Open-at-login toggle
+$('#loginBtn')?.addEventListener('click', e=>{ e.stopPropagation(); toggleLogin(); });
 // Calendar icon: toggles the history panel. If Settings is open, switch to it.
 $('#histBtn')?.addEventListener('click', e=>{ e.stopPropagation();
   const wasSettings=settingsOpen;
@@ -3246,7 +3332,7 @@ $('#quitBtn')?.addEventListener('click', e=>{ e.stopPropagation();
 // Show the running version, pinned at the bottom of Settings.
 (async()=>{ let v='0.2.0';
   try{ const t=window.__TAURI__; if(t&&t.core) v=await t.core.invoke('app_version'); }catch(_){}
-  const el=$('#appVersion'); if(el) el.textContent='v'+v;
+  const el=$('#appVersion'); if(el) el.textContent=v;   // "Buddy Version <v>" — no 'v' prefix (label already says Version)
 })();
 // (Manual "Check for Updates" removed — the auto-check banner below is the only
 // update path; a manual check is redundant.)
@@ -4310,7 +4396,7 @@ function ensureHtml2canvas(){
 function buildBugLogs(){
   return [
     'Buddy bug report',
-    'version: '+($('#appVersion')?.textContent||'?'),
+    'version: v'+($('#appVersion')?.textContent||'?'),
     'when: '+new Date().toISOString(),
     'platform: '+navigator.userAgent,
     // counts only — never the task text (the screenshot is the visual report)
@@ -4339,7 +4425,7 @@ async function reportBug(){
       try{
         const hdrs={'Content-Type':'application/json'}; if(BUG_KEY) hdrs['x-buddy-key']=BUG_KEY;
         const r = await fetch(BUG_ENDPOINT, { method:'POST', headers:hdrs,
-          body: JSON.stringify({ version: $('#appVersion')?.textContent||'?', platform: navigator.userAgent, logs: buildBugLogs(), screenshot: png }) });
+          body: JSON.stringify({ version: 'v'+($('#appVersion')?.textContent||'?'), platform: navigator.userAgent, logs: buildBugLogs(), screenshot: png }) });
         if(r.ok){ sent=true; try{ url=(await r.json()).url; }catch(_){} }
       }catch(e){ console.warn('[buddy] bug endpoint failed, falling back to mail', e); }
     }
