@@ -1025,6 +1025,8 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // "Open at login" — LaunchAgent (modern macOS login item, no deprecated APIs).
+        .plugin(tauri_plugin_autostart::Builder::new().app_name("Buddy").build())
         .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, export_done_tasks, set_reserve, reserve_trusted, set_morning_mode, open_morning_window, hide_morning_window, fit_morning_window, morning_translucent, celebrate_fullscreen, confetti_ready, hide_confetti_window, check_for_update, install_update, load_state, load_recovery_state, save_state, append_event])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
