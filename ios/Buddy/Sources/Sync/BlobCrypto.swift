@@ -77,4 +77,62 @@ enum BlobCrypto {
         return (d["enc"] as? Int) == 1 && d["ct"] is String
             && (d["today"] != nil || d["savedAt"] != nil)
     }
+
+    // MARK: - Wire v2 envelope — cleartext, AAD-authenticated triage header.
+    // Swift mirror of dist/index.html encryptEnvelope/decryptEnvelope (SYNC-COMPAT.md).
+    // {b,wire,crypto,minReader} are CLEARTEXT so any reader — and the server — can decide
+    // "can I safely touch this" WITHOUT the key; the header is bound as AES-GCM AAD so a
+    // tampered/downgraded header fails decryption. Content stays fully E2E-encrypted.
+    // wire/crypto/schema are three INDEPENDENT axes. Pinned by the shared wire-2 vector in
+    // BlobCryptoTests / syncTest 12c-vec — Mac and iOS MUST agree byte-for-byte.
+    static let wireMax = 2       // highest framing this build can READ
+    static let wireWrite = 2     // framing this build WRITES
+    static let cryptoSuite = "aes256gcm.hkdf.v1"
+
+    /// Fixed-order string ⇒ byte-identical AAD on JS and Swift (no canonical-JSON ambiguity).
+    static func aad(wire: Int, suite: String, minReader: Int) -> Data {
+        Data("buddy|\(wire)|\(suite)|\(minReader)".utf8)
+    }
+    static func intField(_ any: Any?) -> Int? {
+        if let n = any as? Int { return n }
+        if let n = any as? NSNumber { return n.intValue }
+        return nil
+    }
+
+    /// Encrypt wire-JSON bytes → wire-2 envelope. `nonce` is for the cross-platform vector only.
+    static func encryptEnvelope(_ plaintext: Data, key: SymmetricKey, nonce: Data? = nil, plat: String = "ios") throws -> [String: Any] {
+        let wire = wireWrite, minReader = wireWrite, suite = cryptoSuite
+        let n = try nonce.map { try AES.GCM.Nonce(data: $0) } ?? AES.GCM.Nonce()
+        let box = try AES.GCM.seal(plaintext, using: key, nonce: n,
+                                   authenticating: aad(wire: wire, suite: suite, minReader: minReader))
+        return ["b": "buddy", "wire": wire, "crypto": suite, "minReader": minReader,
+                "writer": ["app": "?", "plat": plat],
+                "iv": b64uEncode(Data(n)),
+                "ct": b64uEncode(box.ciphertext + box.tag)]   // WebCrypto layout: ct||tag
+    }
+
+    /// Wire-2 envelope → wire-JSON bytes. AAD is rebuilt from the envelope's OWN header,
+    /// so a tampered header (downgrade attack) makes AES-GCM authentication fail.
+    static func decryptEnvelope(_ env: [String: Any], key: SymmetricKey) throws -> Data {
+        guard let ivS = env["iv"] as? String, let ctS = env["ct"] as? String,
+              let iv = b64uDecode(ivS), let ctAndTag = b64uDecode(ctS), ctAndTag.count > 16,
+              let wire = intField(env["wire"]), let suite = env["crypto"] as? String,
+              let minReader = intField(env["minReader"])
+        else { throw NSError(domain: "BlobCrypto", code: 3,
+                             userInfo: [NSLocalizedDescriptionKey: "malformed v2 envelope"]) }
+        let box = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: iv),
+                                        ciphertext: ctAndTag.dropLast(16), tag: ctAndTag.suffix(16))
+        return try AES.GCM.open(box, using: key,
+                                authenticating: aad(wire: wire, suite: suite, minReader: minReader))
+    }
+
+    /// A wire-2 envelope: cleartext header + ciphertext, no plaintext data markers.
+    static func isV2Envelope(_ any: Any?) -> Bool {
+        guard let d = any as? [String: Any] else { return false }
+        return (d["b"] as? String) == "buddy" && intField(d["wire"]) != nil
+            && d["iv"] is String && d["ct"] is String
+            && d["today"] == nil && d["savedAt"] == nil
+    }
+    static func envelopeWire(_ any: Any?) -> Int? { (any as? [String: Any]).flatMap { intField($0["wire"]) } }
+    static func envelopeMinReader(_ any: Any?) -> Int? { (any as? [String: Any]).flatMap { intField($0["minReader"]) } }
 }

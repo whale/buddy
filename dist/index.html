@@ -1335,6 +1335,12 @@ function applyWire(blob){
 // state only via applyWire. Returns a small result describing what happened.
 async function syncOnce(store, key){
   const remote = await store.pull(key);                 // { blob, version }
+  // A peer wrote a framing this build can't read → DEGRADE, never clobber it (#127).
+  // Overwriting here is exactly how the 2026-07-18 split-brain destroyed data.
+  if(remote && remote.unreadable){
+    diag('sync-refuse-clobber', { wire:remote.wire, minReader:remote.minReader });
+    return { ok:false, degraded:true, reason:'peer-newer', wire:remote.wire };
+  }
   const localBlob = JSON.parse(serialize());
 
   // Empty-over-full guard / scanner-pulls-first: a fresh empty device must never
@@ -1361,6 +1367,8 @@ async function syncOnce(store, key){
   for(let attempt=0; attempt<SYNC_MAX_RETRY; attempt++){
     const res = await store.push(key, mergedBlob, expected, blobStats(mergedBlob));
     if(res && res.ok){ applyWire(mergedBlob); return { ok:true, pushed:true, version:res.version, attempts:attempt+1 }; }
+    // A peer's newer-than-us framing landed mid-CAS → bail, don't clobber it (#127).
+    if(res && res.unreadable){ diag('sync-refuse-clobber', { wire:res.wire }); return { ok:false, degraded:true, reason:'peer-newer', wire:res.wire }; }
     // Someone wrote between our pull and push → fold their blob in and retry CAS.
     mergedBlob = mergeWire(mergedBlob, res && res.blob);
     // Adopt the server's reported version; keep the old expected if it's malformed
@@ -1518,7 +1526,7 @@ async function syncNow(reason){
       const res = await syncOnce(syncStore, syncOwnerId);   // pull → merge → CAS push → retry
       if(res && res.ok){ syncLastAt = Date.now(); syncLastError = null;
         diag('sync', {reason, pushed:!!res.pushed, noop:!!res.noop, pulled:!!res.pulled, v:res.version||0, attempts:res.attempts||0}); }
-      else { syncLastError = 'conflict'; diag('sync-conflict', {reason}); }
+      else { syncLastError = (res && res.reason) || 'conflict'; diag(res&&res.degraded?'sync-degraded':'sync-conflict', {reason, peerWire:res&&res.wire}); }
     } while(syncPending && syncStore);
     return true;
   }catch(e){ syncLastError = (e&&e.message)||'error'; console.warn('[buddy] sync failed ('+reason+')', e); diag('sync-error', {reason, err:String(e&&e.message).slice(0,120)}); return null; }
@@ -1549,6 +1557,7 @@ function renderSyncUI(){
   // split brains once a second backend existed).
   const bucket = syncDisplayId ? ' · '+syncDisplayId : '';
   if(!cfg) st.textContent='Off';
+  else if(syncLastError==='peer-newer') st.textContent='Update needed'+bucket;   // a peer is on a newer format we can't read
   else if(syncLastError) st.textContent='Error'+bucket;
   else if(syncLastAt){ const d=new Date(syncLastAt); st.textContent='Synced '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+bucket; }
   else st.textContent='Connected'+bucket;
@@ -1737,6 +1746,43 @@ function isEncryptedBlob(b){
 function isHybridBlob(b){
   return !!(b && b.enc===1 && typeof b.ct==='string' && ('today' in b || 'savedAt' in b));
 }
+
+// ---- Wire v2 envelope: cleartext, AAD-authenticated triage header (SYNC-COMPAT.md).
+// Any reader — and the server — can read {b,wire,crypto,minReader} WITHOUT the key and
+// decide "can I safely touch this" BEFORE decrypting. The header is bound as AES-GCM AAD,
+// so a tampered/downgraded header fails decryption. Content stays fully E2E-encrypted.
+// wire/crypto/schema are three INDEPENDENT axes — never one welded integer again.
+const WIRE_MAX = 2;                    // highest framing this build can READ
+const WIRE_WRITE = 2;                  // framing this build WRITES
+const CRYPTO_SUITE = 'aes256gcm.hkdf.v1';
+// Fixed-order string ⇒ byte-identical AAD on JS and Swift (no canonical-JSON ambiguity).
+function envelopeAAD(wire, suite, minReader){
+  return new TextEncoder().encode('buddy|'+wire+'|'+suite+'|'+minReader);
+}
+function wirePlatform(){ try{ return NATIVE ? 'mac' : 'web'; }catch(_){ return 'web'; } }
+async function encryptEnvelope(blobKey, blob, opts){
+  opts = opts || {};
+  const wire = WIRE_WRITE, minReader = WIRE_WRITE, suite = CRYPTO_SUITE;
+  const iv = opts.ivOverride || crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt(
+    { name:'AES-GCM', iv, additionalData: envelopeAAD(wire, suite, minReader) },
+    blobKey, new TextEncoder().encode(JSON.stringify(blob))));
+  return { b:'buddy', wire, crypto:suite, minReader,
+           writer:{ app:(opts.app||'?'), plat:(opts.plat||wirePlatform()) },
+           iv:b64uEncodeBytes(iv), ct:b64uEncodeBytes(ct) };
+}
+async function decryptEnvelope(blobKey, env){
+  const pt = await crypto.subtle.decrypt(
+    { name:'AES-GCM', iv:b64uDecodeBytes(env.iv), additionalData: envelopeAAD(env.wire, env.crypto, env.minReader) },
+    blobKey, b64uDecodeBytes(env.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+// A wire-2 envelope: cleartext header + ciphertext, no plaintext data markers.
+function isV2Envelope(b){
+  return !!(b && b.b==='buddy' && typeof b.wire==='number'
+    && typeof b.iv==='string' && typeof b.ct==='string'
+    && !('today' in b) && !('savedAt' in b));
+}
 // Metrics beside the ciphertext: COUNTS, NEVER CONTENT (the server also rejects any
 // non-numeric value — same covenant as the diagnostics log).
 function blobStats(b){
@@ -1752,24 +1798,41 @@ function makeEncryptedStore(store, blobKey){
     async pull(key){
       const r = await store.pull(key);
       if(!r || !r.blob) return r;
-      if(isEncryptedBlob(r.blob)){
-        try{ return { blob: await decryptBlob(blobKey, r.blob), version:r.version }; }
+      const b = r.blob;
+      // wire-2 envelope: TRIAGE the cleartext header before decrypting.
+      if(isV2Envelope(b)){
+        if(b.minReader > WIRE_MAX){                       // newer than we can read → DEGRADE, never clobber (#127)
+          diag('sync-peer-newer', { wire:b.wire, minReader:b.minReader });
+          return { blob:null, version:r.version, unreadable:true, wire:b.wire, minReader:b.minReader };
+        }
+        try{ return { blob: await decryptEnvelope(blobKey, b), version:r.version }; }
         catch(e){ throw new Error('blob decrypt failed'); }   // never echo content into errors
+      }
+      // Legacy wire-1 pure envelope {enc:1} (no AAD). plain:true → re-push once to UPGRADE to wire-2.
+      if(isEncryptedBlob(b)){
+        try{ return { blob: await decryptBlob(blobKey, b), version:r.version, plain:true }; }
+        catch(e){ throw new Error('blob decrypt failed'); }
       }
       // Hybrid (pre-E2E peer round-tripped an envelope through its extras): the
       // PLAINTEXT half is the newer truth — the stale ct predates that peer's merge.
-      // Strip the envelope keys (hydrate also drops them) and take the plaintext.
-      if(isHybridBlob(r.blob)){
-        const { enc, iv, ct, ...plainBlob } = r.blob;
+      if(isHybridBlob(b)){
+        const { enc, iv, ct, ...plainBlob } = b;
         diag('sync-hybrid-blob', {v:r.version});   // mixed-version window forensics
         return { blob:plainBlob, version:r.version, plain:true };
       }
-      return { blob:r.blob, version:r.version, plain:true };  // legacy row → upgrade on push
+      return { blob:b, version:r.version, plain:true };  // legacy plaintext → upgrade on push
     },
     async push(key, blob, expected, stats){
-      const r = await store.push(key, await encryptBlob(blobKey, blob), expected, stats);
-      // CAS conflict hands back the CURRENT remote blob for re-merge — decrypt that too.
-      if(r && !r.ok && isEncryptedBlob(r.blob)) r.blob = await decryptBlob(blobKey, r.blob);
+      const r = await store.push(key, await encryptEnvelope(blobKey, blob), expected, stats);
+      // CAS conflict hands back the CURRENT remote row for re-merge — decode it too.
+      if(r && !r.ok && r.blob){
+        if(isV2Envelope(r.blob)){
+          if(r.blob.minReader > WIRE_MAX){ r.unreadable = true; r.wire = r.blob.wire; r.blob = null; }
+          else { try{ r.blob = await decryptEnvelope(blobKey, r.blob); }catch(_){ r.blob = null; } }
+        } else if(isEncryptedBlob(r.blob)){
+          try{ r.blob = await decryptBlob(blobKey, r.blob); }catch(_){ r.blob = null; }
+        }
+      }
       return r;
     },
     async erase(key){ return store.erase ? store.erase(key) : false; },
@@ -4216,15 +4279,24 @@ window.__buddy = {
       const inner=makeFakeCASStore(); const estore=makeEncryptedStore(inner, bk);
       setLocal([{id:'e1',text:'SECRET TASK',state:'neutral',v:1}]); await syncOnce(estore,'k');
       const wire=inner._rows()['k'];
-      ok('wire row is an envelope (enc/iv/ct), not plaintext', wire && isEncryptedBlob(wire.blob) && !JSON.stringify(wire.blob).includes('SECRET TASK'));
+      ok('wire row is a wire-2 envelope (b/wire/minReader + ct), not plaintext',
+        wire && isV2Envelope(wire.blob) && wire.blob.wire===2 && wire.blob.b==='buddy'
+        && wire.blob.minReader===2 && !JSON.stringify(wire.blob).includes('SECRET TASK'));
       const pulled=await estore.pull('k');
       ok('pull decrypts back to the task', pulled.blob && JSON.stringify(pulled.blob).includes('SECRET TASK'));
-      // 12d. Legacy plaintext row upgrades to ciphertext on the next pass, same content.
+      // 12c-vec. CROSS-PLATFORM ENVELOPE VECTOR — MUST match BlobCryptoTests on iOS.
+      // Same key + zero IV + AAD("buddy|2|aes256gcm.hkdf.v1|2") over pt {"probe":1}.
+      // The AAD tag makes this ct differ from the legacy (no-AAD) vector above.
+      const venv=await encryptEnvelope(bk, {probe:1}, { ivOverride:new Uint8Array(12), plat:'mac' });
+      ok('wire-2 envelope vector matches the shared JS↔Swift pin',
+        venv.b==='buddy' && venv.wire===2 && venv.crypto==='aes256gcm.hkdf.v1' && venv.minReader===2
+        && venv.ct==='dwuU613APPxtAVeAdb_UI1J97z3qrFHjfMMU', 'ct='+venv.ct);
+      // 12d. Legacy plaintext row upgrades to a wire-2 envelope on the next pass.
       const inner2=makeFakeCASStore({key:'k', blob:JSON.parse(serialize()), version:3});
       const estore2=makeEncryptedStore(inner2, bk);
       await syncOnce(estore2,'k');
       const up=inner2._rows()['k'];
-      ok('plaintext row upgrades to ciphertext on first pass', up.version===4 && isEncryptedBlob(up.blob), 'v='+up.version);
+      ok('plaintext row upgrades to a wire-2 envelope on first pass', up.version===4 && isV2Envelope(up.blob), 'v='+up.version);
       // 12e. Stats are counts, never content.
       const st=blobStats({today:{items:[{state:'neutral'},{state:'done'}]}, deferred:[{}], history:[{},{}]});
       ok('blobStats counts only', st.active===1 && st.done===1 && st.deferred===1 && st.historyDays===2
@@ -4247,7 +4319,7 @@ window.__buddy = {
       const hrow=hinner._rows()['k'];
       const hwire=JSON.stringify(hrow.blob);
       ok('hybrid row re-encrypts clean (no plaintext, no echoed envelope keys)',
-        hrow.version===8 && isEncryptedBlob(hrow.blob) && !hwire.includes('PHONE EDIT'));
+        hrow.version===8 && isV2Envelope(hrow.blob) && !hwire.includes('PHONE EDIT'));
       const hback=await hstore.pull('k');
       ok('re-encrypted row still contains the peer edit',
         JSON.stringify(hback.blob).includes('PHONE EDIT') && !('enc' in hback.blob));
@@ -4292,6 +4364,105 @@ window.__buddy = {
     editingId=null; render(); saveSuppressed=wasSup;
     const failed=R.filter(r=>!r.pass);
     return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
+  },
+
+  // Version-skew harness — pins the FIX for the 2026-07-18 split-brain
+  // (SYNC-COMPAT.md). GUARDS (counted in ok) prove the wire-2 cleartext-header
+  // protocol degrades instead of corrupting across version skew: backward read,
+  // forward write, refuse-to-clobber a newer peer, AAD tamper/downgrade defence,
+  // legacy upgrade. GAPS are what the CLIENT cannot fix — a frozen pre-header
+  // peer (the v0.1.0 phone) that writes raw and can't be changed; only the
+  // SERVER wire floor (supabase buddy_wire_floor) + a re-pair stop that. Gaps
+  // are reported, not counted in ok.
+  async skewTest(){
+    const R=[]; const ok=(name,cond,detail)=>R.push({name,pass:!!cond,detail:detail||''});
+    const gaps=[];
+    const snap=JSON.parse(JSON.stringify({today:state.today,history:state.history,deferred:state.deferred,settings:state.settings,pinned:state.pinned,tombstones:state.tombstones,erasedAt:state.erasedAt}));
+    const wasSup=saveSuppressed; saveSuppressed=true;
+    const setLocal=(items)=>{ state.today={date:'2026-06-19',morningDone:false,items:items||[]}; state.history=[]; state.deferred=[]; state.tombstones={}; state.erasedAt=null; editingId=null; };
+    const texts=blob=>{ try{ return ((blob&&blob.today&&blob.today.items)||[]).map(i=>i.text).sort(); }catch{ return []; } };
+    let bk;
+    const readWire=async row=>{
+      if(!row||!row.blob) return null;
+      if(isV2Envelope(row.blob)) return await decryptEnvelope(bk,row.blob).catch(()=>null);
+      if(isEncryptedBlob(row.blob)) return await decryptBlob(bk,row.blob).catch(()=>null);
+      return row.blob;
+    };
+    try{
+      bk=await deriveBlobKey('A'.repeat(43));            // 32 zero bytes → shared test blobKey
+      const cloud=makeFakeCASStore();                    // the shared CAS bucket
+      const neu=makeEncryptedStore(cloud,bk);            // NEW client: reads/writes the wire-2 envelope
+
+      // GUARD 1 — a NEW client still READS an OLD plaintext row (backward read).
+      setLocal([{id:'x',text:'OLD_TASK',state:'neutral',v:1}]);
+      await syncOnce(cloud,'k');                          // old client seeds plaintext directly
+      const seeded=cloud._rows()['k'];
+      ok('new client reads an OLD plaintext row (backward read)',
+         seeded && !isV2Envelope(seeded.blob) && texts(seeded.blob).includes('OLD_TASK'));
+
+      // GUARD 2 — NEW client merges old+new and WRITES a wire-2 envelope (forward write).
+      setLocal([{id:'y',text:'NEW_TASK',state:'neutral',v:1}]);
+      await syncOnce(neu,'k');
+      const afterNew=cloud._rows()['k'];
+      const afterNewPlain=await readWire(afterNew);
+      ok('new client merges old+new and writes a WIRE-2 envelope',
+         isV2Envelope(afterNew.blob) && afterNew.blob.wire===2 && afterNew.blob.b==='buddy'
+         && afterNewPlain && texts(afterNewPlain).includes('OLD_TASK') && texts(afterNewPlain).includes('NEW_TASK'),
+         'wire='+(afterNew.blob&&afterNew.blob.wire));
+
+      // GUARD 3 — REFUSE-TO-CLOBBER: a peer wrote a framing newer than we can read
+      // (minReader 3 > WIRE_MAX 2). We must DEGRADE and leave the row untouched.
+      const futureRow={ b:'buddy', wire:3, crypto:'aes256gcm.hkdf.v2', minReader:3,
+        writer:{app:'?',plat:'mac'}, iv:'AAAAAAAAAAAAAAAA', ct:'ZnV0dXJl' };
+      const fcloud=makeFakeCASStore({key:'k', blob:futureRow, version:9});
+      const fstore=makeEncryptedStore(fcloud,bk);
+      setLocal([{id:'z',text:'MY_EDIT',state:'neutral',v:1}]);
+      const res=await syncOnce(fstore,'k');
+      const rowAfter=fcloud._rows()['k'].blob;
+      ok('refuse-to-clobber: syncOnce DEGRADES on an unreadable newer peer',
+         res && res.ok===false && res.degraded===true && res.reason==='peer-newer', 'reason='+(res&&res.reason));
+      ok('refuse-to-clobber: the newer peer row is PRESERVED, not overwritten',
+         rowAfter && rowAfter.wire===3 && rowAfter.minReader===3, 'wire='+(rowAfter&&rowAfter.wire));
+
+      // GUARD 4 — AAD DOWNGRADE DEFENCE: the cleartext header is authenticated, so
+      // tampering with `wire` makes decryption FAIL (no silent downgrade).
+      const env=await encryptEnvelope(bk, {today:{date:'2026-07-19',items:[{id:'t',text:'AAD_OK',state:'neutral',v:1}]}});
+      const good=await decryptEnvelope(bk, env).catch(()=>null);
+      let tamperThrew=false; try{ await decryptEnvelope(bk, {...env, wire:99}); }catch{ tamperThrew=true; }
+      ok('AAD binds the header: a tampered wire field FAILS decryption',
+         tamperThrew && good && good.today && good.today.date==='2026-07-19');
+
+      // GUARD 5 — LEGACY UPGRADE: a wire-1 {enc:1} row is read AND rewritten as wire-2.
+      const legacy=await encryptBlob(bk, {version:1,savedAt:1,today:{date:'2026-06-19',items:[{id:'l',text:'LEGACY',state:'neutral',v:1}]},history:[],deferred:[],tombstones:{}});
+      const linner=makeFakeCASStore({key:'k', blob:legacy, version:5});
+      const lstore=makeEncryptedStore(linner,bk);
+      setLocal([{id:'m',text:'MINE',state:'neutral',v:1}]);
+      await syncOnce(lstore,'k');
+      const up=linner._rows()['k'];
+      const upPlain=await readWire(up);
+      ok('legacy wire-1 row is read AND upgraded to a wire-2 envelope',
+         isV2Envelope(up.blob) && up.blob.wire===2 && upPlain && texts(upPlain).includes('LEGACY') && texts(upPlain).includes('MINE'),
+         'wire='+(isV2Envelope(up.blob)?up.blob.wire:'?'));
+
+      // REMAINING GAP (client cannot fix) — a FROZEN pre-header peer (v0.1.0, raw
+      // store, no crypto) still clobbers a wire-2 row: it pulls the envelope,
+      // hydrate() returns null, and it pushes its plaintext over the top. Only the
+      // SERVER wire floor + a re-pair stop this; documented, not a client bug.
+      setLocal([{id:'y',text:'NEW_TASK',state:'neutral',v:1}]); await syncOnce(neu,'k');
+      const preFmt=isV2Envelope(cloud._rows()['k'].blob)?'wire2':'plain';
+      setLocal([{id:'x',text:'OLD_TASK',state:'neutral',v:1}]); await syncOnce(cloud,'k');   // frozen raw peer
+      const afterOld=cloud._rows()['k'].blob;
+      const survivor=await readWire({blob:afterOld});
+      gaps.push({ scenario:'FROZEN pre-header peer (v0.1.0, raw) writes over a wire-2 row',
+        current: (survivor && texts(survivor).includes('NEW_TASK')) ? 'preserved' : 'clobbered by the frozen peer (expected — client cannot reach it)',
+        wire: preFmt+' → '+(isV2Envelope(afterOld)?'wire2':'plain'),
+        remedy: 'SERVER wire floor (supabase buddy_wire_floor rejects sub-floor writes) + phone re-pair after update' });
+    }catch(e){ ok('skewTest ran without throwing', false, e&&(e.message+' @ '+(e.stack||'').split('\n')[1])); }
+    state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
+    state.tombstones=snap.tombstones||{}; state.erasedAt=(typeof snap.erasedAt==='number')?snap.erasedAt:null;
+    editingId=null; render(); saveSuppressed=wasSup;
+    const failed=R.filter(r=>!r.pass);
+    return { ok:failed.length===0, total:R.length, failed:failed.length, results:R, gaps };
   },
 };
 

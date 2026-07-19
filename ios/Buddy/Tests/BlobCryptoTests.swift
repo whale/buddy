@@ -57,6 +57,45 @@ final class BlobCryptoTests: XCTestCase {
         XCTAssertFalse(BlobCrypto.isEnvelope("string"))
     }
 
+    // MARK: - Wire v2 envelope (SYNC-COMPAT.md) — cross-platform parity with the Mac.
+
+    // The linchpin interop guarantee: same key + zero IV + AAD("buddy|2|aes256gcm.hkdf.v1|2")
+    // over {"probe":1} → the SAME ciphertext the Mac pins in syncTest 12c-vec. If this
+    // matches, Mac and iOS provably read each other's wire-2 rows.
+    func testWireV2EnvelopeVectorMatchesSharedPin() throws {
+        let key = BlobCrypto.deriveKey(syncKey: zeroSyncKey)!
+        let env = try BlobCrypto.encryptEnvelope(Data("{\"probe\":1}".utf8), key: key,
+                                                 nonce: Data(repeating: 0, count: 12))
+        XCTAssertEqual(env["b"] as? String, "buddy")
+        XCTAssertEqual(env["wire"] as? Int, 2)
+        XCTAssertEqual(env["minReader"] as? Int, 2)
+        XCTAssertEqual(env["crypto"] as? String, "aes256gcm.hkdf.v1")
+        XCTAssertEqual(env["ct"] as? String, "dwuU613APPxtAVeAdb_UI1J97z3qrFHjfMMU",
+                       "wire-2 envelope ct MUST match the Mac's syncTest 12c-vec byte-for-byte")
+    }
+
+    // AAD binds the cleartext header to the ciphertext: flipping `wire` (a downgrade
+    // attempt) must fail decryption, never silently succeed at a weaker framing.
+    func testWireV2AADTamperThrows() throws {
+        let key = BlobCrypto.deriveKey(syncKey: zeroSyncKey)!
+        var env = try BlobCrypto.encryptEnvelope(Data("{\"probe\":1}".utf8), key: key,
+                                                 nonce: Data(repeating: 0, count: 12))
+        XCTAssertEqual(try BlobCrypto.decryptEnvelope(env, key: key), Data("{\"probe\":1}".utf8))
+        env["wire"] = 99
+        XCTAssertThrowsError(try BlobCrypto.decryptEnvelope(env, key: key),
+                             "a tampered/downgraded header must fail the GCM tag")
+    }
+
+    func testWireV2Detection() {
+        let v2: [String: Any] = ["b": "buddy", "wire": 2, "crypto": "aes256gcm.hkdf.v1",
+                                 "minReader": 2, "iv": "x", "ct": "y"]
+        XCTAssertTrue(BlobCrypto.isV2Envelope(v2))
+        XCTAssertFalse(BlobCrypto.isEnvelope(v2))              // v2 is NOT the legacy enc:1 shape
+        XCTAssertFalse(BlobCrypto.isV2Envelope(["enc": 1, "iv": "x", "ct": "y"]))
+        XCTAssertEqual(BlobCrypto.envelopeMinReader(v2), 2)
+        XCTAssertEqual(BlobCrypto.envelopeWire(v2), 2)
+    }
+
     // MIXED-VERSION WINDOW: a pre-E2E peer pulls an encrypted row, tolerant-decodes
     // it as empty-with-extras, merges its plaintext in, and pushes a HYBRID —
     // plaintext today/history alongside the stale {enc,iv,ct}. That must read as
