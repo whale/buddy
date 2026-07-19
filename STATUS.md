@@ -1,6 +1,31 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-10 (night). Branch `main`. Latest **released Mac**: **`v0.3.34`** (signed/notarized, updater manifest live). Latest **iOS**: **TestFlight `0.1.0 (28)`** (processed + distributed). Docs: THIS file's top + `RELEASE-CHECKLIST.md` + `JOURNAL.md` are the live docs; `design/celebration-lab.html` is the celebration tuning playground._
+_Last updated: 2026-07-19. Branch `main`. Latest **Mac**: **`v0.4.23`** (auto-released via CI). Latest **iOS**: **TestFlight `0.4.20 (build 36)`** — Apple-confirmed VALID. Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
+
+## Session summary — 2026-07-19 — wire-2 sync fix + settings redesign + holdover cleanup
+
+Big session. All shipped to `main` (Mac auto-released to **v0.4.23**; iOS cut to **TestFlight 0.4.20 build 36**, Apple-confirmed).
+
+**Sync — fixed the 2026-07-18 split-brain (a v0.1.0 phone silently corrupting a v0.4.15 Mac's data):**
+- New **wire-2 envelope**: a cleartext, AES-GCM-AAD-authenticated header `{b,wire,crypto,minReader}` on every synced row, so any client (and the server) can triage before decrypt and **degrade instead of corrupting**. Byte-identical on Mac (`dist/index.html`) + iOS (`ios/.../Sync`), pinned by a shared vector `dwuU613APPxtAVeAdb_UI1J97z3qrFHjfMMU`.
+- **Refuse-to-clobber** on both platforms; iOS shows "Update Buddy to keep syncing"; Mac shows "Update needed".
+- Design + threat model in **`SYNC-COMPAT.md`**; the reproduction/guards in `__buddy.skewTest`; one-command check **`pnpm sync:validate`** (10/10, incl. Mac↔iOS envelope parity via Swift); runbook in **`VALIDATION.md`**.
+- **Server wire floor** SQL (`supabase/migrations/20260719130000_buddy_wire_floor_fix.sql` + hosted-setup) — ships DISABLED.
+
+**Other shipped:** Settings redesigned to grouped cards (Mac + iOS); sync **watchdog** GH Action (`.github/workflows/sync-watchdog.yml`, emails hi@whale.fyi on failure); pairing UX ("Waiting for iPhone…" + "Cancel"; QR 150→113px flush); cold-launch morning/drawer overlap fix; holdover cleanup (removed the fake demo-history seed for new users, removed iOS "Enter manually" pairing, gated MockData, fixed stale "prototype"/"scaffold" copy).
+
+**New guardrails:** RULE 5 (two release rails — iOS is manual `fastlane beta`), RULE 6 (adversarial review before shipping risky work), RULE 7 (confirm at the source of truth, never a proxy exit code / Debug build). Tooling: **`pnpm ios:beta`** (fastlane + polls App Store Connect to confirm the build is really live), `scripts/buddy-asc-builds.mjs`.
+
+**Verified:** `sync:validate` 10/10 · iOS `BuddyTests` TEST SUCCEEDED · Release-config iOS build · App Store Connect confirms build 36 v0.4.20 VALID.
+
+**Outstanding / NOT done or NOT verified:**
+- **User:** update the iPhone to 0.4.20 + re-pair (Mac Settings → Resync shows QR; phone → Scan QR). Add 4 SMTP secrets for the watchdog email.
+- **Server floor:** the migrations are in the repo but NOT deployed to live Supabase, and `supabase/tests/buddy_wire_floor_test.sql` was NOT run (no local pg here). Deploy + test, THEN `select public.buddy_set_wire_floor(2)` only AFTER both devices are on wire-2.
+- **Cold-launch fix:** logic sound but the native "update-pending + first launch" race was NOT observed on the real app.
+- **Deferred:** the hidden web-demo fake-desktop + `#devMorning` (display:none in native, but referenced by the pin logic — needs a verified native pass, RULE 6).
+- **Docs:** `ECOSYSTEM.md` is still an uncommitted draft (parked with `PAYMENT-PLAN.md`, pending a public-vs-private decision) — should hold the release-rails table.
+
+
 
 ## Session summary — 2026-07-10 (night) — celebration physics, add choreography, swipe pan, friend beta
 
