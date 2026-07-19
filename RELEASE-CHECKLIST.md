@@ -67,6 +67,37 @@ every interactive state (rest / hover / focus / done).
 - [ ] Cross-device smoke: add a task on one device → appears on the other;
       edit mid-poll → the FULL text survives (the "Thing→Thi" class).
 
+## 5b · Sync change gate (touching the WIRE — see `SYNC-COMPAT.md`)
+
+Trigger: any PR that changes the envelope, the crypto suite, the CAS
+push/pull path, or `KNOWN_WIRE_KEYS`. Mac and iOS update on different clocks —
+version skew is permanent, so a wire change is never "atomic across platforms."
+
+- [ ] **Name the axis that moved** — `wire` / `crypto` / `schema` (they're
+      independent). More than one ⇒ split the PR. Be honest: "just a new shape"
+      is how the v0.4.0 encryption flip slipped through with `schema` still 1.
+- [ ] **Additive?** New top-level data key = safe (spreads through). Changing
+      the envelope or crypto is **BREAKING** — no spread saves you.
+- [ ] Old↔new tested **both directions** against **frozen golden fixtures** of
+      every shipped version: new-reads-old is correct; old-reads-new **fails
+      safe (no-op), never destructive (clobber)**.
+- [ ] CAS ping-pong test: alternating mismatched-version pushes to one key
+      converge or cleanly lock out — **never oscillate or corrupt**.
+- [ ] Tombstone GC unchanged, or proven past the SLOWEST peer's watermark.
+      Default: **don't GC.**
+
+**If BREAKING, also:**
+- [ ] Bump `wire`/`crypto`; set `minReader`; never reuse a retired number.
+- [ ] **Readers before writers** — ship the version that READS the new format
+      to both platforms, let it saturate, THEN ship the one that WRITES it.
+- [ ] **Dual-write the old format** until `buddy-events.jsonl` shows zero
+      old-reader writes for **≥14 days** (covers App Store review lag). End
+      condition is telemetry, not a release count.
+- [ ] Server-side floor raised only after saturation (rejects `wire < floor`).
+- [ ] Degraded-mode UX verified on BOTH sides, all 3 escalation levels:
+      non-blocking notice, local list keeps working, **no "please update" wall**.
+- [ ] AAD binding confirmed — tampered/downgraded header fails decrypt.
+
 ## 6 · Ship + announce (memory: feedback-ship-announcements)
 
 - [ ] Versions bumped in lockstep where relevant (`package.json`,
