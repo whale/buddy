@@ -2,9 +2,11 @@ import SwiftUI
 import UIKit
 
 // MARK: - SettingsView
-// A faithful port of the Mac's Settings sheet: a Buddy card (not a native Form) with
-// a "Settings" + ✕ header, hairline #d9d9d9 dividers, Geist type, and the celebrate
-// slider bracketed by 👍🏼 … 🦜. Adopts the escalation theme (red bg + light text at lvl2).
+// Port of the Mac's REDESIGNED Settings sheet (2026-07-18): grouped INSET CARDS under
+// quiet section labels (Behavior · Mac · Your data · App), instead of a flat list of
+// dividered rows. Dividers live only inside a card; groups are separated by whitespace.
+// Card fills / hairlines / button backgrounds are token-driven (EscalationTheme.setCard/
+// setHair/setButton) so the whole sheet re-themes across lvl0/1/2.
 struct SettingsView: View {
     @Bindable var store: BuddyStore
     var sync: SyncEngine? = nil
@@ -32,129 +34,99 @@ struct SettingsView: View {
             }
 
             ScrollView {
-                VStack(spacing: 0) {
-                    // Celebrate
-                    section {
-                        Text("Celebrate completed tasks")
-                            .font(.geist(18, .regular)).tracking(-0.36)
-                            .foregroundStyle(theme.sheetLabel)
-                            .padding(.bottom, 14)
-                        HStack(spacing: 12) {
-                            Text("👍🏼").font(.system(size: 20))
-                            BuddySlider(value: $celebrate,
-                                        track: theme.sliderTrack,
-                                        thumb: theme.sliderThumb)
-                                .disabled(reducedMotion)
-                                .onChange(of: celebrate) { _, v in store.settings.celebrate = Int(v) }
-                            Text("🦜").font(.system(size: 20))
-                        }
-                        if reducedMotion {
-                            Text("Off while your system is set to reduce motion.")
-                                .font(.geist(14, .regular)).foregroundStyle(theme.sheetFaint)
-                                .padding(.top, 10)
+                VStack(alignment: .leading, spacing: 0) {
+
+                    // ===== BEHAVIOR =====
+                    sectionLabel("Behavior", first: true)
+                    setCard {
+                        cardItem {
+                            Text("Celebrate completed tasks")
+                                .font(.geist(18, .regular)).tracking(-0.36)
+                                .foregroundStyle(theme.sheetLabel)
+                                .padding(.bottom, 14)
+                            HStack(spacing: 12) {
+                                Text("👍🏼").font(.system(size: 20))
+                                BuddySlider(value: $celebrate, track: theme.sliderTrack, thumb: theme.sliderThumb)
+                                    .disabled(reducedMotion)
+                                    .onChange(of: celebrate) { _, v in store.settings.celebrate = Int(v) }
+                                Text("🦜").font(.system(size: 20))
+                            }
+                            if reducedMotion {
+                                Text("Off while your system is set to reduce motion.")
+                                    .font(.geist(14, .regular)).foregroundStyle(theme.sheetFaint)
+                                    .padding(.top, 10)
+                            }
                         }
                     }
 
-                    // Sync — pair with the Mac by QR (or manual entry)
-                    section {
-                        VStack(alignment: .leading, spacing: 14) {
+                    // ===== MAC (sync) =====
+                    sectionLabel("Mac")
+                    setCard {
+                        cardItem {
                             HStack(spacing: 0) {
-                                Text("Sync with your Mac")
-                                    .font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.sheetLabel)
+                                Text("Sync").font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.sheetLabel)
                                 Spacer()
-                                if !isConnected {   // linked: the status moves down beside Disconnect (Mac parity)
-                                    Text(syncStatusText)
-                                        .font(.geist(15, .regular)).foregroundStyle(theme.sheetFaint)
-                                }
+                                Text(syncStatusText).font(.geist(14, .regular)).foregroundStyle(theme.sheetFaint)
                             }
                             if isConnected {
-                                // Status sits RIGHT-ALIGNED beside Disconnect, sharing the
-                                // pill label's text baseline (field report 2026-07-10).
-                                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                    pill("Disconnect") { disconnect() }
-                                    Spacer()
-                                    Text(syncStatusText)
-                                        .font(.geist(14, .regular)).foregroundStyle(theme.sheetFaint)
-                                }
+                                setButton("Disconnect") { disconnect() }
+                                    .padding(.top, 16)
                             } else {
-                                syncPillRow {
-                                    pill("Scan QR to pair") { pairError = nil; showScanner = true }
-                                    pill(manualExpanded ? "Hide" : "Enter manually") {
-                                        withAnimation { manualExpanded.toggle() }
+                                VStack(spacing: 8) {
+                                    setSplit(("Scan QR to pair", { pairError = nil; showScanner = true }),
+                                             (manualExpanded ? "Hide" : "Enter manually", { withAnimation { manualExpanded.toggle() } }))
+                                    if manualExpanded {
+                                        // Hosted builds (BuddyCloud present) never show server tooling —
+                                        // the backend is part of the service. Manual entry is just the sync
+                                        // key (camera-broken fallback); server fields are the OSS edition's UI.
+                                        if !BuddyCloud.present {
+                                            syncField("Backend URL", text: $fURL, keyboard: .URL)
+                                            syncField("Anon key", text: $fAnon)
+                                        }
+                                        syncField("Sync key (43 characters)", text: $fKey)
+                                        setButton("Connect") { connect() }
                                     }
-                                    Spacer()
                                 }
-                            }
-                            if manualExpanded && !isConnected {
-                                // Hosted builds (BuddyCloud present) never show server
-                                // tooling — the backend is part of the service. Manual
-                                // entry is just the sync key (camera-broken fallback).
-                                // Server fields are the open-source edition's UI.
-                                if !BuddyCloud.present {
-                                    syncField("Backend URL", text: $fURL, keyboard: .URL)
-                                    syncField("Anon key", text: $fAnon)
-                                }
-                                syncField("Sync key (43 characters)", text: $fKey)
-                                syncPillRow { pill("Connect") { connect() }; Spacer() }
+                                .padding(.top, 16)
                             }
                             if let e = pairError {
-                                // Token red; red-on-red is invisible on the lvl2 sheet →
-                                // white + semibold there (mirrors Mac #syncError).
+                                // red-on-red is invisible on the lvl2 sheet → white + semibold there.
                                 Text(e).font(.geist(14, theme.level == .lvl2 ? .semibold : .regular))
-                                    .foregroundStyle(theme.errorText)
+                                    .foregroundStyle(theme.errorText).padding(.top, 10)
                             }
                         }
                     }
 
-                    // Export my done tasks (Mac parity) — share sheet with a live done-count
-                    ShareLink(item: store.doneExport.joined(separator: "\n")) {
-                        HStack(spacing: 0) {
-                            Text("Export my done tasks")
-                                .font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.sheetLabel)
-                            Spacer()
-                            Text("\(store.doneExport.count)")
-                                .font(.geist(15, .regular)).foregroundStyle(theme.sheetFaint)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 32).padding(.vertical, 20)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    Rectangle().fill(theme.line).frame(height: 1)
-
-                    // Report a bug. Prefer the private repo intake endpoint when configured;
-                    // otherwise fall back to email. Never send users to GitHub's login wall.
-                    rowButton {
-                        Task { await submitBugReport() }
-                    } label: {
-                        Text("Report a bug")
-                            .font(.geist(18, .regular)).tracking(-0.36).foregroundStyle(theme.sheetLabel)
-                        Spacer()
-                        if let bugReportMessage {
-                            Text(bugReportMessage)
-                                .font(.geist(15, .regular)).foregroundStyle(theme.sheetFaint)
-                        } else {
-                            Image(systemName: "ladybug").font(.system(size: 15)).foregroundStyle(theme.sheetFaint)
+                    // ===== YOUR DATA =====
+                    sectionLabel("Your data")
+                    setCard {
+                        cardItem {
+                            ShareLink(item: store.doneExport.joined(separator: "\n")) {
+                                setButtonLabel("Export my done tasks")
+                            }
+                            .buttonStyle(.plain)
+                            Text("\(store.doneExport.count) done task\(store.doneExport.count == 1 ? "" : "s")")
+                                .font(.geist(14, .regular)).tracking(-0.26).foregroundStyle(theme.sheetFaint)
+                                .padding(.top, 16)
                         }
                     }
 
-                    #if DEBUG
-                    HStack(spacing: 12) {
-                        pill("Reset data") { store.resetForDev(); onClose() }
-                        pill("Restart") { exit(0) }
+                    // ===== APP =====
+                    sectionLabel("App")
+                    setCard {
+                        cardItem {
+                            setButton(bugReportMessage ?? "Report a bug") { Task { await submitBugReport() } }
+                            #if DEBUG
+                            setSplit(("Reset data", { store.resetForDev(); onClose() }), ("Restart", { exit(0) }))
+                                .padding(.top, 8)
+                            #endif
+                            Text("Buddy Version \(appVersion) (basically a toddler)")
+                                .font(.geist(14, .regular)).tracking(-0.26).foregroundStyle(theme.sheetGhost)
+                                .padding(.top, 16)
+                        }
                     }
-                    .padding(.horizontal, 32).padding(.vertical, 20)
-                    Rectangle().fill(theme.line).frame(height: 1)
-                    #endif
-
-                    HStack {
-                        Text("Buddy \(appVersion)")
-                            .font(.geist(14, .regular)).tracking(-0.26)
-                            .foregroundStyle(theme.sheetGhost)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 32).padding(.top, 20).padding(.bottom, 28)
                 }
+                .padding(.horizontal, 16).padding(.bottom, 24)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -167,6 +139,58 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Grouped-card layout helpers (Mac redesign parity)
+
+    @ViewBuilder private func sectionLabel(_ text: String, first: Bool = false) -> some View {
+        Text(text.uppercased())
+            .font(.geist(12, .semibold)).tracking(0.6)
+            .foregroundStyle(theme.setSectionLabel)
+            .padding(.leading, 16)                 // 16(body)+16(card pad) = 32 rail with row labels
+            .padding(.top, first ? 8 : 22).padding(.bottom, 10)
+    }
+
+    @ViewBuilder private func setCard<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 0) { content() }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.setCard, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    @ViewBuilder private func cardItem<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 0) { content() }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+    }
+
+    private func setButton(_ title: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) { setButtonLabel(title) }.buttonStyle(.plain)
+    }
+
+    private func setButtonLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.geist(15, .regular)).tracking(-0.30)
+            .foregroundStyle(theme.sheetLabel)
+            .frame(maxWidth: .infinity).frame(height: 44)
+            .background(theme.setButton, in: Capsule())
+            .overlay(Capsule().stroke(theme.line, lineWidth: 1))
+            .contentShape(Capsule())
+    }
+
+    @ViewBuilder private func setSplit(_ a: (String, () -> Void), _ b: (String, () -> Void)) -> some View {
+        HStack(spacing: 8) { setButton(a.0, a.1); setButton(b.0, b.1) }
+    }
+
+    @ViewBuilder private func syncField(_ placeholder: String, text: Binding<String>,
+                                        keyboard: UIKeyboardType = .default) -> some View {
+        TextField(placeholder, text: text)
+            .font(.geist(15, .regular))
+            .foregroundStyle(theme.sheetLabel)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .keyboardType(keyboard)
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.line, lineWidth: 1))
+    }
+
     // MARK: - Sync helpers
 
     private var isConnected: Bool { sync?.currentConfig.isSyncable ?? false }
@@ -177,12 +201,8 @@ struct SettingsView: View {
         // the same suffix are provably on the same sync bucket — split-brain
         // pairings sync "fine" but never see each other (field report 2026-07-10).
         // BACKEND-AWARE display id (sha256(url|syncKey), Mac parity): same 6 chars on
-        // two devices now proves same bucket AND same backend — the raw syncKey hash
-        // showed identical ids on split-brained pairings once two backends existed.
-        // The url is NORMALIZED (trailing slashes, case) exactly like the Mac's
-        // syncDisplayId: the two devices' copies come from different provisioning
-        // paths (config.js vs fastlane env), and one stray "/" would make a healthy
-        // pairing show two different ids.
+        // two devices now proves same bucket AND same backend. The url is NORMALIZED
+        // (trailing slashes, case) exactly like the Mac's syncDisplayId.
         let live = sync.currentConfig.resolved
         var normUrl = live.backendUrl.lowercased()
         while normUrl.hasSuffix("/") { normUrl.removeLast() }
@@ -234,53 +254,6 @@ struct SettingsView: View {
         SyncConfigStore.save(cfg)
         sync?.updateConfig(cfg)
         pairError = nil
-    }
-
-    @ViewBuilder private func syncPillRow<C: View>(@ViewBuilder _ content: () -> C) -> some View {
-        HStack(spacing: 10) { content() }
-    }
-
-    @ViewBuilder private func syncField(_ placeholder: String, text: Binding<String>,
-                                        keyboard: UIKeyboardType = .default) -> some View {
-        TextField(placeholder, text: text)
-            .font(.geist(15, .regular))
-            .foregroundStyle(theme.sheetLabel)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .keyboardType(keyboard)
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.line, lineWidth: 1))
-    }
-
-    // MARK: row helpers
-
-    @ViewBuilder private func section<C: View>(@ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 0) { content() }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 32).padding(.vertical, 20)
-        Rectangle().fill(theme.line).frame(height: 1)
-    }
-
-    @ViewBuilder private func rowButton<C: View>(_ action: @escaping () -> Void, @ViewBuilder label: () -> C) -> some View {
-        Button(action: action) {
-            HStack(spacing: 0) { label() }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 32).padding(.vertical, 20)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        Rectangle().fill(theme.line).frame(height: 1)
-    }
-
-    private func pill(_ title: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.geist(15, .regular)).tracking(-0.30)
-                .foregroundStyle(theme.sheetLabel)
-                .padding(.horizontal, 20).padding(.vertical, 10)
-                .overlay(Capsule().stroke(theme.line, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
     }
 
     private var appVersion: String {
