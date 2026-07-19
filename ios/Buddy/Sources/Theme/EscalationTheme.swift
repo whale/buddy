@@ -184,6 +184,36 @@ struct EscalationTheme {
     // invisible at lvl2 → white there.
     var errorText: Color { level == .lvl2 ? .white : Color(hex: "#e5484d") }
 
+    // Settings grouped cards (Mac --set-card/-hair/-btn). Grey group fill on white,
+    // a translucent-light panel on the lvl2 red bg; buttons white on the card,
+    // translucent on red. Dividers live INSIDE a card between its rows.
+    var setCard: Color {
+        switch level {
+        case .lvl0, .lvl1: return Color(hex: "#f4f4f5")
+        case .lvl2:        return Color.white.opacity(0.10)
+        }
+    }
+    var setHair: Color {
+        switch level {
+        case .lvl0, .lvl1: return Color.black.opacity(0.07)
+        case .lvl2:        return Color.white.opacity(0.18)
+        }
+    }
+    var setButton: Color {
+        switch level {
+        case .lvl0, .lvl1: return .white
+        case .lvl2:        return Color.white.opacity(0.14)
+        }
+    }
+    // Section labels above each card (Mac text-black/30 → red → white).
+    var setSectionLabel: Color {
+        switch level {
+        case .lvl0: return Color.black.opacity(0.30)
+        case .lvl1: return Color(hex: "#e5484d")
+        case .lvl2: return Color.white.opacity(0.92)
+        }
+    }
+
     // Convenience factory
     static func from(activeCount: Int) -> EscalationTheme {
         EscalationTheme(level: .from(activeCount: activeCount))

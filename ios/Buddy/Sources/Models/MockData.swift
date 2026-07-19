@@ -1,5 +1,9 @@
 import Foundation
 
+// DEBUG-only: this demo data is used solely by #Preview blocks and the (DEBUG)
+// ScreenshotHarness. Gated so its sample strings never compile into a release build.
+#if DEBUG
+
 // MARK: - Mock data for previews and scaffold testing
 // Covers all escalation levels:
 //   lvl0 — ≤4 active tasks (normal: black text, white background)
@@ -86,3 +90,5 @@ enum MockData {
         deferred: []
     )
 }
+
+#endif
