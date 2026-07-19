@@ -617,7 +617,9 @@ private struct InlineTaskEditor: UIViewRepresentable {
     }
 }
 
-// MARK: - Previews
+// MARK: - Previews (DEBUG only — they reference the #if DEBUG-gated MockData, so they
+// must be gated too or the Release build can't find MockData).
+#if DEBUG
 #Preview("lvl0")  { TodayView(store: seeded(MockData.normalTasks)) }
 #Preview("lvl1")  { TodayView(store: seeded(MockData.warningTasks)) }
 #Preview("lvl2")  { TodayView(store: seeded(MockData.alarmTasks)) }
@@ -625,8 +627,7 @@ private struct InlineTaskEditor: UIViewRepresentable {
 
 private func seeded(_ tasks: [BuddyTask]) -> BuddyStore {
     let s = BuddyStore()
-    #if DEBUG
     s.seedForScreenshot(tasks: tasks)
-    #endif
     return s
 }
+#endif
