@@ -5,6 +5,14 @@ schedule**. Mac auto-updates in minutes; iOS lags days behind App Store review.
 Version skew between the two devices is therefore **permanent and normal** — the
 sync design has to assume it, not hope to avoid it.
 
+> **Status: IMPLEMENTED (wire-2) + verified.** The cleartext AAD envelope,
+> refuse-to-clobber, and legacy upgrade all ship on Mac (`dist/index.html`) and
+> iOS (`ios/.../Sync`), pinned by a shared envelope vector. Run `pnpm
+> sync:validate` for a one-command PASS/FAIL across Mac logic + Mac↔iOS interop;
+> full procedure in [`VALIDATION.md`](VALIDATION.md). The server wire floor
+> (`supabase/migrations/*_buddy_wire_floor.sql`) is written but ships DISABLED —
+> raise it only after the wire-2 build saturates (see below).
+
 This doc exists because it already bit us: a phone stuck on **v0.1.0**
 (pre-encryption) next to a Mac on **v0.4.15** (encrypted). The Mac showed
 "iPhone linked / Synced" and kept polling happily; the phone showed "Not

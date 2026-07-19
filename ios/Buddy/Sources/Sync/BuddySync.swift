@@ -13,8 +13,10 @@ import Foundation
 // MARK: - Store contract (mirror of makeFakeCASStore / the buddy_push SQL)
 // `plain` marks a legacy PLAINTEXT row (pre-E2E) pulled from the wire — syncOnce uses it
 // to force one push so the row gets re-written as ciphertext even when content is equal.
-struct PullResult { let blob: SyncSnapshot?; let version: Int; var plain: Bool = false }
-struct PushResult { let ok: Bool; let blob: SyncSnapshot?; let version: Int }
+// `unreadable` marks a row whose wire framing is NEWER than this build can read — syncOnce
+// must DEGRADE and never clobber it (the 2026-07-18 corruption; SYNC-COMPAT.md).
+struct PullResult { let blob: SyncSnapshot?; let version: Int; var plain: Bool = false; var unreadable: Bool = false; var peerWire: Int = 0 }
+struct PushResult { let ok: Bool; let blob: SyncSnapshot?; let version: Int; var unreadable: Bool = false; var peerWire: Int = 0 }
 
 protocol CASStore {
     func pull(_ key: String) async throws -> PullResult
@@ -28,6 +30,7 @@ struct SyncResult {
     var noop = false
     var version = 0
     var attempts = 0
+    var degraded = false        // a peer's framing is newer than we can read — refused to clobber
     var merged: SyncSnapshot?   // the snapshot the caller should adopt as local truth
 }
 
@@ -128,6 +131,13 @@ enum BuddySync {
     static func syncOnce(store: CASStore, key: String, local: SyncSnapshot) async throws -> SyncResult {
         let remote = try await store.pull(key)
 
+        // A peer wrote a framing this build can't read → DEGRADE, never clobber it.
+        // Overwriting here is exactly how the 2026-07-18 split-brain destroyed data.
+        if remote.unreadable {
+            BuddyDiag.log("sync-refuse-clobber", ["wire": remote.peerWire])
+            return SyncResult(ok: false, degraded: true)
+        }
+
         // Empty-over-full guard / scanner-pulls-first: a fresh empty device adopts the
         // remote rather than pushing nothing over it.
         if blobIsEmpty(local) && !blobIsEmpty(remote.blob) {
@@ -151,6 +161,11 @@ enum BuddySync {
             let res = try await store.push(key, blob: merged, expected: expected)
             if res.ok {
                 return SyncResult(ok: true, pushed: true, version: res.version, attempts: attempt + 1, merged: merged)
+            }
+            // A peer's newer-than-us framing landed mid-CAS → bail, don't clobber it.
+            if res.unreadable {
+                BuddyDiag.log("sync-refuse-clobber", ["wire": res.peerWire])
+                return SyncResult(ok: false, degraded: true)
             }
             // Someone wrote between pull and push → fold their blob in and retry CAS.
             merged = BuddyMerge.merge(merged, res.blob) ?? merged

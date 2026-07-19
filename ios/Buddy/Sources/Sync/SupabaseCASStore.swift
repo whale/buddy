@@ -31,13 +31,14 @@ struct SupabaseCASStore: CASStore {
     func pull(_ key: String) async throws -> PullResult {
         let rows = try await rpc("buddy_pull", ["p_key": key])
         guard let row = rows.first else { return PullResult(blob: nil, version: 0) }
-        let (snap, wasPlain) = try decode(row["blob"])
-        return PullResult(blob: snap, version: intValue(row["version"]), plain: wasPlain)
+        let d = try decode(row["blob"])
+        return PullResult(blob: d.snap, version: intValue(row["version"]),
+                          plain: d.plain, unreadable: d.unreadable, peerWire: d.peerWire)
     }
 
     func push(_ key: String, blob: SyncSnapshot, expected: Int) async throws -> PushResult {
         let wireData = try JSONEncoder().encode(SyncWire(blob))
-        let envelope = try BlobCrypto.encrypt(wireData, key: blobKey)
+        let envelope = try BlobCrypto.encryptEnvelope(wireData, key: blobKey)   // wire-2 cleartext-header envelope
         let base: [String: Any] = ["p_key": key, "p_blob": envelope,
                                    "p_expected": expected, "p_device": device]
         var rows: [[String: Any]]
@@ -59,10 +60,11 @@ struct SupabaseCASStore: CASStore {
             }
         }
         guard let row = rows.first else { return PushResult(ok: false, blob: nil, version: 0) }
-        let (snap, _) = try decode(row["blob"])   // CAS-conflict blob may be an envelope too
+        let d = try decode(row["blob"])   // CAS-conflict blob may be an envelope too
         return PushResult(ok: (row["ok"] as? Bool) ?? false,
-                          blob: snap,
-                          version: intValue(row["version"]))
+                          blob: d.snap,
+                          version: intValue(row["version"]),
+                          unreadable: d.unreadable, peerWire: d.peerWire)
     }
 
     // Metrics beside the ciphertext: COUNTS, NEVER CONTENT (server also enforces
@@ -100,15 +102,32 @@ struct SupabaseCASStore: CASStore {
     /// the plaintext half is that peer's newer merge; decrypting the stale ct would
     /// silently discard it (mixed-version split-brain). SyncWire.knownKeys strips the
     /// envelope keys so they never ride extras back onto the wire.
-    private func decode(_ any: Any?) throws -> (SyncSnapshot?, Bool) {
-        guard let any = any, !(any is NSNull) else { return (nil, false) }
+    private struct Decoded { let snap: SyncSnapshot?; let plain: Bool; let unreadable: Bool; let peerWire: Int }
+    private func decode(_ any: Any?) throws -> Decoded {
+        guard let any = any, !(any is NSNull) else { return Decoded(snap: nil, plain: false, unreadable: false, peerWire: 0) }
+        // wire-2 envelope: TRIAGE the cleartext header before decrypting.
+        if BlobCrypto.isV2Envelope(any) {
+            let minReader = BlobCrypto.envelopeMinReader(any) ?? 0
+            if minReader > BlobCrypto.wireMax {           // newer than we can read → DEGRADE, never clobber
+                BuddyDiag.log("sync-peer-newer", ["minReader": minReader])
+                return Decoded(snap: nil, plain: false, unreadable: true,
+                               peerWire: BlobCrypto.envelopeWire(any) ?? minReader)
+            }
+            let data = try BlobCrypto.decryptEnvelope(any as! [String: Any], key: blobKey)
+            return Decoded(snap: try JSONDecoder().decode(SyncWire.self, from: data).toSnapshot(),
+                           plain: false, unreadable: false, peerWire: 0)
+        }
+        // Legacy wire-1 pure envelope {enc:1}: decode, then flag plain so syncOnce re-pushes
+        // once to UPGRADE it to a wire-2 envelope (mirrors the Mac).
         if BlobCrypto.isEnvelope(any) {
             let data = try BlobCrypto.decrypt(any as! [String: Any], key: blobKey)
-            return (try JSONDecoder().decode(SyncWire.self, from: data).toSnapshot(), false)
+            return Decoded(snap: try JSONDecoder().decode(SyncWire.self, from: data).toSnapshot(),
+                           plain: true, unreadable: false, peerWire: 0)
         }
         if BlobCrypto.isHybrid(any) { BuddyDiag.log("sync-hybrid-blob") }
         let data = try JSONSerialization.data(withJSONObject: any)
-        return (try JSONDecoder().decode(SyncWire.self, from: data).toSnapshot(), true)
+        return Decoded(snap: try JSONDecoder().decode(SyncWire.self, from: data).toSnapshot(),
+                       plain: true, unreadable: false, peerWire: 0)
     }
     private func intValue(_ any: Any?) -> Int {
         if let n = any as? Int { return n }
