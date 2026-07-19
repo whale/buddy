@@ -532,7 +532,7 @@
                 <div id="syncQR" class="shrink-0 leading-none rounded-[8px] overflow-hidden"></div>
                 <div class="flex-1 min-w-0">
                   <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Scan this in Buddy on your iPhone: Settings → “Scan QR to pair”.</p>
-                  <button id="syncUnlinkBtnP" class="set-btn pressable ihover border border-[#d9d9d9] text-black/70">Unlink iPhone</button>
+                  <button id="syncUnlinkBtnP" class="set-btn pressable ihover border border-[#d9d9d9] text-black/70">Cancel</button>
                 </div>
               </div>
 
@@ -1556,16 +1556,18 @@ function renderSyncUI(){
   // devices now proves same bucket AND same backend (the raw syncKey hash certified
   // split brains once a second backend existed).
   const bucket = syncDisplayId ? ' · '+syncDisplayId : '';
+  // which block is visible — computed FIRST so the status can special-case pairing.
+  // (setup has a HOSTED variant — one button — and an OPEN-SOURCE variant with url+key
+  // fields, keyed off config.js.)
+  const inPairing = !!cfg && syncShowQR && isValidSyncKey(raw.syncKey);
+  const inSetup   = !cfg;
+  const inLinked  = !!cfg && !inPairing;
   if(!cfg) st.textContent='Off';
+  else if(inPairing) st.textContent='Waiting for iPhone…';   // showing the QR — no device has joined yet, so NOT "Synced"
   else if(syncLastError==='peer-newer') st.textContent='Update needed'+bucket;   // a peer is on a newer format we can't read
   else if(syncLastError) st.textContent='Error'+bucket;
   else if(syncLastAt){ const d=new Date(syncLastAt); st.textContent='Synced '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+bucket; }
   else st.textContent='Connected'+bucket;
-  // which of the blocks is visible — setup has a HOSTED variant (one button, no
-  // server fields) and an OPEN-SOURCE variant (url+key fields), keyed off config.js
-  const inPairing = !!cfg && syncShowQR && isValidSyncKey(raw.syncKey);
-  const inSetup   = !cfg;
-  const inLinked  = !!cfg && !inPairing;
   const cloud = buddyCloud();
   const setupCloud=$('#syncSetupCloud'), setup=$('#syncSetup'), pairing=$('#syncPairing'), linked=$('#syncLinked');
   setupCloud && setupCloud.classList.toggle('hidden', !(inSetup && cloud));
@@ -2030,6 +2032,12 @@ function unsendDeferred(id){
 /* ----------------------- drawer open / close --------------------- */
 let openTimer=null, closeTimer=null, shrinkTimer=null;
 let updateBannerHold=false;   // while an "update ready" banner is up, keep the drawer open so it's actually SEEN
+// NATIVE ONLY: on Mac, morning is a SEPARATE window, so the main window's morningUp()
+// (which checks THIS window's #morning) can't tell the planner is up. This flag lets the
+// main window's guards (update banner, tray reveal/toggle/settings) know morning is showing
+// — without it, the update banner revealed the drawer ALONGSIDE the morning planner on a
+// cold launch (field report 2026-07-19).
+let nativeMorningOpen=false;
 // Both guard against the morning: while the full-screen planner is up, nothing
 // may resize the window back to a drawer/sliver (that was the "Restart" bug —
 // the morning would flash then get clipped to a sliver by a stray mouse-leave).
@@ -2062,7 +2070,7 @@ drawer.addEventListener('mouseleave', ()=>{ clearTimeout(openTimer); closeTimer=
    by the Rust cursor monitor (which can see the whole screen edge, not just this
    window). `edgeArmed` debounces so one touch = one reveal. ---- */
 let edgeArmed=true;
-function morningUp(){ const m=$('#morning'); return m && !m.classList.contains('hidden'); }
+function morningUp(){ const m=$('#morning'); return (m && !m.classList.contains('hidden')) || nativeMorningOpen; }
 addEventListener('mousemove', e=>{
   if(morningUp() || state.pinned) return;
   if(e.clientX >= innerWidth-2){
@@ -3004,7 +3012,8 @@ async function showMorning(){
   clearTimeout(shrinkTimer); clearTimeout(closeTimer); clearTimeout(openTimer);
   undoneAdded=false; undoneIds=[];
   if(NATIVE && !IS_MORNING_WINDOW){
-    closeDrawer();
+    closeDrawer();                 // tuck first — the guard still sees morning as "down" here
+    nativeMorningOpen=true;        // NOW the main window's guards know the planner window is up
     await nativeFit('sliver');
     await openNativeMorningWindow();
     return;
@@ -4539,6 +4548,7 @@ if(NATIVE){
     // so a peek-and-close does NOT mark the day planned — the auto-morning can still fire.
     ev.listen('buddy://morning-toggle', ()=> showMorning());   // ⌘⌥⌃M ALWAYS brings the morning planner forward (not a hide-toggle)
     ev.listen('buddy://morning-closed', async ()=>{
+      nativeMorningOpen=false;     // planner window closed → main-window guards back to normal
       await bootReconcileFile();
       settleNative();
     });
