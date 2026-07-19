@@ -1,26 +1,16 @@
-// Buddy — Tauri v2 Mac shell.
+// Buddy — Tauri v2 Mac shell. Shipped signed + notarized since v0.3.x.
 //
-// ⚠️ UNVERIFIED SCAFFOLD. This Rust has never been compiled or run by the agent
-// that wrote it (no Rust toolchain available in that environment). Expect to fix
-// small compile errors on the first `pnpm tauri dev`. See README-MAC.md.
+// Loads the single-file web app (../dist/index.html) into a borderless, transparent,
+// always-on-top webview pinned to the RIGHT EDGE of the active monitor, plus a menu-bar
+// (tray) icon and a global summon shortcut.
 //
-// What this shell does:
-//   • Loads the existing single-file web app (../index.html) into a borderless,
-//     transparent, always-on-top webview pinned to the RIGHT EDGE of the active
-//     monitor at full height.
-//   • Adds a menu-bar (tray) icon. Left-click toggles the window show/hide.
-//     The tray menu has Show/Hide and Quit.
-//   • Registers the backtick key ( ` ) as a GLOBAL shortcut that shows + focuses
-//     the window (stand-in summon hotkey; mirrors the in-app `\`` drawer toggle).
+// Native behaviour that Tauri v2 doesn't expose is implemented here via objc2 → AppKit:
+//   • over-fullscreen collection behaviour (Buddy joins full-screen Spaces),
+//   • "reserved space" that pushes other windows out of Buddy's column when pinned,
+//   • the decorated / resizable Morning window (its own window, not a JS mode).
 //
-// KNOWN-FRAGILE / MORNING WORK (documented, not solved here — see PLAN §11):
-//   • Non-activating NSPanel behaviour + exact NSWindowLevel are NOT set here.
-//     Tauri v2 doesn't expose them; doing it right needs Rust→AppKit via objc2,
-//     testable only on the machine.
-//   • "Reserved space" (other windows can't sit behind Buddy) is NOT implemented.
-//   • A plain global `\`` will be swallowed app-wide (you won't be able to type a
-//     backtick anywhere while Buddy runs). That's intentional for the prototype;
-//     you'll likely move the summon to a chord (e.g. Cmd+\`) — noted in README.
+// RULE 4: verify native changes on the machine (`pnpm tauri dev` + screencapture) —
+// window level / Spaces / reserved-space behaviour can't be exercised headlessly.
 
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
