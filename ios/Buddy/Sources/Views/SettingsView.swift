@@ -17,7 +17,6 @@ struct SettingsView: View {
 
     // Sync section state
     @State private var showScanner = false
-    @State private var manualExpanded = false
     @State private var scannedCloud = false   // pairing came from a v2 (Buddy Cloud) QR
     @State private var fURL = ""
     @State private var fAnon = ""
@@ -72,22 +71,10 @@ struct SettingsView: View {
                                 setButton("Disconnect") { disconnect() }
                                     .padding(.top, 16)
                             } else {
-                                VStack(spacing: 8) {
-                                    setSplit(("Scan QR to pair", { pairError = nil; showScanner = true }),
-                                             (manualExpanded ? "Hide" : "Enter manually", { withAnimation { manualExpanded.toggle() } }))
-                                    if manualExpanded {
-                                        // Hosted builds (BuddyCloud present) never show server tooling —
-                                        // the backend is part of the service. Manual entry is just the sync
-                                        // key (camera-broken fallback); server fields are the OSS edition's UI.
-                                        if !BuddyCloud.present {
-                                            syncField("Backend URL", text: $fURL, keyboard: .URL)
-                                            syncField("Anon key", text: $fAnon)
-                                        }
-                                        syncField("Sync key (43 characters)", text: $fKey)
-                                        setButton("Connect") { connect() }
-                                    }
-                                }
-                                .padding(.top, 16)
+                                // Real users pair by scanning the Mac's QR. (Manual sync-key entry
+                                // was a dev/OSS fallback — removed 2026-07-19.)
+                                setButton("Scan QR to pair") { pairError = nil; showScanner = true }
+                                    .padding(.top, 16)
                             }
                             if let e = pairError {
                                 // red-on-red is invisible on the lvl2 sheet → white + semibold there.
@@ -179,18 +166,6 @@ struct SettingsView: View {
         HStack(spacing: 8) { setButton(a.0, a.1); setButton(b.0, b.1) }
     }
 
-    @ViewBuilder private func syncField(_ placeholder: String, text: Binding<String>,
-                                        keyboard: UIKeyboardType = .default) -> some View {
-        TextField(placeholder, text: text)
-            .font(.geist(15, .regular))
-            .foregroundStyle(theme.sheetLabel)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .keyboardType(keyboard)
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.line, lineWidth: 1))
-    }
-
     // MARK: - Sync helpers
 
     private var isConnected: Bool { sync?.currentConfig.isSyncable ?? false }
@@ -218,7 +193,7 @@ struct SettingsView: View {
     private func applyScanned(_ s: String) {
         showScanner = false
         guard let p = SyncIdentity.parse(s) else {
-            pairError = "That QR code isn’t a Buddy pairing code."; manualExpanded = true; return
+            pairError = "That QR code isn’t a Buddy pairing code."; return
         }
         fURL = p.backendUrl; fAnon = p.anonKey; fKey = p.syncKey
         scannedCloud = p.cloud
@@ -226,8 +201,7 @@ struct SettingsView: View {
     }
 
     private func connect() {
-        // Manual entry on a hosted build: the user only typed the sync key — fill the
-        // backend from BuddyCloud (the fields aren't shown; see manualExpanded above).
+        // Hosted v2 QR carries only the sync key — fill the backend from BuddyCloud.
         if BuddyCloud.present && fURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             fURL = BuddyCloud.url!; fAnon = BuddyCloud.anon!; scannedCloud = true
         }
@@ -245,7 +219,6 @@ struct SettingsView: View {
         pairError = nil
         SyncConfigStore.save(cfg)
         sync?.updateConfig(cfg)
-        withAnimation { manualExpanded = false }
     }
 
     private func disconnect() {
