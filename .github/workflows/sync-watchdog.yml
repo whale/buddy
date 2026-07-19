@@ -1,0 +1,68 @@
+name: Sync watchdog
+
+# Answers "is Buddy's sync healthy across Mac + iOS?" on a schedule, so nobody has to
+# remember to check. Runs the real cross-platform validation (Mac JS suites + the
+# Mac↔iOS envelope parity via Swift/CryptoKit) and, on ANY failure, emails hi@whale.fyi.
+# It also fails the job — so GitHub's built-in "workflow failed" notification reaches the
+# repo owner even before the SMTP secrets below are configured.
+#
+# What it catches: a future change breaking the sync protocol or the Mac↔iOS envelope
+# agreement (the exact class that caused the 2026-07-18 split-brain). See VALIDATION.md.
+#
+# To enable the nice hi@whale.fyi email, add these repo secrets (Settings → Secrets →
+# Actions).  Any SMTP provider works; for a whale.fyi Google Workspace mailbox use
+# smtp.gmail.com : 465 and an App Password.
+#   SMTP_HOST   e.g. smtp.gmail.com
+#   SMTP_PORT   e.g. 465
+#   SMTP_USER   the sending mailbox (e.g. hi@whale.fyi)
+#   SMTP_PASS   an app password / SMTP password
+# Without them the email step is skipped and you still get GitHub's failure email.
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"     # every 6 hours (odd minute — kinder to GitHub's cron load)
+  workflow_dispatch: {}         # run on demand from the Actions tab to test
+
+concurrency:
+  group: sync-watchdog
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: macos-latest       # macOS so the Swift/CryptoKit envelope parity check runs too
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Playwright (Chromium)
+        run: |
+          npm install -g @playwright/test
+          NODE_PATH=$(npm root -g) npx playwright install chromium
+
+      - name: Run sync validation
+        run: NODE_PATH=$(npm root -g) node scripts/buddy-sync-validate.mjs
+
+      - name: Email alert on failure
+        if: failure() && env.SMTP_HOST != ''
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          secure: true
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          from: Buddy Watchdog <${{ secrets.SMTP_USER }}>
+          to: hi@whale.fyi
+          subject: "⚠️ Buddy sync watchdog FAILED"
+          body: |
+            The scheduled Buddy sync validation failed — sync may be broken across Mac/iOS.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Reproduce locally:  pnpm sync:validate
+            Details:            VALIDATION.md
