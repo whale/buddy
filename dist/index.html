@@ -528,7 +528,7 @@
               </div>
 
               <!-- STATE 2: pairing — QR the phone scans -->
-              <div id="syncPairing" class="hidden flex items-center gap-4 mt-4">
+              <div id="syncPairing" class="hidden flex items-start gap-4 mt-4">
                 <div id="syncQR" class="shrink-0 leading-none rounded-[8px] overflow-hidden"></div>
                 <div class="flex-1 min-w-0">
                   <p class="text-[14px] text-black/60 tracking-[-0.3px] leading-snug mb-3">Scan this in Buddy on your iPhone: Settings → “Scan QR to pair”.</p>
@@ -1587,7 +1587,7 @@ function renderSyncStatus(){ renderSyncUI(); }   // back-compat: sync engine cal
 function renderSyncQR(payload){
   const el=$('#syncQR'); if(!el) return;
   el.innerHTML='';
-  try{ new QRCode(el, { text:payload, width:150, height:150, colorDark:'#000000', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M }); }
+  try{ new QRCode(el, { text:payload, width:113, height:113, colorDark:'#000000', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M }); }
   catch(e){ const err=$('#syncError'); if(err){ err.textContent='Could not render QR: '+(e&&e.message); err.classList.remove('hidden'); } }
 }
 async function syncConnectFromUI(){
