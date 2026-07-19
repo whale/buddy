@@ -163,6 +163,27 @@ Therefore:
 4. Cross-repo coordination (which repo releases how) lives in `ECOSYSTEM.md` — keep it
    current; read it before cross-repo work.
 
+## 🔎 RULE 6 — Adversarially review RISKY work BEFORE shipping. Don't wait to be asked.
+
+Both adversarial reviews this project has run caught REAL, already-"shipped" bugs my
+own verification missed — the server wire floor was wired to a dead function and did
+nothing; the iOS "sync failed, will retry" message was shown when the truth was "your
+app is too old, update it". So this is not optional polish; it's the step that catches
+the class of bug tests pass right over.
+
+**For any RISKY / non-trivial change, BEFORE opening the PR:** spawn a skeptic — an
+adversarial subagent (Agent tool) briefed to *break* the diff, or run `/code-review` —
+then confirm and fix what it finds. RISKY = sync / wire / merge / crypto, security,
+server SQL, native window/lifecycle, multi-file logic, anything user-facing or shared
+between Mac + iOS.
+
+- **SKIP** for trivial work: copy tweaks, one-liners, pure styling with no logic, docs.
+  State "n/a — trivial" so the skip is a decision, not a lapse.
+- The review is a SECOND MIND trying to break it — bootstrapping/edge cases, the
+  direction I didn't test, what the happy path hides. "My tests passed" ≠ "someone
+  tried to break it and couldn't."
+- Enforced by `RELEASE-CHECKLIST.md § 1` and a pre-PR hook (`.claude/settings.json`).
+
 ## Foundation
 
 Buddy's design language follows the shared Foundation system — prefer its tokens
