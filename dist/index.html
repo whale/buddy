@@ -4207,6 +4207,81 @@ window.__buddy = {
     const failed=R.filter(r=>!r.pass);
     return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
   },
+
+  // Version-skew harness — the deterministic reproduction of the 2026-07-18
+  // split-brain incident (SYNC-COMPAT.md). Models an OLD client (pre-E2E, e.g.
+  // the v0.1.0 phone) sharing a CAS bucket with a NEW encrypted client. The old
+  // client is modeled as talking to the RAW store (it has no crypto layer), so
+  // when it pulls a ciphertext row hydrate() rejects the envelope (no
+  // version/today/history) and returns null — exactly how a v0.1.0 binary treats
+  // an envelope. GUARD assertions (counted in ok) pin the backward-compat that
+  // already works and must never regress. GAPS are the corruption we do NOT yet
+  // prevent — reported live, NOT counted in ok, so this stays green while
+  // documenting the bug. Fix targets: #126 (cleartext header) + #127 (write
+  // gating). When those land, the gaps go safe and get promoted to guards.
+  async skewTest(){
+    const R=[]; const ok=(name,cond,detail)=>R.push({name,pass:!!cond,detail:detail||''});
+    const gaps=[];
+    const snap=JSON.parse(JSON.stringify({today:state.today,history:state.history,deferred:state.deferred,settings:state.settings,pinned:state.pinned,tombstones:state.tombstones,erasedAt:state.erasedAt}));
+    const wasSup=saveSuppressed; saveSuppressed=true;
+    const setLocal=(items)=>{ state.today={date:'2026-06-19',morningDone:false,items:items||[]}; state.history=[]; state.deferred=[]; state.tombstones={}; state.erasedAt=null; editingId=null; };
+    const texts=blob=>{ try{ return ((blob&&blob.today&&blob.today.items)||[]).map(i=>i.text).sort(); }catch{ return []; } };
+    const readWire=async row=> isEncryptedBlob(row.blob) ? await decryptBlob(bk,row.blob).catch(()=>null) : row.blob;
+    let bk;
+    try{
+      bk=await deriveBlobKey('A'.repeat(43));           // 32 zero bytes → shared test blobKey
+      const cloud=makeFakeCASStore();                    // the shared CAS bucket
+      const neu=makeEncryptedStore(cloud,bk);            // NEW client: reads/writes ciphertext
+      // OLD client = talks to `cloud` RAW (no crypto). Its syncOnce pulls the
+      // envelope as opaque JSON; hydrate() returns null on it.
+
+      // GUARD 1 — a NEW client can still READ an OLD plaintext row (backward read).
+      setLocal([{id:'x',text:'OLD_TASK',state:'neutral',v:1}]);
+      await syncOnce(cloud,'k');                          // old client seeds plaintext
+      const seeded=cloud._rows()['k'];
+      ok('new client reads an OLD plaintext row (backward read)',
+         seeded && !isEncryptedBlob(seeded.blob) && texts(seeded.blob).includes('OLD_TASK'),
+         'wire='+(isEncryptedBlob(seeded.blob)?'enc':'plain'));
+
+      // NEW client adds its own task and pushes an ENCRYPTED, merged row.
+      setLocal([{id:'y',text:'NEW_TASK',state:'neutral',v:1}]);
+      await syncOnce(neu,'k');
+      const afterNew=cloud._rows()['k'];
+      const afterNewPlain=await readWire(afterNew);
+      ok('new client merges old+new and encrypts the row',
+         isEncryptedBlob(afterNew.blob) && afterNewPlain && texts(afterNewPlain).includes('OLD_TASK') && texts(afterNewPlain).includes('NEW_TASK'),
+         'has='+JSON.stringify(afterNewPlain?texts(afterNewPlain):[]));
+
+      // GAP 1 — OLD client syncs against the ciphertext row it cannot read.
+      setLocal([{id:'x',text:'OLD_TASK',state:'neutral',v:1}]);   // old device only ever had OLD_TASK
+      const preFmt=isEncryptedBlob(cloud._rows()['k'].blob)?'enc':'plain';
+      await syncOnce(cloud,'k');                          // OLD client syncs RAW
+      const afterOld=cloud._rows()['k'];
+      const postFmt=isEncryptedBlob(afterOld.blob)?'enc':'plain';
+      const survivor=await readWire(afterOld);
+      const keptNew=!!(survivor && texts(survivor).includes('NEW_TASK'));
+      gaps.push({ scenario:'old client (no crypto) syncs against a ciphertext row',
+        current: keptNew ? 'NEW_TASK preserved' : 'NEW_TASK CLOBBERED — data loss (no tombstone)',
+        desired: 'refuse-to-clobber; NEW_TASK preserved',
+        wire: preFmt+' → '+postFmt,
+        issue: '#127 write-gating (needs #126 cleartext header to detect peer format)' });
+
+      // GAP 2 — alternating passes oscillate the row format instead of converging.
+      setLocal([{id:'y',text:'NEW_TASK',state:'neutral',v:1}]); await syncOnce(neu,'k');
+      const f1=isEncryptedBlob(cloud._rows()['k'].blob)?'enc':'plain';
+      setLocal([{id:'x',text:'OLD_TASK',state:'neutral',v:1}]); await syncOnce(cloud,'k');
+      const f2=isEncryptedBlob(cloud._rows()['k'].blob)?'enc':'plain';
+      gaps.push({ scenario:'alternating new/old passes on one bucket',
+        current: (f1!==f2) ? ('row format OSCILLATES ('+f1+' ↔ '+f2+')') : ('row format stable ('+f1+')'),
+        desired: 'converge, or cleanly lock the old client out — never oscillate',
+        issue: '#126 / #127' });
+    }catch(e){ ok('skewTest ran without throwing', false, e&&(e.message+' @ '+(e.stack||'').split('\n')[1])); }
+    state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
+    state.tombstones=snap.tombstones||{}; state.erasedAt=(typeof snap.erasedAt==='number')?snap.erasedAt:null;
+    editingId=null; render(); saveSuppressed=wasSup;
+    const failed=R.filter(r=>!r.pass);
+    return { ok:failed.length===0, total:R.length, failed:failed.length, results:R, gaps };
+  },
 };
 
 /* --------------------------- boot -------------------------------- */
