@@ -184,6 +184,29 @@ between Mac + iOS.
   tried to break it and couldn't."
 - Enforced by `RELEASE-CHECKLIST.md § 1` and a pre-PR hook (`.claude/settings.json`).
 
+## ✅ RULE 7 — Report from the SOURCE OF TRUTH, never a proxy. Confirm, don't infer.
+
+I told the user an iOS build shipped when it hadn't — twice — because I trusted a
+proxy instead of the real thing. Two traps, both banned:
+
+1. **A masked exit code.** `fastlane … | tail`, `… ; echo done`, `… | grep` — the
+   exit code you read then belongs to `tail`/`echo`/`grep`, NOT the build. Run the
+   critical command UN-piped so its own exit code surfaces, then confirm the outcome
+   directly. Never conclude "it worked" from a pipeline's exit status.
+2. **The wrong artifact / config.** A passing DEBUG build does not prove the RELEASE
+   build (the one that ships) compiles — `#if DEBUG` code, previews, and MockData
+   only fail in Release. Verify in the config that ships.
+
+Before telling the user something SHIPPED or WORKS, confirm it at the source:
+- **iOS TestFlight:** `pnpm ios:beta` (wraps fastlane + polls App Store Connect until a
+  NEW build is VALID) — or `node scripts/buddy-asc-builds.mjs`. "fastlane uploaded" ≠
+  "live on TestFlight" (Apple processes for minutes).
+- **Mac release:** `gh release view` shows the tag/asset.
+- **Sync / behaviour:** the running app or Apple/GitHub confirming — not a green log line.
+
+"I verified it" means I looked at the source of truth and it agreed. If I can't confirm,
+I say "uploaded but not yet confirmed", never "done".
+
 ## Foundation
 
 Buddy's design language follows the shared Foundation system — prefer its tokens
