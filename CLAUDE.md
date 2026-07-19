@@ -136,6 +136,33 @@ about it is not verification (that's how "Future scrolls now" shipped broken).
 - Save all captures to the session scratchpad; report what was observed vs.
   what remains unverified. "The code should do X" is a hypothesis, not a result.
 
+## 🚢 RULE 5 — Buddy is TWO apps on DIFFERENT release rails. iOS is manual; "merged" ≠ "shipped".
+
+Buddy = **Mac** (Tauri, `dist/` + `src-tauri/`) **and iOS** (Swift, `ios/`), plus the
+marketing site (`buddy-site`, Vercel). They do NOT ship together automatically:
+
+- **Mac** auto-releases on merge to `main` (GitHub Actions → signed DMG + updater).
+  Merging = shipped.
+- **iOS** has **NO CI release**. It ships ONLY when someone runs `fastlane beta` from
+  `ios/` locally (needs `ASC_*` + `BUDDY_CLOUD_*` in the shell env). Merging does
+  **nothing** for iOS — the phone has nothing to update to.
+
+**Any change to SHARED plumbing — sync/wire/merge/crypto, escalation tokens, anything
+both apps consume — is only HALF shipped when the Mac releases.** Leaving iOS behind
+recreates the exact version-skew problem the change was meant to fix (this is how the
+2026-07-18 split-brain nearly stranded the user again).
+
+Therefore:
+1. A shared-plumbing change is NOT done until BOTH the Mac release AND a new iOS
+   TestFlight build (`fastlane beta`) are cut. Say "shipped to Mac; iOS still owed" —
+   never just "shipped".
+2. **Never tell the user to "update in TestFlight" without first confirming a newer
+   build exists** (the `beta` lane's `latest_testflight_build_number`, or ask).
+3. Bump iOS `MARKETING_VERSION` (in `ios/project.yml`) to track the Mac version each
+   release — it silently sat at `0.1.0` for months. Build number auto-increments.
+4. Cross-repo coordination (which repo releases how) lives in `ECOSYSTEM.md` — keep it
+   current; read it before cross-repo work.
+
 ## Foundation
 
 Buddy's design language follows the shared Foundation system — prefer its tokens
