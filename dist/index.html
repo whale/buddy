@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Buddy — prototype</title>
+<title>Buddy</title>
 <script src="assets/vendor/tailwindcss.js"></script>
 <script src="vendor/qrcode.js"></script>   <!-- QR render for iPhone pairing (davidshimjs/qrcodejs, MIT) -->
 <!-- Buddy Cloud config — gitignored, present ONLY in hosted builds (CI injects it).
@@ -1944,30 +1944,6 @@ function rolloverAndCarry(){
     }
   }
   return rolled;
-}
-
-/* ----------------------- demo history seed ----------------------- */
-/* Seed a tiny demo history ONLY when history is empty, so first-run
-   shows the Last-7-days panel populated. */
-function seedDemoHistory(){
-  if(state.history.length) return;
-  const sample=[
-    [['Reply to the team',true],['Draft the intro',true],['Book the flights',false]],
-    [['Review the doc',true],['Call Liam',false],['Water the plants',false]],
-    [['Plan the week',true],['Ship the newsletter',false],['Tidy the desk',true]],
-    null,                                       // a skipped day (dimmed)
-    [['Read two chapters',false],['Stretch',true],['Email Erica',false]],
-  ];
-  const base=new Date();
-  sample.forEach((day,i)=>{
-    if(!day) return;                            // skipped day = no record
-    const d=new Date(base); d.setDate(base.getDate()-(i+1));
-    const date=localDate(d), epoch=Math.floor(d.getTime()/1000);
-    state.history.push({
-      date, weekday:DOW[d.getDay()],
-      items: day.map(([text,done],j)=>({ id:`h-${epoch}-${j}`, text, done })),
-    });
-  });
 }
 
 // Done history: store up to ~1 year. The Done tab shows ONE WEEK at a time and a
@@ -4675,7 +4651,6 @@ function bootFinish(recovered){
   } else {
     maybeAutoRestoreLastList();              // heals an empty new-day save using yesterday's archived list
   }
-  if(!bootHadStored && !recovered) seedDemoHistory();   // demo seed ONLY on a genuine first run
   pruneHistory();                         // drop archived days older than ~1 year
   setDate();
   updateWeather();                        // paint cached weather, refresh if stale (silent on failure)
