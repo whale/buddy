@@ -8,6 +8,11 @@ touches colors" still runs the interaction pass on its platform — the
 
 ## 1 · Automated gates (always, both platforms)
 
+- [ ] **Adversarial review (RULE 6)** — for any sync / crypto / server-SQL / native
+      window-lifecycle / multi-file / user-facing change, a skeptic subagent (or
+      `/code-review`) attacked the diff and its CONFIRMED findings are fixed. Both
+      prior reviews caught real shipped bugs; don't skip on risky work. Trivial diff:
+      write "n/a — trivial".
 - [ ] `pnpm ui:smoke` — 4/4 (wraps `__buddy.smokeTest()`: add/edit/Enter/Tab,
       escalation colors incl. lvl1 red pattern, merge suite, mid-edit sync guard)
 - [ ] `cd ios && xcodebuild test …BuddyTests` — unit suite (incl. token parity
