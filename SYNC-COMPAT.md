@@ -10,7 +10,7 @@ sync design has to assume it, not hope to avoid it.
 > iOS (`ios/.../Sync`), pinned by a shared envelope vector. Run `pnpm
 > sync:validate` for a one-command PASS/FAIL across Mac logic + Mac↔iOS interop;
 > full procedure in [`VALIDATION.md`](VALIDATION.md). The server wire floor
-> (`supabase/migrations/*_buddy_wire_floor.sql`) is written but ships DISABLED —
+> (`supabase/migrations/20260719130000_buddy_wire_floor_fix.sql`) is written but ships DISABLED —
 > raise it only after the wire-2 build saturates (see below).
 
 This doc exists because it already bit us: a phone stuck on **v0.1.0**
@@ -131,6 +131,18 @@ change ships in two waves:
 Never same-day both-platforms for a `wire`/`crypto` change.
 
 ---
+
+## Threat boundary (honest-but-curious server)
+
+The AAD binding stops a **downgrade within the encrypted format** (you can't move a
+wire-1 ct into the wire-2 path or forge a header — GCM fails closed both ways) and
+the server can't read content. But because clients still **read legacy plaintext**
+(to migrate old rows), a fully hostile server could replace a row with *forged
+plaintext* and a client would merge it — a data-integrity (not confidentiality)
+attack, and only over task text. This is inherent to supporting the legacy tail;
+the **server wire floor** (once raised) closes it by refusing sub-wire-2 writes.
+For a personal, single-tenant backend this residual is acceptable; documented here
+so it's a decision, not a surprise.
 
 ## Enforce the floor where both clients actually meet: the server
 

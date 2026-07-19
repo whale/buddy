@@ -122,6 +122,13 @@ final class SyncEngine {
                     BuddyDiag.log("sync", ["pushed": res.pushed, "pulled": res.pulled,
                                            "v": res.version, "attempts": res.attempts])
                 }
+            } else if res.degraded {
+                // The OTHER device is on a NEWER format this build can't read — this is NOT a
+                // transient conflict, it's "you must update". Say so plainly; a "will retry"
+                // message would tell the incident's victim (the old device) to just wait
+                // forever (review 2026-07-19).
+                lastError = "Update Buddy to keep syncing with your Mac"
+                BuddyDiag.log("sync-degraded")
             } else {
                 // Do NOT stamp a reassuring lastSyncedAt on failure — retries were exhausted.
                 lastError = "Sync failed (server conflict — will retry)"

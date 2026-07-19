@@ -1825,12 +1825,15 @@ function makeEncryptedStore(store, blobKey){
     async push(key, blob, expected, stats){
       const r = await store.push(key, await encryptEnvelope(blobKey, blob), expected, stats);
       // CAS conflict hands back the CURRENT remote row for re-merge — decode it too.
+      // A decrypt FAILURE here must THROW (abort the pass), NOT null → the retry loop would
+      // fold `null` in and re-push, clobbering an un-decryptable peer row (parity with iOS,
+      // which throws from decode; review 2026-07-19).
       if(r && !r.ok && r.blob){
         if(isV2Envelope(r.blob)){
           if(r.blob.minReader > WIRE_MAX){ r.unreadable = true; r.wire = r.blob.wire; r.blob = null; }
-          else { try{ r.blob = await decryptEnvelope(blobKey, r.blob); }catch(_){ r.blob = null; } }
+          else { r.blob = await decryptEnvelope(blobKey, r.blob); }   // throws on failure → syncOnce aborts, no clobber
         } else if(isEncryptedBlob(r.blob)){
-          try{ r.blob = await decryptBlob(blobKey, r.blob); }catch(_){ r.blob = null; }
+          r.blob = await decryptBlob(blobKey, r.blob);                // throws on failure → abort, no clobber
         }
       }
       return r;
