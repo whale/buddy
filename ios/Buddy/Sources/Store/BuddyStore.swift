@@ -42,6 +42,12 @@ final class BuddyStore {
     // MARK: - Derived helpers
     var activeTasks: [BuddyTask] { today.items.filter { $0.isActive } }
     var doneTasks: [BuddyTask]   { today.items.filter { $0.isDone } }
+    // The Today LIST hides Boss-Mode-cleared completions; the Done tab still shows them
+    // (via `doneTasks`). Mirrors the Mac's renderToday filter `!(done && clearedAt)`.
+    var listDoneTasks: [BuddyTask] { today.items.filter { $0.isDone && !$0.isCleared } }
+    // Boss Mode offers to sweep finished rows once the visible done pile reaches BOSS_MIN.
+    static let bossMin = 5
+    var bossReady: Bool { listDoneTasks.count >= Self.bossMin }
     var activeCount: Int         { activeTasks.count }
     var atHardCap: Bool          { activeCount >= Self.hardCap }
 
@@ -91,10 +97,12 @@ final class BuddyStore {
         case .focused:
             t.state = .done
             t.doneAt = Date()
+            t.clearedAt = nil          // a fresh completion is visible on the list, not swept
         case .done:
             guard activeCount < Self.hardCap else { return false }
             t.state = .neutral
             t.doneAt = nil
+            t.clearedAt = nil          // un-done → no longer swept off the list (Mac parity)
         }
         t.v += 1                       // any state change bumps the merge version
         today.items[idx] = t
@@ -111,6 +119,7 @@ final class BuddyStore {
         let wasDone = today.items[idx].state == .done
         today.items[idx].state = .done
         today.items[idx].doneAt = Date()
+        today.items[idx].clearedAt = nil          // a fresh completion is visible, not swept
         today.items[idx].v += 1
         scheduleSave()
         return !wasDone
@@ -153,7 +162,25 @@ final class BuddyStore {
         guard activeCount < Self.hardCap else { return }
         today.items[idx].state = .neutral
         today.items[idx].doneAt = nil
+        today.items[idx].clearedAt = nil          // un-done → no longer swept off the list
         today.items[idx].v += 1
+        scheduleSave()
+    }
+
+    /// Boss Mode (Mac parity): sweep every visible finished row off the Today LIST — set
+    /// `clearedAt` (+ v-bump so the change propagates over sync) on each. They stay in state,
+    /// so the Done tab, rollover, and the other device all still see them. An action here on
+    /// EITHER platform mirrors to the other (clearedAt rides the per-item wire).
+    func bossMove() {
+        let now = Date()
+        var moved = 0
+        for i in today.items.indices where today.items[i].isDone && !today.items[i].isCleared {
+            today.items[i].clearedAt = now
+            today.items[i].v += 1
+            moved += 1
+        }
+        guard moved > 0 else { return }
+        BuddyDiag.log("boss-move", ["n": moved])
         scheduleSave()
     }
 

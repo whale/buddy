@@ -355,16 +355,66 @@ struct TodayView: View {
 
     // MARK: - Card 2 — task list
 
+    // One typed row for the Today list: a task, or the Boss Mode sweep row.
+    private enum ListRow: Identifiable {
+        case task(BuddyTask)
+        case boss
+        var id: String { switch self { case .task(let t): return t.id; case .boss: return "boss-row" } }
+    }
+    private var listRows: [ListRow] {
+        var rows = store.listDoneTasks.map { ListRow.task($0) }   // visible done (cleared hidden), first
+        if store.bossReady { rows.append(.boss) }
+        rows += store.activeTasks.map { ListRow.task($0) }        // then active
+        return rows
+    }
+
+    // Boss Mode (Mac parity): at 5+ done, offer to sweep the finished rows off the list. They stay
+    // in the Done tab; `store.bossMove()` sets clearedAt + v-bump, which syncs to the other device.
+    private var bossRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(store.listDoneTasks.count) done today.")
+                    .font(.geist(15, .medium)).tracking(-0.30)
+                    .foregroundStyle(theme.escalationText)
+                Text("Move to done, and make room for more?")
+                    .font(.geist(14, .regular)).tracking(-0.20)
+                    .foregroundStyle(theme.inkDim)
+                    .fixedSize(horizontal: false, vertical: true)   // wrap, don't truncate (Mac shows it in full)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: 8)
+            Button { withAnimation(.easeOut(duration: 0.25)) { store.bossMove() } } label: {
+                Text("move")
+                    .font(.geist(14, .semibold)).tracking(-0.20)
+                    .foregroundStyle(theme.escalationText)
+                    .padding(.horizontal, 16).padding(.vertical, 6)
+                    .background(theme.escalationText.opacity(0.10), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("boss-move")
+        }
+        .padding(.horizontal, 20).padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+    }
+
     private var listCard: some View {
         GeometryReader { geo in
-            let rows = store.doneTasks + store.activeTasks   // Donezo first, then active
+            // Visible done rows (cleared/swept ones are hidden — they stay in the Done tab), then
+            // the Boss Mode row (at 5+ done), then active rows. Modeled as one typed list so the
+            // between-row dividers stay a simple `i > 0` check.
+            let rows = listRows
             // The list content. Rows flex-fill to share the column height equally when there's
             // room; when the fit falls to its floor and still overflows, we scroll instead of clip.
             let content = VStack(spacing: 0) {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { i, task in
+                ForEach(Array(rows.enumerated()), id: \.element.id) { i, row in
                     if i > 0 { rowDivider }
                     Group {
-                        if task.isDone { doneRowView(task: task) } else { activeRowView(task: task) }
+                        switch row {
+                        case .task(let task):
+                            if task.isDone { doneRowView(task: task) } else { activeRowView(task: task) }
+                        case .boss:
+                            bossRow
+                        }
                     }
                     .transition(.opacity)
                 }
@@ -395,10 +445,10 @@ struct TodayView: View {
 
     private func recomputeFit(_ size: CGSize) {
         let active = store.activeTasks.map(\.text)
-        let done = store.doneTasks.map(\.text)
+        let done = store.listDoneTasks.map(\.text)   // cleared (swept) rows aren't shown → don't size for them
         let next = RowFit.compute(active: active, done: done,
                                   height: size.height, width: size.width,
-                                  includesAdd: !store.atHardCap)
+                                  includesAdd: !store.atHardCap, boss: store.bossReady)
         guard next != fit else { return }   // no-op when nothing changed — no redundant re-render
         // Apply fit WITHOUT animation: the uniform font/vpad must snap, never ping-pong.
         // (Row insert/remove keeps its own transition; only the fit values are exempt.)

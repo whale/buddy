@@ -71,6 +71,24 @@ enum ScreenshotHarness {
         case "settings":
             store.seedForScreenshot(tasks: MockData.normalTasks, history: recentHistory())
             return (store, .settings, false, false)
+        case "boss":
+            // 5 done + 2 active → the Boss Mode "Move to done" row appears under the done pile.
+            let titles = ["Email Sam", "Draft the deck", "Call plumber", "Review PR", "Book flights"]
+            var items = titles.enumerated().map { i, t in
+                BuddyTask(id: "bd\(i)", text: t, state: .done, doneAt: Date())
+            }
+            items += [BuddyTask(id: "ba1", text: "Water plants", state: .neutral),
+                      BuddyTask(id: "ba2", text: "Pay the invoice", state: .neutral)]
+            store.seedForScreenshot(tasks: items)
+            return (store, .none, false, false)
+        case "boss-lvl2":
+            // 6 active (lvl2 red) + 5 done → the Boss row must stay legible on the red background.
+            var items = (0..<5).map { i in
+                BuddyTask(id: "bd\(i)", text: ["Email Sam","Draft the deck","Call plumber","Review PR","Book flights"][i], state: .done, doneAt: Date())
+            }
+            items += (0..<6).map { i in BuddyTask(id: "ba\(i)", text: ["Ship it","Pay invoice","Water plants","Renew domain","Book flights","Plan offsite"][i], state: .neutral) }
+            store.seedForScreenshot(tasks: items)
+            return (store, .none, false, false)
         case "peer-unlinked":
             // Settings open, unpaired, with the "your Mac unlinked this device" note (mutual unlink).
             store.seedForScreenshot(tasks: MockData.normalTasks)
