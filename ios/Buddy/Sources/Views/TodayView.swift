@@ -166,6 +166,9 @@ struct TodayView: View {
             #endif
             // Bring up the sync engine (inert until the user pairs) and pull once on launch.
             if sync == nil { sync = SyncEngine(store: store) }
+            #if DEBUG
+            if ScreenshotHarness.activeFixture == "peer-unlinked" { sync?.peerUnlinked = true }
+            #endif
             sync?.syncOnForeground()
         }
         .onChange(of: scenePhase) { _, phase in

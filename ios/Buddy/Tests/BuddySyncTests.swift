@@ -94,6 +94,46 @@ final class BuddySyncTests: XCTestCase {
         XCTAssertNotNil(blob?.erasedAt)
     }
 
+    // 7b. MUTUAL UNLINK: a bucket stamped with `unlinkedAt` makes the peer's pass report
+    // `.unlinked` (read BEFORE merge) and must NOT push/clobber the marker away.
+    func testMutualUnlinkDetected() async throws {
+        var stamped = snap([item("keep","keep")])
+        stamped.unlinkedAt = 1_750_000_000
+        let store = InMemoryCASStore(seed: ("k", stamped, 5))
+        let r = try await BuddySync.syncOnce(store: store, key: "k", local: snap([item("mine","mine")]))
+        XCTAssertTrue(r.unlinked, "peer pass reports unlinked")
+        let ver = await store.currentVersion("k")
+        let stampedBlob = await store.currentBlob("k")
+        XCTAssertEqual(ver, 5, "marker must not be clobbered")
+        XCTAssertEqual(stampedBlob?.unlinkedAt, 1_750_000_000)
+        // A normal (un-stamped) bucket → no false unlink.
+        let store2 = InMemoryCASStore(seed: ("k", snap([item("x","x")]), 2))
+        let r2 = try await BuddySync.syncOnce(store: store2, key: "k", local: snap([item("x","x")]))
+        XCTAssertFalse(r2.unlinked)
+    }
+
+    // 7b2. CONCURRENT unlink race (adversarial finding 2026-07-19): a pass is mid-CAS when the peer
+    // stamps the bucket. The conflict must be read as `.unlinked` — NOT folded+repushed, which would
+    // ERASE the marker (merge() drops unlinkedAt) and tell the user it worked.
+    func testConcurrentUnlinkMarkerNotErased() async throws {
+        var stamped = snap([item("p","mine")], savedAt: 2000)
+        stamped.unlinkedAt = 1_750_000_000
+        let store = ConflictOnceStore(blob: snap([item("p","mine")], savedAt: 1000), version: 1, injected: stamped)
+        let r = try await BuddySync.syncOnce(store: store, key: "k",
+                    local: snap([item("p","mine"), item("r","late")], savedAt: 3000))
+        XCTAssertTrue(r.unlinked, "mid-CAS marker must be read as unlinked, not merged away")
+        let (blob, _) = await store.cur()
+        XCTAssertEqual(blob.unlinkedAt, 1_750_000_000, "marker preserved on the server, not clobbered")
+    }
+
+    // 7c. The unlink marker survives the wire round-trip (seconds ↔ ms), like erasedAt.
+    func testUnlinkMarkerWireRoundTrip() throws {
+        var s = snap([item("a","a")]); s.unlinkedAt = 1_750_000_000
+        let wire = SyncWire(s)
+        XCTAssertEqual(try XCTUnwrap(wire.unlinkedAt), 1_750_000_000 * 1000, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(wire.toSnapshot().unlinkedAt), 1_750_000_000, accuracy: 0.001)
+    }
+
     // 8. SyncWire round-trip preserves data AND converts seconds ↔ wire milliseconds.
     func testWireRoundTripAndUnits() throws {
         let s = snap([item("a","alpha",2)], history: [Day(date: "2026-06-18", weekday: "Thu",

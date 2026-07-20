@@ -71,6 +71,10 @@ enum ScreenshotHarness {
         case "settings":
             store.seedForScreenshot(tasks: MockData.normalTasks, history: recentHistory())
             return (store, .settings, false, false)
+        case "peer-unlinked":
+            // Settings open, unpaired, with the "your Mac unlinked this device" note (mutual unlink).
+            store.seedForScreenshot(tasks: MockData.normalTasks)
+            return (store, .settings, false, false)
         case "sync-notice":
             // The overflow banner sits above the date card; alarmTasks = 6 active → lvl2 (red).
             store.seedForScreenshot(tasks: MockData.alarmTasks)

@@ -46,6 +46,9 @@ struct SyncSnapshot {
     // A sync moved N over-cap tasks to Future — a dismissible, SYNCED notice (mirrors the
     // Mac's state.syncNotice). Nil when nothing was moved / it was dismissed on both sides.
     var syncNotice: SyncNotice? = nil
+    // Mutual-unlink marker (seconds): a device stamps the shared bucket to dissolve the link so
+    // the peer self-unlinks. Read BEFORE any merge (syncOnce), never merged into task data.
+    var unlinkedAt: Double? = nil
     // Unknown top-level wire fields (the Mac's doneWordBag/pinned/restartStash and any
     // future peer's additions) — pass through merge/adopt/persist untouched.
     var extras: [String: JSONValue] = [:]

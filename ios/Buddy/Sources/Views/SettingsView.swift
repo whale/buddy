@@ -81,6 +81,12 @@ struct SettingsView: View {
                                 Text(e).font(.geist(14, theme.level == .lvl2 ? .semibold : .regular))
                                     .foregroundStyle(theme.errorText).padding(.top, 10)
                             }
+                            if sync?.peerUnlinked == true {
+                                // Mutual unlink: the other device dissolved the link. Neutral note, not an error.
+                                Text("Your Mac unlinked this device. Pair again to sync.")
+                                    .font(.geist(14, .regular)).tracking(-0.26)
+                                    .foregroundStyle(theme.sheetFaint).padding(.top, 10)
+                            }
                         }
                     }
 
@@ -222,11 +228,14 @@ struct SettingsView: View {
     }
 
     private func disconnect() {
-        var cfg = sync?.currentConfig ?? SyncConfig(backendUrl: "", anonKey: "", syncKey: "", enabled: false)
-        cfg.enabled = false
-        SyncConfigStore.save(cfg)
-        sync?.updateConfig(cfg)
+        // MUTUAL unlink: stamp the bucket so the Mac self-unlinks too, then clear our link.
+        // Be honest when we couldn't reach the Mac (offline / conflict) — parity with the Mac.
         pairError = nil
+        guard let sync else { return }
+        Task {
+            let signalled = await sync.unlinkMutual()
+            if !signalled { pairError = "Unlinked here. Couldn’t reach your Mac — unlink it there too." }
+        }
     }
 
     private var appVersion: String {

@@ -31,6 +31,7 @@ struct SyncResult {
     var version = 0
     var attempts = 0
     var degraded = false        // a peer's framing is newer than we can read — refused to clobber
+    var unlinked = false        // the peer stamped the bucket to dissolve the link (mutual unlink)
     var merged: SyncSnapshot?   // the snapshot the caller should adopt as local truth
 }
 
@@ -144,6 +145,13 @@ enum BuddySync {
             return SyncResult(ok: false, degraded: true)
         }
 
+        // The peer stamped the bucket to dissolve the link (mutual unlink). Read BEFORE any
+        // merge — it's a plain marker, not mergeable state — and report up so the engine
+        // self-unlinks. Never merge/adopt a marker blob's task data (mirrors the Mac).
+        if let ua = remote.blob?.unlinkedAt, ua > 0 {
+            return SyncResult(ok: true, unlinked: true)
+        }
+
         // Empty-over-full guard / scanner-pulls-first: a fresh empty device adopts the
         // remote rather than pushing nothing over it.
         if blobIsEmpty(local) && !blobIsEmpty(remote.blob) {
@@ -172,6 +180,12 @@ enum BuddySync {
             if res.unreadable {
                 BuddyDiag.log("sync-refuse-clobber", ["wire": res.peerWire])
                 return SyncResult(ok: false, degraded: true)
+            }
+            // The conflicting write is a mutual-unlink marker → bail. merge() DROPS unlinkedAt, so
+            // folding+repushing would ERASE the marker (peer never unlinks) while telling the user
+            // it worked. Read here too, not just at the top (the racing writer is the unlink push).
+            if let ua = res.blob?.unlinkedAt, ua > 0 {
+                return SyncResult(ok: true, unlinked: true)
             }
             // Someone wrote between pull and push → fold their blob in and retry CAS.
             merged = BuddyMerge.merge(merged, res.blob) ?? merged
@@ -358,6 +372,7 @@ struct SyncWire: Codable {
     var tombstones: [String: Double]    // id → epoch ms
     var erasedAt: Double?               // epoch ms
     var syncNotice: SyncNotice?         // "N tasks moved to Future" banner (synced, dismissible)
+    var unlinkedAt: Double?             // epoch ms — mutual-unlink marker (dissolves the link)
     var extras: [String: JSONValue] = [:]   // doneWordBag / pinned / restartStash / future fields
 
     // Tolerant decode: a missing key must NEVER throw and kill a sync pass. Swift's
@@ -368,9 +383,9 @@ struct SyncWire: Codable {
     // (mirrors the Mac's DROP_WIRE_KEYS).
     static let knownKeys: Set<String> = ["version", "savedAt", "today", "history",
                                          "deferred", "settings", "tombstones", "erasedAt",
-                                         "syncNotice", "enc", "iv", "ct"]
+                                         "syncNotice", "unlinkedAt", "enc", "iv", "ct"]
     private enum CodingKeys: String, CodingKey {
-        case version, savedAt, today, history, deferred, settings, tombstones, erasedAt, syncNotice
+        case version, savedAt, today, history, deferred, settings, tombstones, erasedAt, syncNotice, unlinkedAt
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -383,6 +398,7 @@ struct SyncWire: Codable {
         tombstones = (try? c.decodeIfPresent([String: Double].self, forKey: .tombstones)) ?? [:]
         erasedAt   = (try? c.decodeIfPresent(Double.self, forKey: .erasedAt)) ?? nil
         syncNotice = SyncNotice.sanitized((try? c.decodeIfPresent(SyncNotice.self, forKey: .syncNotice)) ?? nil)
+        unlinkedAt = (try? c.decodeIfPresent(Double.self, forKey: .unlinkedAt)) ?? nil
         extras     = decodeExtras(from: decoder, known: Self.knownKeys)
     }
     // Extras first, known keys win — mirrors the Mac's `{ ...(state.extras||{}), version:1, … }`.
@@ -399,6 +415,7 @@ struct SyncWire: Codable {
         try c.encode(tombstones, forKey: .tombstones)
         try c.encodeIfPresent(erasedAt, forKey: .erasedAt)
         try c.encodeIfPresent(SyncNotice.sanitized(syncNotice), forKey: .syncNotice)
+        try c.encodeIfPresent(unlinkedAt, forKey: .unlinkedAt)
     }
 
     // snapshot (seconds) → wire (ms)
@@ -421,6 +438,7 @@ struct SyncWire: Codable {
         tombstones = s.tombstones.mapValues { $0 * MS }
         erasedAt = s.erasedAt.map { $0 * MS }
         syncNotice = SyncNotice.sanitized(s.syncNotice)   // counts, not timestamps — no ms conversion
+        unlinkedAt = s.unlinkedAt.map { $0 * MS }
         extras = s.extras
     }
 
@@ -445,6 +463,7 @@ struct SyncWire: Codable {
             erasedAt: erasedAt.map { $0 / MS },
             savedAt: savedAt / MS,
             syncNotice: SyncNotice.sanitized(syncNotice),
+            unlinkedAt: unlinkedAt.map { $0 / MS },
             extras: extras
         )
     }
