@@ -207,6 +207,21 @@ Before telling the user something SHIPPED or WORKS, confirm it at the source:
 "I verified it" means I looked at the source of truth and it agreed. If I can't confirm,
 I say "uploaded but not yet confirmed", never "done".
 
+## 🔀 RULE 8 — Every feature: check the OTHER platform and offer to mirror it (whale 2026-07-20).
+
+Buddy is Mac + iOS. When you build (or change) a feature on one platform, you MUST — before
+calling it done — work out how it lands on the other platform and **ask the user whether they
+want it mirrored** (functionality AND sync, so an action on either device shows on the other).
+Don't silently ship a one-platform feature and don't assume the answer. This is proactive: the
+user should not have to remember to ask for parity — you surface it every time.
+
+- Applies to any user-facing behaviour or interaction, not just shared sync/merge plumbing
+  (RULE 5 already forces shipping BOTH when the plumbing is shared).
+- If a feature is deliberately one-platform (a Mac-window-only affordance, an iOS-gesture-only
+  thing), say so and why — the "no mirror" answer is still a stated decision, not a lapse.
+- When mirroring, prefer the SAME sync mechanism both ways (e.g. a per-item field that rides
+  the existing wire) so "do it on Mac" and "do it on iPhone" converge to the same state.
+
 ## Foundation
 
 Buddy's design language follows the shared Foundation system — prefer its tokens
