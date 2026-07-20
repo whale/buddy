@@ -30,7 +30,7 @@ enum RowFit {
     /// - height/width: the list card's available size. width is the card width (gutters removed inside).
     /// - ceil/floor: font ceiling & legibility floor (main view 24, morning 22).
     static func compute(active: [String], done: [String] = [], height H: CGFloat, width cardW: CGFloat,
-                        includesAdd: Bool = true,
+                        includesAdd: Bool = true, boss: Bool = false,
                         ceil: CGFloat = 24, floor: CGFloat = 16) -> Result {
         guard H > 0, cardW > 0 else { return Result(font: ceil, vpad: padMax, scroll: false) }
         let innerW = max(40, cardW - 64)                 // 32pt gutter each side
@@ -66,7 +66,15 @@ enum RowFit {
             if includesAdd {
                 sum += uf.lineHeight + 2 * p + addBottomExtra  // the "Add +" row (one line) with extra bottom air
             }
-            sum += max(0, doneN + n + (includesAdd ? 1 : 0) - 1) * 1   // hairline dividers between visible rows
+            if boss {
+                // Fixed-height Boss Mode row: a 15pt title + a 14pt subtitle (budget 2 lines — it
+                // wraps on narrow widths) + 12pt padding top/bottom. Doesn't shrink with the fit.
+                let titleUF = UIFont(name: "Geist-Medium", size: 15) ?? .systemFont(ofSize: 15)
+                let subUF = UIFont(name: "Geist-Regular", size: 14) ?? .systemFont(ofSize: 14)
+                sum += titleUF.lineHeight + 2 + subUF.lineHeight * 2 + 24
+            }
+            let visibleRows = doneN + n + (includesAdd ? 1 : 0) + (boss ? 1 : 0)
+            sum += max(0, visibleRows - 1) * 1   // hairline dividers between visible rows
             return sum + 4                      // safety epsilon vs SwiftUI's own line metrics
         }
 

@@ -28,6 +28,26 @@ struct BuddyTask: Identifiable, Codable, Equatable {
     // Convenience: active = pressing on you (not done)
     var isActive: Bool { state != .done }
 
+    // Boss Mode (Mac parity): a completed task the user swept off the Today LIST via "Move to
+    // done" — still lives in state (Done tab, rollover, sync see it), just hidden from Today.
+    // Backed by the per-item `extras` bag (epoch MS, matching the Mac's `item.clearedAt`), so it
+    // rides the existing wire with NO merge/contentKey change — an action on either device syncs.
+    // (Excluded from `itemValue`/contentKey exactly like the Mac; the v-bump on set drives sync.)
+    var clearedAt: Date? {
+        get {
+            switch extras["clearedAt"] {
+            case .int(let ms)?:    return ms > 0 ? Date(timeIntervalSince1970: Double(ms) / 1000) : nil
+            case .number(let ms)?: return ms > 0 ? Date(timeIntervalSince1970: ms / 1000) : nil
+            default:               return nil
+            }
+        }
+        set {
+            if let d = newValue { extras["clearedAt"] = .int(Int64((d.timeIntervalSince1970 * 1000).rounded())) }
+            else { extras["clearedAt"] = nil }
+        }
+    }
+    var isCleared: Bool { clearedAt != nil }
+
     init(id: String, text: String, state: TaskState, doneAt: Date? = nil, v: Int = 1,
          extras: [String: JSONValue] = [:]) {
         self.id = id; self.text = text; self.state = state; self.doneAt = doneAt; self.v = v
