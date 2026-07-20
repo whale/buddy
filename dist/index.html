@@ -948,7 +948,11 @@ const KNOWN_WIRE_KEYS = ['version','savedAt','today','doneWordBag','history','de
 // E2E envelope keys must NEVER ride the extras bag: a pre-E2E peer that pulled an
 // encrypted row echoes {enc,iv,ct} back through ITS extras (hybrid blob), and if we
 // re-emitted them the row would look encrypted forever while carrying plaintext.
-const DROP_WIRE_KEYS = ['enc','iv','ct'];
+// `unlinkedAt` is a transport-only mutual-unlink marker: read RAW in syncOnce (before hydrate),
+// NEVER merged or adopted. Dropping it here guarantees it can't ride `extras` into local state
+// and get re-emitted on a later re-pair (which would self-unlink the device forever). enc/iv/ct
+// are the E2E envelope keys, dropped for the same "never echo it back" reason.
+const DROP_WIRE_KEYS = ['enc','iv','ct','unlinkedAt'];
 function hydrate(blob){
   if(!blob) return null;
   const looksLikeBuddy = blob.version===1 || isValidToday(blob.today) || Array.isArray(blob.history);
@@ -1451,6 +1455,12 @@ async function syncOnce(store, key){
     diag('sync-refuse-clobber', { wire:remote.wire, minReader:remote.minReader });
     return { ok:false, degraded:true, reason:'peer-newer', wire:remote.wire };
   }
+  // The peer stamped the bucket to dissolve the link (mutual unlink). Read BEFORE any merge —
+  // it's a plain top-level marker, not part of the mergeable state — and report up so syncNow
+  // can self-unlink. Never merge/adopt a marker blob's task data.
+  if(remote && remote.blob && typeof remote.blob.unlinkedAt==='number' && remote.blob.unlinkedAt>0){
+    return { ok:true, unlinked:true, unlinkedAt:remote.blob.unlinkedAt };
+  }
   const localBlob = JSON.parse(serialize());
 
   // Empty-over-full guard / scanner-pulls-first: a fresh empty device must never
@@ -1479,6 +1489,12 @@ async function syncOnce(store, key){
     if(res && res.ok){ applyWire(mergedBlob); return { ok:true, pushed:true, version:res.version, attempts:attempt+1 }; }
     // A peer's newer-than-us framing landed mid-CAS → bail, don't clobber it (#127).
     if(res && res.unreadable){ diag('sync-refuse-clobber', { wire:res.wire }); return { ok:false, degraded:true, reason:'peer-newer', wire:res.wire }; }
+    // The conflicting write is a mutual-unlink marker → bail (do NOT fold+repush, which would
+    // both ERASE the marker for the peer AND adopt it into our own state). Read here too, not
+    // just at the top: the racing writer is often the OTHER device's — or our own — unlink push.
+    if(res && res.blob && typeof res.blob.unlinkedAt==='number' && res.blob.unlinkedAt>0){
+      return { ok:true, unlinked:true, unlinkedAt:res.blob.unlinkedAt };
+    }
     // Someone wrote between our pull and push → fold their blob in and retry CAS.
     mergedBlob = mergeWire(mergedBlob, res && res.blob);
     // Adopt the server's reported version; keep the old expected if it's malformed
@@ -1565,6 +1581,8 @@ const SYNC_CFG_KEY = 'buddy.sync.v1';
 const SYNC_DEBOUNCE_MS = 3000;
 let syncStore=null, syncOwnerId=null, syncDisplayId=null, syncing=false, syncPending=false,
     syncLastAt=0, syncLastError=null, syncDebounce=null;
+let syncUnlinking=false;      // guards the brief window between stamping the unlink marker and teardown
+let syncPeerUnlinked=false;   // the OTHER device unlinked us — show the note until the next pairing
 // True while applyWire is adopting a pulled snapshot. render() ends with save(), and a
 // sync adoption calls render() — without this guard that save() re-arms scheduleSync,
 // which re-syncs, re-adopts, re-renders… an infinite push loop. Mirrors iOS applyingRemote.
@@ -1606,6 +1624,7 @@ async function initSync(){
   // show two different ids (the diagnostic crying wolf). Mirrors SyncIdentity.swift.
   syncDisplayId = (await deriveOwnerId(String(url).replace(/\/+$/,'').toLowerCase() + '|' + cfg.syncKey)).slice(0,6);
   diag('sync-owner', {bucket: syncOwnerId.slice(0,8)});   // which bucket THIS device talks to (split-brain forensics)
+  syncPeerUnlinked=false;   // a live link supersedes any prior "unlinked by your other device" note
   return true;
 }
 async function setSync(cfg){                        // Settings/pairing writes config here
@@ -1616,7 +1635,7 @@ async function setSync(cfg){                        // Settings/pairing writes c
 }
 let syncStartedAt = 0;
 async function syncNow(reason){
-  if(!syncStore || !syncOwnerId) return null;
+  if(!syncStore || !syncOwnerId || syncUnlinking) return null;   // don't process our own marker mid-unlink
   // NEVER sync mid-edit. A pass here would PUSH the half-typed text at the item's
   // unchanged v; after commit, pickItem's equal-v canonical tiebreak can then pick
   // the shorter stale echo over the finished text ("Thing" → "Thi", field report
@@ -1634,6 +1653,7 @@ async function syncNow(reason){
     do{
       syncPending = false;
       const res = await syncOnce(syncStore, syncOwnerId);   // pull → merge → CAS push → retry
+      if(res && res.unlinked){ if(!syncUnlinking) handlePeerUnlink(); return true; }   // peer dissolved the link → self-unlink (never on our OWN unlink)
       if(res && res.ok){ syncLastAt = Date.now(); syncLastError = null;
         diag('sync', {reason, pushed:!!res.pushed, noop:!!res.noop, pulled:!!res.pulled, v:res.version||0, attempts:res.attempts||0}); }
       else { syncLastError = (res && res.reason) || 'conflict'; diag(res&&res.degraded?'sync-degraded':'sync-conflict', {reason, peerWire:res&&res.wire}); }
@@ -1672,7 +1692,8 @@ function renderSyncUI(){
   const inPairing = !!cfg && syncShowQR && isValidSyncKey(raw.syncKey);
   const inSetup   = !cfg;
   const inLinked  = !!cfg && !inPairing;
-  if(!cfg) st.textContent='Off';
+  if(syncPeerUnlinked && !cfg) st.textContent='Unlinked by your other device — pair again to sync';
+  else if(!cfg) st.textContent='Off';
   else if(inPairing) st.textContent='Waiting for iPhone…';   // showing the QR — no device has joined yet, so NOT "Synced"
   else if(syncLastError==='peer-newer') st.textContent='Update needed'+bucket;   // a peer is on a newer format we can't read
   else if(syncLastError) st.textContent='Error'+bucket;
@@ -1702,6 +1723,7 @@ function renderSyncQR(payload){
 }
 async function syncConnectFromUI(){
   const err=$('#syncError'); if(err){ err.classList.add('hidden'); err.textContent=''; }
+  syncPeerUnlinked=false;   // a fresh pairing clears the "unlinked by your other device" note
   // Hosted build → the backend comes from config.js, resolved AT WRITE TIME so the
   // stored config (and therefore the QR + Resync) always has real url/key values —
   // a read-time fallback once put the literal string "undefined" in the QR.
@@ -1719,10 +1741,64 @@ async function syncConnectFromUI(){
   if(!ok){ if(err){ err.textContent=cloud?'Could not connect — try again in a moment.':'Could not connect — check the URL and anon key.'; err.classList.remove('hidden'); } return; }
   syncShowQR=true; renderSyncUI();
 }
-function syncUnlinkFromUI(){
+/* Stamp the shared bucket so the OTHER device self-unlinks on its next pass. One CAS push
+   of the current remote blob + an `unlinkedAt` marker (a plain top-level field the peer reads
+   BEFORE any merge, in syncOnce). Best-effort: if we're offline / the push conflicts, the peer
+   simply won't hear it and stays linked — surfaced honestly by the caller. */
+async function pushUnlinkMarker(){
+  if(!syncStore || !syncOwnerId) return false;
+  // RETRY on CAS conflict: a concurrent in-flight sync pass (1.5s poll / debounce) can bump the
+  // version between our pull and push. Without retry the marker would silently fail to land and
+  // the peer would never unlink. Re-pull the latest, re-stamp, re-push — the marker MUST land.
+  try{
+    for(let attempt=0; attempt<SYNC_MAX_RETRY; attempt++){
+      const remote = await syncStore.pull(syncOwnerId);
+      if(remote && remote.unreadable) return false;          // a newer-format peer row — don't clobber it
+      if(remote && remote.blob && remote.blob.unlinkedAt) return true;   // already stamped (peer/us) → done
+      const blob = (remote && remote.blob) ? remote.blob : JSON.parse(serialize());
+      blob.unlinkedAt = Date.now();
+      const res = await syncStore.push(syncOwnerId, blob, (remote && remote.version)||0, blobStats(blob));
+      if(res && res.ok){ diag('unlink-marker', { ok:true, attempts:attempt+1 }); return true; }
+      if(res && res.unreadable) return false;
+    }
+    diag('unlink-marker', { ok:false });
+    return false;
+  }catch(e){ diag('unlink-marker-failed', {err:String(e&&e.message).slice(0,80)}); return false; }
+}
+/* Local half of an unlink: drop the syncKey (NOT just enabled) so a reconnect is a fresh PAIR,
+   never a one-click return to a bucket that may still carry the unlink marker. Backend coords
+   (url/anon/cloud) are kept so re-pairing doesn't need them re-entered. */
+function clearSyncLink(){
   let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
-  raw.enabled=false; lsSet(SYNC_CFG_KEY, JSON.stringify(raw));   // keep the key so reconnect is one click
+  delete raw.syncKey; raw.enabled=false;
+  lsSet(SYNC_CFG_KEY, JSON.stringify(raw));
   syncStore=null; syncOwnerId=null; syncDisplayId=null; syncShowQR=false;
+  clearTimeout(syncDebounce); syncPending=false;
+}
+/* MUTUAL unlink (whale 2026-07-19): unlinking one device breaks the link for BOTH. We stamp the
+   bucket first (so the peer self-unlinks), THEN clear our own link. The `syncUnlinking` guard
+   stops a concurrent/pending pass from processing our own marker as a "peer unlinked us". */
+async function syncUnlinkFromUI(){
+  if(syncUnlinking) return;
+  syncUnlinking = true;
+  const err=$('#syncError'); if(err){ err.classList.add('hidden'); err.textContent=''; }
+  try{
+    const signalled = await pushUnlinkMarker();
+    clearSyncLink();
+    syncPeerUnlinked = false;
+    if(!signalled && err){                                   // couldn't reach the bucket — be honest
+      err.textContent='Unlinked here. Couldn’t reach your other device — unlink it there too.';
+      err.classList.remove('hidden');
+    }
+  } finally { syncUnlinking = false; renderSyncUI(); }
+}
+/* The OTHER device stamped the bucket → we self-unlink and tell the user. Called from syncNow
+   when a pass reports the marker. Idempotent (clearSyncLink nulls the store, so it won't re-fire). */
+function handlePeerUnlink(){
+  if(!syncStore) return;   // WE already unlinked (our own in-flight pass saw our marker) → no false note
+  diag('peer-unlinked', {});
+  clearSyncLink();
+  syncPeerUnlinked = true;
   renderSyncUI();
 }
 async function syncResyncFromUI(){
@@ -3758,6 +3834,8 @@ window.__buddy = {
   eraseAll,                                  // sync step 2: erase + stamp erasedAt (merge barrier)
   syncOnce, makeFakeCASStore, makeSupabaseCASStore,   // sync step 5: CAS loop + reference + live store
   setSync, syncNow, syncConfigured, isValidSyncKey,   // auto-sync engine (opt-in)
+  syncUnlink: syncUnlinkFromUI,                        // mutual unlink (harness + two-device test)
+  get syncPeerUnlinked(){ return syncPeerUnlinked; },  // did the peer dissolve our link?
   generateSyncKey, deriveOwnerId, pairingPayload, parsePairingPayload,   // QR pairing core
   deriveBlobKey, encryptBlob, decryptBlob, isEncryptedBlob, makeEncryptedStore, blobStats,  // E2E crypto
 
@@ -4543,6 +4621,41 @@ window.__buddy = {
       const einner=makeFakeCASStore({key:'k', blob:{today:{date:'2026-07-14',items:[]}}, version:2});
       const ee=makeEncryptedStore(einner, bk);
       ok('erase removes the cloud row', (await ee.erase('k'))===true && (await ee.pull('k')).version===0);
+
+      // 14. MUTUAL UNLINK: a bucket stamped with `unlinkedAt` makes the peer's pass report
+      // `unlinked` — read BEFORE any merge, and it must NOT push/clobber the marker away.
+      const ulStore=makeFakeCASStore({key:'k', version:5, blob:{version:1, savedAt:1000,
+        today:{date:'2026-06-19',items:[{id:'keep',text:'keep',state:'neutral',v:1}]},
+        history:[], deferred:[], settings:state.settings, tombstones:{}, erasedAt:null, unlinkedAt:1750000000000}});
+      setLocal([{id:'mine',text:'mine',state:'neutral',v:1}]);
+      const ulRes=await syncOnce(ulStore,'k');
+      ok('mutual unlink: peer pass reports { unlinked:true }', ulRes && ulRes.unlinked===true, JSON.stringify(ulRes));
+      ok('mutual unlink: the marker is NOT clobbered (no push over it)',
+         ulStore._rows()['k'].version===5 && ulStore._rows()['k'].blob.unlinkedAt===1750000000000,
+         'v='+ulStore._rows()['k'].version);
+      // A normal (un-stamped) bucket is unaffected — no false unlink.
+      const okStore=makeFakeCASStore({key:'k', version:2, blob:{version:1, savedAt:1000,
+        today:{date:'2026-06-19',items:[{id:'x',text:'x',state:'neutral',v:1}]}, history:[], deferred:[], settings:state.settings, tombstones:{}, erasedAt:null}});
+      setLocal([{id:'x',text:'x',state:'neutral',v:1}]);
+      const okRes=await syncOnce(okStore,'k');
+      ok('no false unlink on a normal bucket', !(okRes && okRes.unlinked));
+
+      // 15. CONCURRENT unlink race (adversarial finding 2026-07-19): a pass is mid-CAS when the
+      // peer stamps the bucket. The conflict MUST be read as "unlinked" — NOT folded + repushed
+      // (which would ERASE the marker for the peer AND adopt it into our own state forever).
+      let rstore=makeFakeCASStore();
+      setLocal([{id:'p',text:'mine',state:'neutral',v:1}]); await syncOnce(rstore,'k');   // server: p @ v1
+      let firedU=false;
+      const markerBlob=JSON.parse(JSON.stringify({version:1,savedAt:Date.now(),
+        today:{date:'2026-06-19',items:[{id:'p',text:'mine',state:'neutral',v:1}]},
+        history:[],deferred:[],settings:state.settings,pinned:false,tombstones:{},erasedAt:null,unlinkedAt:1750000000000}));
+      const racyU={ pull:rstore.pull, _rows:rstore._rows,
+        push:async(key,blob,exp)=>{ if(!firedU){ firedU=true; await rstore.push(key, markerBlob, 1); } return rstore.push(key,blob,exp); } };
+      setLocal([{id:'p',text:'mine',state:'neutral',v:1},{id:'r',text:'late-add',state:'neutral',v:1}]);
+      const rres=await syncOnce(racyU,'k');
+      ok('concurrent pass reads a mid-CAS unlink marker as unlinked (no fold+repush)', rres && rres.unlinked===true, JSON.stringify(rres));
+      ok('the marker is preserved on the server, not clobbered', rstore._rows()['k'].blob.unlinkedAt===1750000000000);
+      ok('the marker never leaks into our own local state', JSON.parse(serialize()).unlinkedAt===undefined);
     }catch(e){ ok('syncTest ran without throwing', false, e&&(e.message+' @ '+(e.stack||'').split('\n')[1])); }
     state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
     state.tombstones=snap.tombstones||{}; state.erasedAt=(typeof snap.erasedAt==='number')?snap.erasedAt:null;
