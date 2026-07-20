@@ -81,8 +81,9 @@ await window.__buddy.smokeTest()   // → { ok: true, ... } means core flows pas
 ```
 
 It asserts: add focuses the new task, edit focuses the task text, completing marks
-done + drops the red count, undo restores, and rows don't reuse `data-tid`. If
-`ok` is false, fix before building. (This exists because a render change once gave
+done + drops the red count, undo restores, rows don't reuse `data-tid`, and **lvl2
+done text adapts to light** (the red-bg legibility guard). If `ok` is false, fix
+before building. (This exists because a render change once gave
 the row and its text the same `data-tid`, which broke add/edit focus.)
 
 ## Building a release (each new version)

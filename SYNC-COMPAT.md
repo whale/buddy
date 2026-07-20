@@ -185,10 +185,25 @@ version:
 {
   "schema": 1,                     // DATA-schema version — what migrate() switches on.
   "savedAt": 0,
-  "today": { }, "history": [ ], "deferred": [ ], "tombstones": { }
+  "today": { }, "history": [ ], "deferred": [ ], "tombstones": { },
+  "syncNotice": { "combined": 9, "moved": 3, "dismissed": false },
+                                   // KNOWN_WIRE_KEY. The "N tasks moved to Future on sync"
+                                   //   banner: merged via pickNotice, part of blobContentKey
+                                   //   (so a dismiss syncs). Normal mergeable app state.
+  "unlinkedAt": 0                  // RESERVED transport marker (mutual unlink). Read RAW in
+                                   //   syncOnce BEFORE any merge → bail as `unlinked`; NEVER
+                                   //   merged or adopted. In Mac's DROP_WIRE_KEYS so it can't
+                                   //   ride `extras` into local state (a leak = a permanent
+                                   //   self-unlink loop). iOS merge() omits it from output. It
+                                   //   is INSIDE the ciphertext (GCM-authenticated) — the
+                                   //   server can't forge it, only replay/withhold the whole row.
   // unknown top-level keys still spread through (the additive KNOWN_WIRE_KEYS rule)
 }
 ```
+
+**Reserved keys, do not repurpose:** `unlinkedAt` (mutual-unlink signal) must never be
+merged or added to `KNOWN_WIRE_KEYS`; a future wire change touching the data blob must
+keep it a read-raw-then-bail marker. `syncNotice` is a normal merged key.
 
 **Why each piece:** cleartext header ⇒ triage before decrypt works even with no
 key (and the server can enforce a floor); AAD ⇒ no downgrade attack; `minReader`
