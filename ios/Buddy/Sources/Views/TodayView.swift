@@ -36,8 +36,10 @@ struct TodayView: View {
     // Adaptive row fitting (see RowFit) — recomputed when the list or its size changes.
     @State private var fit = RowFit.Result(font: 24, vpad: 16, scroll: false)
 
-    // Celebration overlay
-    @State private var showCelebration = false
+    // Celebration overlay. Bumped on each completion; the always-mounted CelebrationView keys its
+    // fresh instance off this tick. A conditionally-INSERTED TimelineView(.animation) never started
+    // its clock when a flag flipped outside .task, so real (async) completions produced no burst.
+    @State private var celebrationTick = 0
     @State private var celebrationAnchor: CGPoint? = nil   // quiet-pop origin (completed row's ✓)
     @State private var rowFrames: [String: CGRect] = [:]   // active-row frames, global coords
 
@@ -141,11 +143,11 @@ struct TodayView: View {
             .onChange(of: editorMaxY) { _, _ in updateKeyboardLift() }
             .onChange(of: editingId) { _, _ in updateKeyboardLift() }
 
-            if showCelebration {
-                CelebrationView(intensity: store.settings.celebrate, anchor: celebrationAnchor) { showCelebration = false }
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-            }
+            // ALWAYS mounted (never behind an `if`) — trigger-driven so a real completion's async
+            // toggle reliably fires the burst. See CelebrationView for why.
+            CelebrationView(trigger: celebrationTick, intensity: store.settings.celebrate, anchor: celebrationAnchor)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
         }
         .fullScreenCover(isPresented: $showMorning) {
             MorningView(store: store, onDone: { showMorning = false })
@@ -158,7 +160,14 @@ struct TodayView: View {
             // OR-merge across sync). Re-enable by restoring the gate below.
             // showMorning = forceMorning || store.needsMorning
             showMorning = forceMorning
-            if forceCelebration { showCelebration = true }
+            if forceCelebration { celebrationTick += 1 }
+            #if DEBUG
+            // Exercise the REAL completion path (anchor from the row frame, withAnimation) so a
+            // screenshot captures what a genuine celebration looks like — not the forced shortcut.
+            if ScreenshotHarness.activeFixture == "celebration-real", let first = store.activeTasks.first {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { handleComplete(task: first) }
+            }
+            #endif
             #if DEBUG
             if ScreenshotHarness.activeFixture == nil { weather.refresh() }   // no network under a fixture (deterministic shots)
             #else
@@ -393,7 +402,7 @@ struct TodayView: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("boss-move")
         }
-        .padding(.horizontal, 20).padding(.vertical, 12)
+        .padding(.horizontal, 32).padding(.vertical, 12)   // match the task rows' 32pt gutter (was 20 → too far left)
         .frame(maxWidth: .infinity)
     }
 
@@ -578,8 +587,11 @@ struct TodayView: View {
         }
         let didComplete = withAnimation(.easeOut(duration: 0.3)) { store.complete(task) }
         // celebrate == 0 is the QUIET POP, not silence — never gate it off here.
+        // Present the overlay OUTSIDE the completion's animation transaction: coalescing the
+        // insert into the list's re-layout animation swallowed the burst entirely (it never
+        // rendered on a real completion — only the forced fixture, which sets it plainly, did).
         if didComplete {
-            withAnimation { showCelebration = true }
+            celebrationTick += 1
         }
     }
 

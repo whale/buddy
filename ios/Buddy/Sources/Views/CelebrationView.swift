@@ -11,18 +11,25 @@ import UIKit
 // the completed row's checkmark, fading in fast and out slow.
 // intensity 1…100 → the burst: count and emoji variety scale with intensity.
 struct CelebrationView: View {
+    let trigger: Int                // bump to fire a fresh celebration; 0 = idle (nothing shown)
     let intensity: Int              // 0–100 (settings.celebrate)
     var anchor: CGPoint? = nil      // quiet-pop origin (the row's ✓), screen coords
-    var onFinish: () -> Void = {}
 
     var body: some View {
+        // ALWAYS mounted (never behind an `if`), driven by `trigger`. A conditionally-INSERTED
+        // TimelineView(.animation) never starts its clock when the flag flips outside `.task` — so
+        // a real (async) completion produced no burst. Keeping the host mounted and swapping the
+        // child by `.id(trigger)` fires a fresh instance's onAppear/launch every time. (whale 2026-07-20)
         Group {
-            if intensity <= 0 {
-                QuietPop(anchor: anchor, onFinish: onFinish)
-            } else {
-                PhysicsBurst(intensity: intensity, onFinish: onFinish)
+            if trigger > 0 {
+                if intensity <= 0 {
+                    QuietPop(anchor: anchor)
+                } else {
+                    PhysicsBurst(intensity: intensity)
+                }
             }
         }
+        .id(trigger)
         .allowsHitTesting(false)
     }
 }
@@ -47,7 +54,6 @@ enum CelebPhysics {
 // MARK: - The burst
 private struct PhysicsBurst: View {
     let intensity: Int
-    var onFinish: () -> Void
 
     private struct P {
         let glyph: String
@@ -59,10 +65,18 @@ private struct PhysicsBurst: View {
     }
     @State private var parts: [P] = []
     @State private var start = Date()
+    @State private var done = false
 
     var body: some View {
-        GeometryReader { geo in
-            TimelineView(.animation) { tl in
+        // A stable always-mounted host (Color.clear) fires onAppear → launch() populates `parts`.
+        // The TimelineView is gated on `!parts.isEmpty` so it's CREATED in the re-render caused by
+        // that populate — which is what makes it actually tick. Rendered before parts exists (or with
+        // .animation) it silently never ran when the view was created via an async completion.
+        ZStack {
+            Color.clear
+            if !done, !parts.isEmpty {
+            GeometryReader { geo in
+            TimelineView(.periodic(from: .now, by: 1.0 / 120.0)) { tl in
                 Canvas { ctx, _ in
                     let t0 = tl.date.timeIntervalSince(start)
                     let k = CelebPhysics.drag, g = CelebPhysics.gravity
@@ -83,6 +97,8 @@ private struct PhysicsBurst: View {
                         glyph.draw(Text(p.glyph).font(.system(size: p.size)), at: .zero)
                     }
                 }
+            }
+            }
             }
         }
         .ignoresSafeArea()
@@ -112,7 +128,7 @@ private struct PhysicsBurst: View {
                      fadeAt: life * .random(in: 0.55...0.90))
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + CelebPhysics.life + CelebPhysics.stagger + 0.3) {
-            onFinish()
+            done = true          // stop the TimelineView + free the canvas once the burst is spent
         }
     }
 }
@@ -120,17 +136,23 @@ private struct PhysicsBurst: View {
 // MARK: - The quiet pop (minimum celebration)
 private struct QuietPop: View {
     let anchor: CGPoint?
-    var onFinish: () -> Void
 
     // Randomized without repeats across pops (matches the Mac's quietLastHand).
     private static var lastHand = -1
     @State private var glyph = "👍"
     @State private var drift: Double = 0
     @State private var start = Date()
+    @State private var done = false
+    @State private var launched = false
 
     var body: some View {
-        GeometryReader { geo in
-            TimelineView(.animation) { tl in
+        // Same pattern as PhysicsBurst: gate the TimelineView on `launched` (set in onAppear) so it
+        // is created in the re-render that follows — otherwise it never ticks on an async completion.
+        ZStack {
+            Color.clear
+            if launched, !done {
+            GeometryReader { geo in
+            TimelineView(.periodic(from: .now, by: 1.0 / 120.0)) { tl in
                 let u = min(1, max(0, tl.date.timeIntervalSince(start) / CelebPhysics.quietDur))
                 let eased = 1 - pow(1 - u, 4)          // ≈ the Mac's cubic-bezier(0.23,1,0.32,1)
                 let inEnd = CelebPhysics.quietInPct
@@ -142,16 +164,19 @@ private struct QuietPop: View {
                     .position(x: origin.x + drift * eased,
                               y: origin.y - CelebPhysics.quietSize - CelebPhysics.quietRise * eased)
             }
+            }
+            }
         }
         .ignoresSafeArea()
         .onAppear {
-            var i: Int
-            repeat { i = Int.random(in: 0..<CelebPhysics.hands.count) } while i == Self.lastHand
-            Self.lastHand = i
-            glyph = CelebPhysics.hands[i]
-            drift = .random(in: -CelebPhysics.quietDrift...CelebPhysics.quietDrift)
-            start = Date()
-            DispatchQueue.main.asyncAfter(deadline: .now() + CelebPhysics.quietDur + 0.1) { onFinish() }
+                var i: Int
+                repeat { i = Int.random(in: 0..<CelebPhysics.hands.count) } while i == Self.lastHand
+                Self.lastHand = i
+                glyph = CelebPhysics.hands[i]
+                drift = .random(in: -CelebPhysics.quietDrift...CelebPhysics.quietDrift)
+                start = Date()
+                launched = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + CelebPhysics.quietDur + 0.1) { done = true }
         }
     }
 }
@@ -160,12 +185,12 @@ private struct QuietPop: View {
 #Preview("Burst") {
     ZStack {
         Color.white.ignoresSafeArea()
-        CelebrationView(intensity: 100)
+        CelebrationView(trigger: 1, intensity: 100)
     }
 }
 #Preview("Quiet pop") {
     ZStack {
         Color.white.ignoresSafeArea()
-        CelebrationView(intensity: 0, anchor: CGPoint(x: 340, y: 400))
+        CelebrationView(trigger: 1, intensity: 0, anchor: CGPoint(x: 340, y: 400))
     }
 }
