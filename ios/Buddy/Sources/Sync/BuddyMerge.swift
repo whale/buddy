@@ -43,9 +43,27 @@ struct SyncSnapshot {
     var tombstones: [String: Double]
     var erasedAt: Double?
     var savedAt: Double
+    // A sync moved N over-cap tasks to Future — a dismissible, SYNCED notice (mirrors the
+    // Mac's state.syncNotice). Nil when nothing was moved / it was dismissed on both sides.
+    var syncNotice: SyncNotice? = nil
     // Unknown top-level wire fields (the Mac's doneWordBag/pinned/restartStash and any
     // future peer's additions) — pass through merge/adopt/persist untouched.
     var extras: [String: JSONValue] = [:]
+}
+
+/// The "N tasks moved to Future on sync" banner state — synced so a dismiss on one device
+/// clears it on the other. Byte-parallel to the Mac's `{combined,moved,dismissed}`.
+struct SyncNotice: Codable, Equatable {
+    var combined: Int
+    var moved: Int
+    var dismissed: Bool
+    /// Integers ≥0, and nil when nothing was moved — the same rule the Mac's sanitizeNotice uses.
+    static func sanitized(_ n: SyncNotice?) -> SyncNotice? {
+        guard let n = n else { return nil }
+        let moved = Swift.max(0, n.moved)
+        if moved <= 0 { return nil }
+        return SyncNotice(combined: Swift.max(moved, n.combined), moved: moved, dismissed: n.dismissed)
+    }
 }
 
 enum BuddyMerge {
@@ -72,11 +90,14 @@ enum BuddyMerge {
 
         var today: TodayState?
         var carryHistory: [Day] = []
+        var overflowItems: [BuddyTask] = []
         if let ta = va.today, let tb = vb.today, ta.date == tb.date {
             let newerT = newer.today!, olderT = older.today!
+            let clamped = clampActive(mergeItems(newerT.items, olderT.items, tombstones))
+            overflowItems = clamped.overflow
             today = TodayState(
                 date: ta.date,
-                items: clampActiveItems(mergeItems(newerT.items, olderT.items, tombstones)),
+                items: clamped.kept,
                 morningDone: ta.morningDone || tb.morningDone,     // OR-wins, mirrors the Mac
                 extras: olderT.extras.merging(newerT.extras) { _, n in n }   // unknown today-level fields ride through
             )
@@ -102,6 +123,27 @@ enum BuddyMerge {
 
         // Deferred: union keyed by id, conflicts resolved by per-row v (send/unsend bump it).
         var deferred = mergeDeferred(newer.deferred, older.deferred, tombstones)
+        // Overflow relocation: active tasks that lost their slot in the cap fight get PARKED in
+        // Future (wake:"" = undated) instead of deleted (whale 2026-07-19). Reuse the item's own
+        // id so BOTH devices relocate the identical row; the invariant below keeps it out of
+        // active. Byte-parallel to the Mac's merge().
+        var movedCount = 0   // rows ACTUALLY relocated this merge — an overflow item already parked
+                             // on the peer is skipped, so it must NOT inflate the notice's count.
+        if !overflowItems.isEmpty {
+            var have = Set(deferred.map { $0.id })
+            for it in overflowItems where !it.id.isEmpty && tombstones[it.id] == nil && !have.contains(it.id) {
+                deferred.append(DeferredTask(id: it.id, text: it.text, wake: "", v: it.v < 1 ? 1 : it.v))
+                have.insert(it.id)
+                movedCount += 1
+            }
+        }
+        // INVARIANT — an id parked in Future is NOT also active. In the window where one device
+        // has relocated an overflow row while the peer still holds it active, the union carries
+        // it in BOTH lists; Future wins so it can't pop back onto the full list and re-overflow.
+        if today != nil {
+            let parked = Set(deferred.map { $0.id })
+            today!.items = today!.items.filter { !parked.contains($0.id) }
+        }
         // Reconcile "Sent to today!" rows whose linked Today copy did not survive the merge
         // (deduped, capped, or unsent-with-tombstone on the other device): a sent row without
         // its live counterpart is a lie — flip it back to a plain, sendable row. Runs LAST so
@@ -133,6 +175,16 @@ enum BuddyMerge {
             return bestByTitle[key]?.id == d.id
         }
 
+        // Sync notice: only a merge that ACTUALLY relocated a task (movedCount>0) writes a fresh
+        // notice; otherwise carry the peers' notice forward, keeping a dismiss sticky. Counts are
+        // TRUTHFUL: keptActiveCount is read AFTER the invariant filter, moved = rows actually moved.
+        // Both devices compute identical counts (same merged input) → converge. Mirrors the Mac.
+        let keptActiveCount = (today?.items ?? []).filter { !$0.isDone }.count
+        var syncNotice = pickNotice(va.syncNotice, vb.syncNotice)
+        if movedCount > 0 {
+            syncNotice = SyncNotice(combined: keptActiveCount + movedCount, moved: movedCount, dismissed: false)
+        }
+
         return SyncSnapshot(
             today: today,
             history: mergeHistory(va.history + carryHistory, vb.history),
@@ -141,6 +193,7 @@ enum BuddyMerge {
             tombstones: tombstones,
             erasedAt: erasedAt,
             savedAt: max(a.savedAt, b.savedAt),
+            syncNotice: SyncNotice.sanitized(syncNotice),
             extras: older.extras.merging(newer.extras) { _, n in n }   // union; newer wins per key
         )
     }
@@ -179,27 +232,64 @@ enum BuddyMerge {
         return CanonicalJSON.lessOrEqual(BuddySync.ckDef(x), BuddySync.ckDef(y)) ? x : y
     }
 
+    /// Which device MINTED an id? Mac uses lowercase UUIDs; iOS uses UUID().uuidString, which
+    /// is UPPERCASE. Any uppercase letter ⇒ iPhone-minted. Lets merge give Mac tasks slot
+    /// priority when the union exceeds the cap — deterministically from the id, not "which
+    /// device am I". Mirrors the Mac's `idIsIos`.
+    /// Parity note: the Mac uses ASCII `/[A-Z]/`; this uses Unicode `.uppercaseLetters`. Every id
+    /// the app mints is ASCII (UUID / `n<base36>` / `h-…`), so the two never disagree. Only a
+    /// non-ASCII-uppercase id (e.g. Greek/Cyrillic) would diverge — not reachable, since ids are
+    /// never user text. Keep them matched if id minting ever changes.
+    static func idIsIos(_ id: String) -> Bool {
+        id.rangeOfCharacter(from: .uppercaseLetters) != nil
+    }
+
     /// After a cross-device merge the UNION of both devices' active tasks can exceed the
-    /// 6-task cap and carry same-title duplicates (each device minted its own id, so
-    /// `mergeItems` keeps both). `hardCap` is only enforced on manual Add, never on merge —
-    /// so re-clamp here: keep every done item, drop same-title active dupes, cap active tasks
-    /// at `hardCap`. Order preserved (primary = newer save first → newer device's dup wins).
-    /// Deterministic → both devices converge on the same clamped list, no ping-pong.
-    /// Mirrors the Mac's `clampActiveItems` in dist/index.html.
-    static func clampActiveItems(_ items: [BuddyTask]) -> [BuddyTask] {
+    /// 6-task cap and carry same-title dupes (each device minted its own id). Returns
+    /// (kept, overflow): done items always kept; same-title dupes dropped; active over the cap
+    /// become OVERFLOW — the caller relocates these to Future instead of DELETING them, so a
+    /// task never silently vanishes on sync (whale 2026-07-19). Slot priority: Mac-minted
+    /// (lowercase id) keeps its slot, iPhone-minted (uppercase id) overflows first, last-first
+    /// within a device. Deterministic on the SAME merged input → both devices converge.
+    /// Byte-parallel to the Mac's `clampActive`.
+    static func clampActive(_ items: [BuddyTask]) -> (kept: [BuddyTask], overflow: [BuddyTask]) {
         var seenTitles = Set<String>()
-        var active = 0
-        var out = [BuddyTask]()
-        for it in items {
-            if it.isDone { out.append(it); continue }   // done work never counts against the cap
+        var activeIdx = [Int]()
+        var dropDup = Set<Int>()
+        for (i, it) in items.enumerated() {
+            if it.isDone { continue }                    // done handled below (always kept)
             let title = it.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            if !title.isEmpty && seenTitles.contains(title) { continue }   // same-title dup → drop
-            if active >= BuddyStore.hardCap { continue }                   // past the cap → drop overflow
+            if !title.isEmpty && seenTitles.contains(title) { dropDup.insert(i); continue }
             if !title.isEmpty { seenTitles.insert(title) }
-            active += 1
-            out.append(it)
+            activeIdx.append(i)
         }
-        return out
+        var overflowSet = Set<Int>()
+        if activeIdx.count > BuddyStore.hardCap {
+            var excess = activeIdx.count - BuddyStore.hardCap
+            // iPhone-origin last-first, then (defensively) Mac-origin last-first.
+            let ios = activeIdx.filter { idIsIos(items[$0].id) }.reversed()
+            let mac = activeIdx.filter { !idIsIos(items[$0].id) }.reversed()
+            for i in Array(ios) + Array(mac) {
+                if excess <= 0 { break }
+                overflowSet.insert(i); excess -= 1
+            }
+        }
+        var kept = [BuddyTask](), overflow = [BuddyTask]()
+        for (i, it) in items.enumerated() {
+            if dropDup.contains(i) { continue }
+            if overflowSet.contains(i) { overflow.append(it) } else { kept.append(it) }
+        }
+        return (kept, overflow)
+    }
+
+    /// Merge two sync notices → one. Deterministic + symmetric: higher (combined, then moved)
+    /// count is the base; dismissed is sticky. Mirrors the Mac's `pickNotice`.
+    static func pickNotice(_ a: SyncNotice?, _ b: SyncNotice?) -> SyncNotice? {
+        guard let a = a else { return b }
+        guard let b = b else { return a }
+        let base: SyncNotice = a.combined != b.combined ? (a.combined > b.combined ? a : b)
+            : (a.moved != b.moved ? (a.moved > b.moved ? a : b) : a)
+        return SyncNotice(combined: base.combined, moved: base.moved, dismissed: a.dismissed || b.dismissed)
     }
 
     static func mergeItems(_ primary: [BuddyTask], _ secondary: [BuddyTask],
@@ -339,6 +429,7 @@ enum BuddyMerge {
         if var t = c.today { t.items = []; c.today = t }   // keep date/morningDone/extras (mirrors {...src.today, items:[]})
         c.history = []
         c.deferred = []
+        c.syncNotice = nil
         return c
     }
 }

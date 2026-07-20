@@ -95,12 +95,18 @@ enum BuddySync {
             "celebrate": b.settings.map { .int(Int64($0.celebrate)) } ?? .null,
             "reserveSpace": .bool(b.settings?.reserveSpace ?? false),
         ]
+        // syncNotice is IN the key so a dismiss / fresh overflow is a real change → it syncs.
+        let n = SyncNotice.sanitized(b.syncNotice)
+        let notice: JSONValue = n.map { .object([
+            "c": .int(Int64($0.combined)), "mv": .int(Int64($0.moved)), "x": .bool($0.dismissed),
+        ]) } ?? .null
         return CanonicalJSON.canonical(.object([
             "td": b.today.map { .string($0.date) } ?? .null,
             "m": .bool(b.today?.morningDone ?? false),
             "t": .array(items), "h": .array(hist), "d": .array(defs),
             "tomb": .object(tomb),
             "e": b.erasedAt.map { .number($0 * msFactor) } ?? .null,
+            "n": notice,
             "s": .object(s),
         ]))
     }
@@ -351,6 +357,7 @@ struct SyncWire: Codable {
     var settings: BuddySettings?
     var tombstones: [String: Double]    // id → epoch ms
     var erasedAt: Double?               // epoch ms
+    var syncNotice: SyncNotice?         // "N tasks moved to Future" banner (synced, dismissible)
     var extras: [String: JSONValue] = [:]   // doneWordBag / pinned / restartStash / future fields
 
     // Tolerant decode: a missing key must NEVER throw and kill a sync pass. Swift's
@@ -361,9 +368,9 @@ struct SyncWire: Codable {
     // (mirrors the Mac's DROP_WIRE_KEYS).
     static let knownKeys: Set<String> = ["version", "savedAt", "today", "history",
                                          "deferred", "settings", "tombstones", "erasedAt",
-                                         "enc", "iv", "ct"]
+                                         "syncNotice", "enc", "iv", "ct"]
     private enum CodingKeys: String, CodingKey {
-        case version, savedAt, today, history, deferred, settings, tombstones, erasedAt
+        case version, savedAt, today, history, deferred, settings, tombstones, erasedAt, syncNotice
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -375,6 +382,7 @@ struct SyncWire: Codable {
         settings   = (try? c.decodeIfPresent(BuddySettings.self, forKey: .settings)) ?? nil
         tombstones = (try? c.decodeIfPresent([String: Double].self, forKey: .tombstones)) ?? [:]
         erasedAt   = (try? c.decodeIfPresent(Double.self, forKey: .erasedAt)) ?? nil
+        syncNotice = SyncNotice.sanitized((try? c.decodeIfPresent(SyncNotice.self, forKey: .syncNotice)) ?? nil)
         extras     = decodeExtras(from: decoder, known: Self.knownKeys)
     }
     // Extras first, known keys win — mirrors the Mac's `{ ...(state.extras||{}), version:1, … }`.
@@ -390,6 +398,7 @@ struct SyncWire: Codable {
         try c.encodeIfPresent(settings, forKey: .settings)
         try c.encode(tombstones, forKey: .tombstones)
         try c.encodeIfPresent(erasedAt, forKey: .erasedAt)
+        try c.encodeIfPresent(SyncNotice.sanitized(syncNotice), forKey: .syncNotice)
     }
 
     // snapshot (seconds) → wire (ms)
@@ -411,6 +420,7 @@ struct SyncWire: Codable {
         settings = s.settings
         tombstones = s.tombstones.mapValues { $0 * MS }
         erasedAt = s.erasedAt.map { $0 * MS }
+        syncNotice = SyncNotice.sanitized(s.syncNotice)   // counts, not timestamps — no ms conversion
         extras = s.extras
     }
 
@@ -434,6 +444,7 @@ struct SyncWire: Codable {
             tombstones: tombstones.mapValues { $0 / MS },
             erasedAt: erasedAt.map { $0 / MS },
             savedAt: savedAt / MS,
+            syncNotice: SyncNotice.sanitized(syncNotice),
             extras: extras
         )
     }

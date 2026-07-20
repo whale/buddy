@@ -205,13 +205,13 @@ final class Slice2MergeTests: XCTestCase {
             savedAt: 1_750_000_123.456,
             extras: ["pinned": .bool(true), "restartStash": .object(["texts": .array([.string("x")]), "date": .string("2026-06-20")])]
         )
-        let expected = #"{"d":[{"id":"d1","text":"plain","wake":""},{"id":"d2","sent":true,"sentTid":"m1","text":"later","wake":"2026-06-25"}],"e":null,"h":[{"date":"2026-06-20","items":[{"done":true,"id":"h-2026-06-20-0","text":"yesterday"}],"weekday":"Friday"},{"date":"2026-06-19","items":[{"done":false,"id":"h-2026-06-19-0","text":"old"}],"weekday":""}],"m":true,"s":{"celebrate":80,"reserveSpace":false},"t":[{"id":"m1","state":"neutral","text":"alpha \"quoted\"\nline","v":1},{"doneAt":1750000005000,"id":"m2","state":"done","text":"done ✓","v":2}],"td":"2026-06-21","tomb":{"gone":1750000004000}}"#
+        let expected = #"{"d":[{"id":"d1","text":"plain","wake":""},{"id":"d2","sent":true,"sentTid":"m1","text":"later","wake":"2026-06-25"}],"e":null,"h":[{"date":"2026-06-20","items":[{"done":true,"id":"h-2026-06-20-0","text":"yesterday"}],"weekday":"Friday"},{"date":"2026-06-19","items":[{"done":false,"id":"h-2026-06-19-0","text":"old"}],"weekday":""}],"m":true,"n":null,"s":{"celebrate":80,"reserveSpace":false},"t":[{"id":"m1","state":"neutral","text":"alpha \"quoted\"\nline","v":1},{"doneAt":1750000005000,"id":"m2","state":"done","text":"done ✓","v":2}],"td":"2026-06-21","tomb":{"gone":1750000004000}}"#
         XCTAssertEqual(BuddySync.contentKey(s), expected)
 
         // Minimal blob with NO settings → the Mac renders celebrate as null.
         let empty = snap(today: TodayState(date: "2026-06-21", items: []), settings: nil, savedAt: 0)
         XCTAssertEqual(BuddySync.contentKey(empty),
-                       #"{"d":[],"e":null,"h":[],"m":false,"s":{"celebrate":null,"reserveSpace":false},"t":[],"td":"2026-06-21","tomb":{}}"#)
+                       #"{"d":[],"e":null,"h":[],"m":false,"n":null,"s":{"celebrate":null,"reserveSpace":false},"t":[],"td":"2026-06-21","tomb":{}}"#)
     }
 
     // MARK: - histId natural sort (h-<date>-<i>): numeric index order past 9; foreign ids last.

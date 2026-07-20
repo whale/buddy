@@ -23,6 +23,9 @@ final class BuddyStore {
     // --- sync merge foundation (step 2, no network yet) ---
     var tombstones: [String: Double] = [:]  // { itemId: deletedAt } — deletes persist across a merge
     var erasedAt: Double? = nil             // "erase all" barrier so a real wipe wins over stale pushes
+    // "N tasks moved to Future on sync" banner — synced + dismissible (mirrors the Mac's
+    // state.syncNotice). Set by a merge that relocated over-cap tasks; cleared on dismiss.
+    var syncNotice: SyncNotice? = nil
     // Unknown top-level wire fields from a newer peer (the Mac's doneWordBag / pinned /
     // restartStash, future additions) — persisted + merged + pushed back untouched.
     var extras: [String: JSONValue] = [:]
@@ -292,7 +295,16 @@ final class BuddyStore {
     func snapshot() -> SyncSnapshot {
         SyncSnapshot(today: today, history: history, deferred: deferred, settings: settings,
                      tombstones: tombstones, erasedAt: erasedAt, savedAt: lastMutatedAt,
-                     extras: extras)
+                     syncNotice: SyncNotice.sanitized(syncNotice), extras: extras)
+    }
+
+    /// Dismiss the "moved to Future" banner. A user mutation → bumps lastMutatedAt so the
+    /// dismissed flag wins the merge and clears on the other device too (mirrors the Mac).
+    func dismissSyncNotice() {
+        guard var n = SyncNotice.sanitized(syncNotice) else { return }
+        n.dismissed = true
+        syncNotice = n
+        scheduleSave(immediate: true)
     }
 
     /// Replace local state from a merged snapshot (the result of a pull+merge). Persists directly
@@ -309,6 +321,7 @@ final class BuddyStore {
         if let s = merged.settings { settings = s }
         tombstones = merged.tombstones
         erasedAt   = merged.erasedAt
+        syncNotice = SyncNotice.sanitized(merged.syncNotice)
         extras     = merged.extras
         lastMutatedAt = merged.savedAt       // adopt the merged max — adopting must NOT claim newer
         saveToDisk()                         // persist without going through scheduleSave/dirty
@@ -432,6 +445,7 @@ final class BuddyStore {
             settings: settings,
             tombstones: tombstones,
             erasedAt: erasedAt,
+            syncNotice: SyncNotice.sanitized(syncNotice),
             extras: extras
         )
         do {
@@ -475,6 +489,7 @@ final class BuddyStore {
         settings = blob.settings ?? .default
         tombstones = blob.tombstones ?? [:]
         erasedAt   = blob.erasedAt
+        syncNotice = SyncNotice.sanitized(blob.syncNotice)
         extras     = blob.extras ?? [:]
         lastMutatedAt = blob.savedAt          // restore the "last user mutation" stamp
         return true
@@ -511,6 +526,7 @@ private struct PersistedBlob: Codable {
     var settings: BuddySettings?
     var tombstones: [String: Double]?
     var erasedAt: Double?
+    var syncNotice: SyncNotice?
     // Unknown top-level wire fields (version-skew pass-through). Local-only file, so a
     // plain nested key is fine here — the wire spreads them at the top level instead.
     var extras: [String: JSONValue]?
