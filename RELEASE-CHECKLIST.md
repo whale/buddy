@@ -68,7 +68,9 @@ every interactive state (rest / hover / focus / done).
 
 - [ ] `pnpm sync:doctor` — all containers on ONE bucket, version sane.
 - [ ] Settings on both devices show the SAME bucket suffix ("Synced HH:MM · abc123").
-- [ ] `pnpm sync:live` — two-device harness end-to-end.
+- [ ] `pnpm sync:live` — two-device harness end-to-end (future→today, undo, dedupe).
+- [ ] `pnpm sync:unlink` — two-device LIVE **mutual unlink** (A unlinks → B self-unlinks,
+      keeps its tasks, flags peer-unlinked). Run whenever you touch unlink / the `unlinkedAt` marker.
 - [ ] Cross-device smoke: add a task on one device → appears on the other;
       edit mid-poll → the FULL text survives (the "Thing→Thi" class).
 

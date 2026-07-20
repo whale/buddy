@@ -5,6 +5,42 @@ Newest first.
 
 ---
 
+## 2026-07-19/20 — 0.4.25: sync stops deleting tasks, mutual unlink, and the race the happy path hid
+
+Two sync features, and both taught the same lesson twice: **my own verification passed
+before the adversarial review found a real, shipping-blocking bug.**
+
+**Overflow → Future.** Sync used to silently DELETE tasks when two devices' combined active
+list exceeded the 6-cap (the old `clampActiveItems` just dropped the overflow). Now they move
+to Future with a synced, dismissible notice. The non-obvious part is **determinism**: "Mac
+wins the slots" can't mean "whichever device I'm on" (the two devices would disagree and
+ping-pong) — it's encoded in the DATA, via **id case** (Mac mints lowercase UUIDs,
+`crypto.randomUUID`; iOS mints uppercase, `UUID().uuidString`), so both compute the identical
+overflow set from the same merged input. Relocation happens inside `merge()`, reuses each
+item's own id, and an invariant filter keeps a parked id off the active list. The review's fix:
+the notice counts must be TRUTHFUL — count only tasks *actually relocated this merge*
+(`keptActiveCount` read AFTER the invariant filter), or an already-parked overflow inflates it.
+
+**Mutual unlink + the concurrent-sync race (CRITICAL, review-only catch).** Unlinking one
+device now stamps the shared bucket with an `unlinkedAt` marker; the peer self-unlinks on its
+next pass. My two-device live test passed. Then the review found the hole: a **poll pass already
+in-flight when you tap Unlink** CAS-conflicts against the marker push, and the retry loop
+folds+repushes the marker blob. On Mac that LEAKED `unlinkedAt` into local state (it rode the
+`extras` bag → re-emitted on every future re-pair → **permanent, unrecoverable self-unlink
+loop**, reinstall-only). On iOS the same fold DROPPED it (merge omits it) → peer never unlinks,
+user falsely told it did. The lesson (again): a happy-path two-device test that doesn't force a
+concurrent in-flight pass proves nothing about the race. Fix: read the marker in the **CAS-retry
+loop too** and bail (never fold+repush); `pushUnlinkMarker` retries so it reliably lands; Mac
+adds `unlinkedAt` to `DROP_WIRE_KEYS` so it can never touch local state. Regression test: a
+two-writer race (in-flight pass vs marker push) asserting the marker survives on the server AND
+never lands in local state.
+
+**Release gotcha:** the v0.4.24 Mac release run FAILED mid-GitHub-outage; v0.4.25 superseded it
+with all the code. A failed auto-release isn't worth chasing — the next merge's release carries
+everything. Don't reuse a version number whose tag never published.
+
+---
+
 ## 2026-07-14 — 0.4.0: Buddy Cloud + E2E encryption (the Ghost split), and what the reviews caught
 
 The big architectural night: one codebase, two editions. The released app is the

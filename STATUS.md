@@ -1,6 +1,49 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-10 (night). Branch `main`. Latest **released Mac**: **`v0.3.34`** (signed/notarized, updater manifest live). Latest **iOS**: **TestFlight `0.1.0 (28)`** (processed + distributed). Docs: THIS file's top + `RELEASE-CHECKLIST.md` + `JOURNAL.md` are the live docs; `design/celebration-lab.html` is the celebration tuning playground._
+_Last updated: 2026-07-20. Branch `main`. Latest **Mac**: **`v0.4.25`** (auto-released via CI; DMG + updater manifest live). Latest **iOS**: **TestFlight `0.4.25 (build 38)`** — Apple-confirmed VALID. Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
+
+## Session summary — 2026-07-19/20 — sync never deletes tasks + mutual unlink
+
+Two features, both shipped to **Mac v0.4.25** + **iOS TestFlight build 38 (0.4.25)** (Apple-confirmed). Both are shared sync plumbing → byte-parallel Mac (`dist/index.html`) + iOS (`ios/Buddy/Sources/Sync/*`), each caught a real bug in adversarial review (RULE 6) that the happy-path tests missed.
+
+**1. Overflow → Future (sync never silently deletes a task).** When the UNION of two devices' active tasks exceeds the 6-task cap, the over-cap tasks are now MOVED to Future (undated) instead of dropped, with a **synced, dismissible notice** ("Sync combined N tasks. M overflow tasks have been moved to the Future tab.") + a Future button. **Mac tasks (lowercase UUID ids) keep the 6 slots; iPhone tasks (uppercase ids) overflow first** — encoded in the id so both devices compute the identical result. Relocation happens inside `merge()`, reuses each item's own id, and an invariant keeps a parked id off the active list (deterministic, converges — verified by a 400k-merge fuzz + the two-device live test). New synced field: `syncNotice {combined,moved,dismissed}`, in `blobContentKey` so a dismiss propagates. Review fix: counts are truthful (only tasks ACTUALLY relocated this merge count; `keptActiveCount` read after the invariant filter).
+
+**2. Mutual unlink (unlinking one device breaks the link for BOTH).** The unlinking device stamps the shared bucket with a synced `unlinkedAt` marker (transport-only — read RAW in `syncOnce` before any merge, NEVER merged or adopted), then clears its own syncKey so reconnect is a fresh QR pair. The peer sees the marker on its next pass, self-unlinks, keeps its own tasks, and shows "Your Mac unlinked this device. Pair again to sync." **Review caught a CRITICAL concurrent-sync race**: an in-flight pass overlapping the unlink tap CAS-conflicted and folded+repushed the marker — which on Mac LEAKED it into local state (`extras` → permanent, unrecoverable re-pair breakage) and on iOS ERASED it (peer never unlinks, user falsely told it did). Fixed at the root: `syncOnce` reads the marker in the CAS-retry loop too and BAILS; `pushUnlinkMarker` retries so it reliably lands; Mac added `unlinkedAt` to `DROP_WIRE_KEYS`; `handlePeerUnlink` guards on still-linked; iOS surfaces a failed/offline unlink honestly.
+
+**Verified:** Mac `syncTest` 38/38 (+ overflow, Mac-priority, notice, dismiss, overlap, mutual-unlink detection, concurrent-race) · Mac `mergeTest` ok · iOS 95 unit tests (+ same coverage + Mac↔iOS contentKey byte-parity pin) · `ui:smoke` 4/4 · **`scripts/buddy-unlink-live.spec.js`** two-device LIVE mutual unlink on real Supabase · overflow banner + iOS unlink note confirmed on both platforms (lvl0/lvl1/lvl2). New `__buddy` test hooks: `syncUnlink`, `syncPeerUnlinked`. New iOS screenshot fixtures: `sync-notice`, `sync-notice-lvl0`, `peer-unlinked`.
+
+**Outstanding / notes:**
+- The **v0.4.24 Mac release run FAILED** during a 2026-07-19 GitHub API outage — harmless: **v0.4.25 supersedes it** with all the code. No v0.4.24 tag exists; don't reuse it.
+- iOS `MARKETING_VERSION` is tracked to `0.4.25` (PR #143); bump it in lockstep each Mac release (RULE 5).
+- `ECOSYSTEM.md` + `PAYMENT-PLAN.md` remain uncommitted drafts (parked pending a public-vs-private decision).
+
+---
+
+
+## Session summary — 2026-07-19 — wire-2 sync fix + settings redesign + holdover cleanup
+
+Big session. All shipped to `main` (Mac auto-released to **v0.4.23**; iOS cut to **TestFlight 0.4.20 build 36**, Apple-confirmed).
+
+**Sync — fixed the 2026-07-18 split-brain (a v0.1.0 phone silently corrupting a v0.4.15 Mac's data):**
+- New **wire-2 envelope**: a cleartext, AES-GCM-AAD-authenticated header `{b,wire,crypto,minReader}` on every synced row, so any client (and the server) can triage before decrypt and **degrade instead of corrupting**. Byte-identical on Mac (`dist/index.html`) + iOS (`ios/.../Sync`), pinned by a shared vector `dwuU613APPxtAVeAdb_UI1J97z3qrFHjfMMU`.
+- **Refuse-to-clobber** on both platforms; iOS shows "Update Buddy to keep syncing"; Mac shows "Update needed".
+- Design + threat model in **`SYNC-COMPAT.md`**; the reproduction/guards in `__buddy.skewTest`; one-command check **`pnpm sync:validate`** (10/10, incl. Mac↔iOS envelope parity via Swift); runbook in **`VALIDATION.md`**.
+- **Server wire floor** SQL (`supabase/migrations/20260719130000_buddy_wire_floor_fix.sql` + hosted-setup) — ships DISABLED.
+
+**Other shipped:** Settings redesigned to grouped cards (Mac + iOS); sync **watchdog** GH Action (`.github/workflows/sync-watchdog.yml`, emails hi@whale.fyi on failure); pairing UX ("Waiting for iPhone…" + "Cancel"; QR 150→113px flush); cold-launch morning/drawer overlap fix; holdover cleanup (removed the fake demo-history seed for new users, removed iOS "Enter manually" pairing, gated MockData, fixed stale "prototype"/"scaffold" copy).
+
+**New guardrails:** RULE 5 (two release rails — iOS is manual `fastlane beta`), RULE 6 (adversarial review before shipping risky work), RULE 7 (confirm at the source of truth, never a proxy exit code / Debug build). Tooling: **`pnpm ios:beta`** (fastlane + polls App Store Connect to confirm the build is really live), `scripts/buddy-asc-builds.mjs`.
+
+**Verified:** `sync:validate` 10/10 · iOS `BuddyTests` TEST SUCCEEDED · Release-config iOS build · App Store Connect confirms build 36 v0.4.20 VALID.
+
+**Outstanding / NOT done or NOT verified:**
+- **User:** update the iPhone to 0.4.20 + re-pair (Mac Settings → Resync shows QR; phone → Scan QR). Add 4 SMTP secrets for the watchdog email.
+- **Server floor:** the migrations are in the repo but NOT deployed to live Supabase, and `supabase/tests/buddy_wire_floor_test.sql` was NOT run (no local pg here). Deploy + test, THEN `select public.buddy_set_wire_floor(2)` only AFTER both devices are on wire-2.
+- **Cold-launch fix:** logic sound but the native "update-pending + first launch" race was NOT observed on the real app.
+- **Deferred:** the hidden web-demo fake-desktop + `#devMorning` (display:none in native, but referenced by the pin logic — needs a verified native pass, RULE 6).
+- **Docs:** `ECOSYSTEM.md` is still an uncommitted draft (parked with `PAYMENT-PLAN.md`, pending a public-vs-private decision) — should hold the release-rails table.
+
+
 
 ## Session summary — 2026-07-10 (night) — celebration physics, add choreography, swipe pan, friend beta
 

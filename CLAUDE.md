@@ -182,7 +182,7 @@ between Mac + iOS.
 - The review is a SECOND MIND trying to break it — bootstrapping/edge cases, the
   direction I didn't test, what the happy path hides. "My tests passed" ≠ "someone
   tried to break it and couldn't."
-- Enforced by `RELEASE-CHECKLIST.md § 1` and a pre-PR hook (`.claude/settings.json`).
+- Enforced by discipline via `RELEASE-CHECKLIST.md § 1` — there is NO automated hook; you must run the review yourself before opening the PR.
 
 ## ✅ RULE 7 — Report from the SOURCE OF TRUTH, never a proxy. Confirm, don't infer.
 

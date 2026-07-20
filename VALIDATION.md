@@ -27,8 +27,9 @@ pnpm sync:validate
 
 Runs headless (Chromium + the Swift toolchain). **Expect `✅ PASS — 10/10`:**
 
-- `Mac syncTest` 32/32 — merge / CAS / E2E correctness
-- `Mac mergeTest` — lossless union
+- `Mac syncTest` — merge / CAS / E2E / mutual-unlink correctness (the sub-count grows every
+  sync PR — don't hardcode it; `✅ PASS — 10/10` is the stable gate)
+- `Mac mergeTest` — lossless union (incl. overflow → Future + Mac-priority)
 - `Mac skewTest GUARDS` 6/6 — the version-skew fix (see §what-it-proves)
 - five named guards: backward read · writes wire-2 · refuse-to-clobber · AAD · legacy upgrade
 - `Mac wire-2 envelope vector == shared pin`
@@ -65,7 +66,10 @@ cd ios && xcodebuild test -project Buddy.xcodeproj -scheme Buddy \
 **Expect `TEST SUCCEEDED`.** The crypto/interop tests are in
 `BlobCryptoTests` — `testWireV2EnvelopeVectorMatchesSharedPin` (the same vector
 as §trust-chain), `testWireV2AADTamperThrows`, `testWireV2Detection`. To run just
-those: append `/BlobCryptoTests`.
+those: append `/BlobCryptoTests`. The **sync-behaviour** tests are in
+`BuddySyncTests` (mutual-unlink detection, wire round-trip, concurrent-race) +
+`BuddyMergeTests` (overflow → Future, Mac-priority, notice, dismiss) and the
+Mac↔iOS `contentKey` byte-parity pin in `Slice2MergeTests`.
 
 ---
 
@@ -80,6 +84,16 @@ Supabase backend with a throwaway syncKey, and drives future→today, undo,
 dedupe, and convergence end-to-end. Needs creds in `.supabase-buddy.secret`
 (gitignored). **Expect all specs green.** To reproduce a specific field report,
 extend the spec with the exact steps before touching merge code.
+
+For **mutual unlink**, run the dedicated two-device live test:
+
+```
+pnpm sync:unlink
+```
+
+Drives `scripts/buddy-unlink-live.spec.js`: two paired devices, A unlinks → B
+self-unlinks on its next pass, keeps its own tasks, and flags peer-unlinked.
+Run it whenever you touch unlink or the `unlinkedAt` marker.
 
 ---
 
