@@ -102,6 +102,10 @@ enum ScreenshotHarness {
             store.seedForScreenshot(tasks: MockData.normalTasks)   // ≤4 active → lvl0 (white/black)
             store.syncNotice = SyncNotice(combined: 9, moved: 3, dismissed: false)
             return (store, .none, false, false)
+        case "celebration-real":
+            // Active tasks + a real completion fired from TodayView.task (see the DEBUG hook).
+            store.seedForScreenshot(tasks: MockData.normalTasks)
+            return (store, .none, false, false)
         case "celebration":
             store.seedForScreenshot(tasks: MockData.normalTasks)
             return (store, .none, false, true)
