@@ -111,8 +111,8 @@ final class BuddyMergeTests: XCTestCase {
         XCTAssertEqual(m?.today?.items.first?.text, "new-done")
     }
 
-    // 13. Merge cap — the UNION of two full-ish devices re-clamps to hardCap.
-    // Without the clamp, Mac(6) + iPhone(2 new) → 8 active rows (the live bug).
+    // 13. Merge cap — the UNION re-clamps to hardCap, and over-cap tasks are MOVED TO FUTURE,
+    // never deleted (whale 2026-07-19).
     func testMergeClampsActiveToHardCap() {
         let a = snap(today: TodayState(date: "2026-06-19", items: [
             item("a1","one"), item("a2","two"), item("a3","three"),
@@ -122,6 +122,67 @@ final class BuddyMergeTests: XCTestCase {
         let m = BuddyMerge.merge(a, b)
         let active = (m?.today?.items ?? []).filter { $0.isActive }.count
         XCTAssertEqual(active, BuddyStore.hardCap)
+        let parked = Set((m?.deferred ?? []).map { $0.id })
+        XCTAssertTrue(parked.contains("b7") && parked.contains("b8"), "over-cap tasks parked in Future, not deleted")
+        XCTAssertFalse((m?.today?.items ?? []).contains { $0.id == "b7" || $0.id == "b8" })
+        XCTAssertEqual(m?.syncNotice?.moved, 2)
+        XCTAssertEqual(m?.syncNotice?.combined, 8)
+        XCTAssertEqual(m?.syncNotice?.dismissed, false)
+    }
+
+    // 13b. Mac WINS the slots: iPhone-minted (UPPERCASE id) tasks overflow first, even when the
+    // iPhone save is newer. Six Mac tasks keep their slots; two iPhone tasks go to Future.
+    func testMacTasksWinSlotsOveriPhone() {
+        let macFull = snap(today: TodayState(date: "d", items: [
+            item("c1","m1"), item("c2","m2"), item("c3","m3"),
+            item("c4","m4"), item("c5","m5"), item("c6","m6")]), savedAt: 1000)
+        let iosTwo = snap(today: TodayState(date: "d", items: [
+            item("AA11","p1"), item("BB22","p2")]), savedAt: 9000)   // NEWER, still overflows
+        let m = BuddyMerge.merge(macFull, iosTwo)
+        let active = Set((m?.today?.items ?? []).filter { $0.isActive }.map { $0.id })
+        let parked = Set((m?.deferred ?? []).map { $0.id })
+        XCTAssertTrue(["c1","c2","c3","c4","c5","c6"].allSatisfy { active.contains($0) }, "Mac tasks keep slots")
+        XCTAssertTrue(parked.contains("AA11") && parked.contains("BB22"), "iPhone tasks overflow to Future")
+        XCTAssertFalse(active.contains("AA11") || active.contains("BB22"))
+    }
+
+    // 13c. Determinism: both directions relocate the identical set; re-merging the settled
+    // result is a fixpoint (no re-overflow, no churn) → devices converge.
+    func testOverflowIsSymmetricAndFixpoint() {
+        let macFull = snap(today: TodayState(date: "d", items: [
+            item("c1","m1"), item("c2","m2"), item("c3","m3"),
+            item("c4","m4"), item("c5","m5"), item("c6","m6")]), savedAt: 1000)
+        let iosTwo = snap(today: TodayState(date: "d", items: [item("AA11","p1"), item("BB22","p2")]), savedAt: 9000)
+        let m1 = BuddyMerge.merge(macFull, iosTwo)!
+        let m2 = BuddyMerge.merge(iosTwo, macFull)!
+        XCTAssertEqual(Set(m1.deferred.map { $0.id }), Set(m2.deferred.map { $0.id }), "symmetric relocation")
+        let settled = snap(today: m1.today, deferred: m1.deferred, savedAt: 9000)
+        let m3 = BuddyMerge.merge(settled, settled)!
+        XCTAssertEqual((m3.today?.items ?? []).filter { $0.isActive }.count, BuddyStore.hardCap)
+        XCTAssertEqual(m3.deferred.count, m1.deferred.count, "no re-overflow on re-merge")
+    }
+
+    // 13e. Dismiss is sticky + syncs: a dismissed notice on one side stays dismissed after a
+    // merge with a peer that hasn't dismissed (moved=0 path → pickNotice ORs dismissed).
+    func testDismissedNoticeStaysDismissed() {
+        var a = snap(savedAt: 2000); a.syncNotice = SyncNotice(combined: 8, moved: 2, dismissed: true)
+        var b = snap(savedAt: 3000); b.syncNotice = SyncNotice(combined: 8, moved: 2, dismissed: false)
+        XCTAssertEqual(BuddyMerge.merge(a, b)?.syncNotice?.dismissed, true)
+        XCTAssertEqual(BuddyMerge.merge(b, a)?.syncNotice?.dismissed, true)
+    }
+
+    // 13f. TRUTHFUL counts when an overflow item is ALREADY parked on the peer: only the
+    // NEWLY-relocated task counts (adversarial review finding, 2026-07-19). A: 6 Mac tasks + U1
+    // parked; B: U1 + U2 still active. Union overflows by 2, but U1 is already parked → moved == 1.
+    func testNoticeCountsOnlyNewlyMovedTasks() {
+        let a = snap(today: TodayState(date: "d", items: [
+            item("a1","1"), item("a2","2"), item("a3","3"),
+            item("a4","4"), item("a5","5"), item("a6","6")]),
+            deferred: [DeferredTask(id: "U1", text: "p1", wake: "", v: 1)], savedAt: 2000)
+        let b = snap(today: TodayState(date: "d", items: [item("U1","p1"), item("U2","p2")]), savedAt: 1900)
+        let m = BuddyMerge.merge(a, b)
+        XCTAssertEqual(m?.syncNotice?.moved, 1, "already-parked overflow item must not inflate the count")
+        XCTAssertEqual(m?.syncNotice?.combined, 7)
     }
 
     // 14. Merge dedupe — same title from both devices (different ids) collapses to one;

@@ -167,6 +167,16 @@
   #syncError{ color:var(--red); }
   .lvl2 #syncError{ color:#fff; font-weight:600; }
 
+  /* Sync overflow notice — token-driven like the update banner (it almost always shows at
+     lvl2 red, so hardcoded blacks would be black-on-red). Show pill mirrors #updateInstall. */
+  #syncNoticeText{ color:var(--ink); }
+  #syncNotice.banner-in{ animation: banner-down var(--t-drift) var(--ease-out) both; }
+  #syncNoticeShow{ background:var(--sel-bg); color:var(--sel-ink); transition:box-shadow .15s ease, background-color .15s ease; }
+  @media (hover:hover) and (pointer:fine){
+    #syncNoticeShow:hover{ box-shadow:inset 0 0 0 999px rgba(255,255,255,.16); }
+    .lvl1 #syncNoticeShow:hover, .lvl2 #syncNoticeShow:hover{ box-shadow:none; background-color:var(--cta-hover); }
+  }
+
   /* History segmented control, selected tab. Deliberate exception to --sel-bg (a black
      pill would break the segmented idiom at lvl0): the pill stays white, the LABEL
      follows escalation like the selected chrome icon — black → red (lvl1 and lvl2). */
@@ -405,6 +415,19 @@
       <button id="updateInstall" class="pressable shrink-0 px-4 py-2 rounded-full text-[14px] font-medium tracking-[-0.28px]">Install</button>
     </div>
     <div id="updateProgress" class="h-[3px] hidden"><div id="updateBar" class="h-full w-0 transition-[width] duration-300"></div></div>
+  </div>
+  <!-- Sync overflow notice: shown when a sync moved over-cap tasks to Future (never deletes).
+       .bcard → auto-red at lvl2 (where this almost always appears); text/buttons ride tokens. -->
+  <div id="syncNotice" class="bcard w-[400px] shrink-0 bg-white rounded-[24px] overflow-hidden hidden">
+    <div class="flex items-center justify-between gap-3 px-6 py-4">
+      <div id="syncNoticeText" class="min-w-0 flex-1 text-[14px] leading-[1.35] tracking-[-0.26px]"></div>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button id="syncNoticeShow" class="pressable px-4 py-2 rounded-full text-[14px] font-medium tracking-[-0.28px]">Future</button>
+        <button id="syncNoticeDismiss" title="Dismiss" class="pressable size-[30px] grid place-items-center rounded-full ihover icon-ink">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+    </div>
   </div>
   <!-- Card 1: Buddy pill + date -->
   <div class="bcard w-[400px] shrink-0 bg-white rounded-[24px] overflow-hidden">
@@ -665,6 +688,13 @@ Object.defineProperty(state,'items',{
 // fallback keeps things working in any non-secure context.
 let uid = 1;
 const nid = () => (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('n'+Date.now().toString(36)+'-'+(uid++));
+// Which device MINTED an id? Mac uses crypto.randomUUID() / 'n<base36>' — both fully
+// LOWERCASE. iOS uses Swift UUID().uuidString, which is UPPERCASE hex. So any A–Z in the
+// id means iPhone-minted. This lets merge() give Mac tasks slot priority when the union
+// of two devices exceeds the cap — deterministically, from the DATA alone (not "which
+// device am I"), so both sides compute the identical winner and never ping-pong.
+// (Pinned to a shared test vector in mergeTest + the iOS parity test.)
+const idIsIos = id => /[A-Z]/.test(String(id||''));
 // Back-compat for blobs saved before UUIDs: ensure the counter clears any old n* ids.
 function bumpUid(){ let mx=0; (state.today.items||[]).forEach(i=>{ const m=/^n(\d+)$/.exec(i.id||''); if(m) mx=Math.max(mx,+m[1]); }); uid=Math.max(uid, mx+1); }
 // Every today-item carries a per-item version `v` (starts at 1). merge() keeps the
@@ -835,7 +865,16 @@ function serialize(){
     // dismiss-without-restore or a relaunch can never drop it — the empty-list restore
     // row offers it back. See restartFresh(). Cleared on restore or a real day rollover.
     restartStash: (restartStash && Array.isArray(restartStash.texts) && restartStash.texts.length) ? { texts:restartStash.texts.slice(), date:restartStash.date||null } : null,
+    syncNotice: sanitizeNotice(state.syncNotice),
   });
+}
+// A sync-overflow notice is {combined,moved,dismissed} or null. Sanitised the same way on
+// serialize + hydrate so both platforms agree on the shape (integers ≥0, boolean).
+function sanitizeNotice(n){
+  if(!n || typeof n!=='object') return null;
+  const moved = Math.max(0, n.moved|0);
+  if(moved<=0) return null;                         // nothing was moved → no notice to show
+  return { combined: Math.max(moved, n.combined|0), moved, dismissed: !!n.dismissed };
 }
 let saveSuppressed=false;        // test hook: freeze persistence so an injected blob survives reload
 
@@ -896,6 +935,7 @@ function freshBoot(){
   state.erasedAt=null;
   state.doneWordBag=[];
   state.savedAt=0;                 // never mutated yet → any peer wins scalar conflicts
+  state.syncNotice=null;
   state.extras={};
 }
 function parseRaw(raw){ if(raw==null) return null; try{ const b=JSON.parse(raw); return (b&&typeof b==='object')?b:null; }catch{ return null; } }
@@ -904,7 +944,7 @@ function parseRaw(raw){ if(raw==null) return null; try{ const b=JSON.parse(raw);
    validated INDEPENDENTLY, so a malformed `today` can never discard valid
    `history`/`deferred`/`settings`. Returns null only if the blob isn't a Buddy
    blob at all. `hadToday` tells the caller whether today was usable or reset. */
-const KNOWN_WIRE_KEYS = ['version','savedAt','today','doneWordBag','history','deferred','settings','pinned','tombstones','erasedAt','restartStash'];
+const KNOWN_WIRE_KEYS = ['version','savedAt','today','doneWordBag','history','deferred','settings','pinned','tombstones','erasedAt','restartStash','syncNotice'];
 // E2E envelope keys must NEVER ride the extras bag: a pre-E2E peer that pulled an
 // encrypted row echoes {enc,iv,ct} back through ITS extras (hybrid blob), and if we
 // re-emitted them the row would look encrypted forever while carrying plaintext.
@@ -942,6 +982,7 @@ function hydrate(blob){
     restartStash: (blob.restartStash && Array.isArray(blob.restartStash.texts))
       ? { texts: blob.restartStash.texts.map(t=>String(t||'').trim()).filter(Boolean), date: (typeof blob.restartStash.date==='string'?blob.restartStash.date:null) }
       : null,
+    syncNotice: sanitizeNotice(blob.syncNotice),
     extras,
   };
 }
@@ -970,6 +1011,7 @@ function applyHydrated(h){
   state.doneWordBag = Array.isArray(h.doneWordBag) ? h.doneWordBag : (state.doneWordBag||[]);  // sync/merge paths omit the bag → keep what we have
   restartStash     = h.restartStash || null;   // persisted set-aside list (Restart Buddy)
   state.savedAt    = (typeof h.savedAt==='number') ? h.savedAt : 0;   // adopt the merged stamp — do NOT re-stamp
+  state.syncNotice = sanitizeNotice(h.syncNotice);
   state.extras     = h.extras || {};
 }
 
@@ -1048,27 +1090,45 @@ function mergeItems(primary, secondary, tombstones){
 }
 // After a cross-device merge, the UNION of both devices' active tasks can exceed the
 // 6-task cap and carry same-title duplicates (each device minted its own id, so
-// mergeItems keeps both). HARD_CAP is only enforced on manual Add, never on merge —
-// so re-clamp here: keep every done item untouched, drop same-title active dupes, and
-// cap active tasks at HARD_CAP. Order is preserved (primary = newer save comes first,
-// so the newer device's copy of a duplicate wins). Deterministic → both devices
-// converge on the same clamped list, no ping-pong.
-function clampActiveItems(items){
-  if(!Array.isArray(items)) return items;
+// mergeItems keeps both). HARD_CAP is only enforced on manual Add, never on merge — so
+// re-clamp here. Returns { kept, overflow }:
+//   - done items         → always kept (never count against the cap)
+//   - same-title dupes    → dropped outright (the same task parked twice = one task)
+//   - active over the cap → OVERFLOW: the caller relocates these to Future instead of
+//     deleting them, so no task ever silently vanishes on sync (whale 2026-07-19).
+// Slot priority when the union is over the cap: Mac-minted (lowercase id) tasks keep
+// their slots; iPhone-minted (uppercase id) tasks overflow first — and within a device,
+// the LAST ones overflow (stable, order-preserving). Deterministic on the SAME merged
+// input (merge is symmetric), so both devices relocate the identical set and converge.
+function clampActive(items){
+  if(!Array.isArray(items)) return { kept:items||[], overflow:[] };
   const seenTitles = new Set();
-  let active = 0;
-  const out = [];
-  for(const it of items){
-    if(!it) continue;
-    if(it.state==='done'){ out.push(it); continue; }   // done work never counts against the cap
+  const activeIdx = [];                                  // indices of surviving active items, in order
+  const dropDup = new Set();                             // indices of same-title duplicates (deleted, not overflowed)
+  for(let i=0;i<items.length;i++){
+    const it=items[i];
+    if(!it || it.state==='done') continue;               // done handled below (always kept)
     const title = String(it.text||'').trim().toLowerCase();
-    if(title && seenTitles.has(title)) continue;        // same-title duplicate → drop
-    if(active >= HARD_CAP) continue;                     // past the cap → drop the overflow
+    if(title && seenTitles.has(title)){ dropDup.add(i); continue; }
     if(title) seenTitles.add(title);
-    active++;
-    out.push(it);
+    activeIdx.push(i);
   }
-  return out;
+  const overflowSet = new Set();
+  if(activeIdx.length > HARD_CAP){
+    let excess = activeIdx.length - HARD_CAP;
+    // iPhone-origin last-first, then (defensively, if Mac alone somehow exceeds the cap)
+    // Mac-origin last-first. reverse() gives last-first; both devices see the same order.
+    const ios = activeIdx.filter(i=>idIsIos(items[i].id)).reverse();
+    const mac = activeIdx.filter(i=>!idIsIos(items[i].id)).reverse();
+    for(const i of [...ios, ...mac]){ if(excess<=0) break; overflowSet.add(i); excess--; }
+  }
+  const kept=[], overflow=[];
+  for(let i=0;i<items.length;i++){
+    if(dropDup.has(i)) continue;
+    if(overflowSet.has(i)) overflow.push(items[i]);
+    else kept.push(items[i]);
+  }
+  return { kept, overflow };
 }
 function todayToHistoryRecord(today){
   if(!today || !today.date || !Array.isArray(today.items) || !today.items.length) return null;
@@ -1146,13 +1206,15 @@ function merge(a, b){
   const older = newer===va ? vb : va;
   const tombstones = mergeTombstones(va.tombstones, vb.tombstones);
 
-  let today, carryHistory=[];
+  let today, carryHistory=[], overflowItems=[];
   if(va.today && vb.today && va.today.date === vb.today.date){
+    const clamped = clampActive(mergeItems(newer.today.items, older.today.items, tombstones));
+    overflowItems = clamped.overflow;
     today = {
       ...older.today, ...newer.today,               // unknown today-level fields ride through (newer wins per key)
       date: va.today.date,
       morningDone: !!(va.today.morningDone || vb.today.morningDone),
-      items: clampActiveItems(mergeItems(newer.today.items, older.today.items, tombstones)),
+      items: clamped.kept,
     };
   } else {
     // Different/missing days: the CALENDAR-LATER day is live (not the newer save's —
@@ -1170,6 +1232,29 @@ function merge(a, b){
 
   // Deferred: union keyed by id, conflicts resolved by per-row v (send/unsend bump it).
   let deferred = mergeDeferred(newer.deferred, older.deferred, tombstones);
+  // Overflow relocation: active tasks that lost their slot in the cap fight get PARKED in
+  // Future (wake:'' = undated) instead of deleted — so a sync can never silently drop a
+  // task (whale 2026-07-19). Reuse the item's own id so BOTH devices relocate the identical
+  // row; the invariant below then guarantees it never lives in Future AND active at once.
+  let movedCount = 0;   // rows ACTUALLY relocated this merge (an overflow item already parked on
+                        // the peer is skipped → it must NOT inflate the notice's "moved" count).
+  if(overflowItems.length){
+    const have = new Set(deferred.map(d=>d&&d.id));
+    for(const it of overflowItems){
+      if(!it || !it.id || (it.id in tombstones) || have.has(it.id)) continue;
+      deferred.push({ id:it.id, text:it.text||'', wake:'', v:(it.v|0)||1 });
+      have.add(it.id);
+      movedCount++;
+    }
+  }
+  // INVARIANT — an id parked in Future is NOT also active. In the brief window where one
+  // device has already relocated an overflow row (it's in its deferred) while the peer
+  // still holds it active, the union carries it in BOTH lists; Future wins so it can't pop
+  // back onto the full list and re-overflow. Deterministic → both sides drop the same ids.
+  if(today && today.items){
+    const parked = new Set(deferred.map(d=>d&&d.id));
+    today.items = today.items.filter(it=> it && !parked.has(it.id));
+  }
   // Reconcile "Sent to today!" rows whose linked Today copy did not survive the merge
   // (deduped, capped, or unsent-with-tombstone on the other device): a sent row without
   // its live counterpart is a lie — flip it back to a plain, sendable row.
@@ -1194,6 +1279,17 @@ function merge(a, b){
     deferred = deferred.filter(d => d.sent || !String(d.text||'').trim() || best.get(String(d.text||'').trim().toLowerCase())===d);
   }
 
+  // Sync notice: only a merge that ACTUALLY relocated a task (movedCount>0) writes a fresh
+  // (un-dismissed) notice; otherwise carry the peers' existing notice forward, keeping a dismiss
+  // sticky (pickNotice). Counts are TRUTHFUL: keptActiveCount is read AFTER the invariant filter
+  // (so a kept item the peer already parked doesn't inflate it), and moved = rows actually moved.
+  // Both devices compute identical counts (same merged input) → converge; dismiss syncs.
+  const keptActiveCount = (today && today.items) ? today.items.filter(it=>it && it.state!=='done').length : 0;
+  let syncNotice = pickNotice(va.syncNotice, vb.syncNotice);
+  if(movedCount > 0){
+    syncNotice = { combined: keptActiveCount + movedCount, moved: movedCount, dismissed:false };
+  }
+
   return {
     today, hadToday: !!today,
     history: mergeHistory([...(va.history||[]), ...carryHistory], vb.history),
@@ -1203,8 +1299,17 @@ function merge(a, b){
     tombstones, erasedAt,
     savedAt: Math.max(a.savedAt||0, b.savedAt||0),
     restartStash: newer.restartStash || older.restartStash || null,
+    syncNotice: syncNotice || null,
     extras: { ...(older.extras||{}), ...(newer.extras||{}) },   // union; newer wins per key
   };
+}
+// Merge two sync notices → one. Deterministic + symmetric: the higher (combined, then
+// moved) count is the base, and dismissed is sticky (either side dismissed → dismissed).
+function pickNotice(a,b){
+  if(!a) return b||null; if(!b) return a||null;
+  const base = (a.combined!==b.combined) ? (a.combined>b.combined?a:b)
+             : ((a.moved|0)!==(b.moved|0)) ? ((a.moved|0)>(b.moved|0)?a:b) : a;
+  return { combined: base.combined|0, moved: base.moved|0, dismissed: !!(a.dismissed||b.dismissed) };
 }
 
 /* ====================================================================
@@ -1278,8 +1383,12 @@ function blobContentKey(b){
   // restartStash is DELIBERATELY excluded: an older peer strips fields it doesn't know,
   // and a stripped-vs-present stash in the key would push-loop forever against that peer.
   // The stash never changes without today's items changing too, so it always rides along.
+  // syncNotice is IN the key so a dismiss (or a fresh overflow) is a real change → it syncs
+  // to the other device instead of being a silent no-op. Sanitised so null==absent matches.
+  const n=sanitizeNotice(b.syncNotice);
   return canonicalJSON({ td:b.today&&b.today.date, m:!!(b.today&&b.today.morningDone),
     t:items, h:hist, d:def, tomb:b.tombstones||{}, e:b.erasedAt??null,
+    n:n?{c:n.combined,mv:n.moved,x:n.dismissed}:null,
     s:{ celebrate:s.celebrate, reserveSpace:!!s.reserveSpace } });
 }
 // Map a merged hydrated result (merge() output) back to a wire blob for push/apply.
@@ -1291,7 +1400,8 @@ function hydratedToWire(h){
     history: h.history||[], deferred: h.deferred||[], settings: h.settings,
     pinned: !!h.pinned, tombstones: h.tombstones||{},
     erasedAt:(typeof h.erasedAt==='number')?h.erasedAt:null,
-    restartStash: h.restartStash||null };
+    restartStash: h.restartStash||null,
+    syncNotice: sanitizeNotice(h.syncNotice) };
 }
 // Merge two wire blobs → merged wire blob (hydrate both, merge, re-wire).
 function mergeWire(aBlob, bBlob){
@@ -2374,6 +2484,7 @@ function render(){
   morning.classList.toggle('lvl2', lvl===2);
   edgeBar.classList.toggle('edge-alert', lvl>=1);   // escalation shows on the hidden tab too
   syncChrome();                                     // pin / calendar / settings selected states
+  renderSyncNotice();                               // overflow-moved-to-Future banner (synced, dismissible)
   if(settingsOpen) syncReserve();                  // reserve switch color follows red/normal theme live
   if(morningUp()){ renderToday(morningList, true); renderMorningUndone(); }
 
@@ -2421,6 +2532,34 @@ function render(){
   save();                                  // debounced persist after any mutation
 }
 function warnLevel(){ const n=activeCount(); return n>=HARD_CAP?2 : n===SOFT_CAP?1 : 0; }
+
+// The sync-overflow notice: a task never silently disappears on sync — if the union of
+// two devices exceeds the cap, the losers are parked in Future and THIS tells the user.
+// State is synced (merge/pickNotice), so a dismiss on one device clears it on the other.
+let syncNoticeSeen='';                 // last (combined/moved) signature we revealed the drawer for
+function renderSyncNotice(){
+  const el=$('#syncNotice'); if(!el) return;
+  const n=sanitizeNotice(state.syncNotice);
+  if(!n || n.dismissed){ el.classList.add('hidden'); el.classList.remove('banner-in'); if(!n) syncNoticeSeen=''; return; }
+  const txt=$('#syncNoticeText');
+  if(txt) txt.textContent='Sync combined '+n.combined+' task'+(n.combined===1?'':'s')+'. '
+    +n.moved+' overflow task'+(n.moved===1?' has':'s have')+' been moved to the Future tab.';
+  const sig=n.combined+'/'+n.moved;
+  if(el.classList.contains('hidden')){ el.classList.remove('hidden'); requestAnimationFrame(()=>el.classList.add('banner-in')); }
+  // Reveal the tucked drawer ONCE per new notice (like the update banner) so it's actually seen.
+  if(sig!==syncNoticeSeen){ syncNoticeSeen=sig; if(NATIVE && !morningUp() && !state.pinned){ clearTimeout(closeTimer); openDrawer(); } }
+}
+function dismissSyncNotice(){
+  if(!state.syncNotice) return;
+  state.syncNotice={ ...sanitizeNotice(state.syncNotice), dismissed:true };  // sticky; syncs to the peer
+  save(); renderSyncNotice();
+}
+function openFutureTab(){ editingId=null; state.histOpen=true; state.histTab='future'; render(); }
+(function wireSyncNotice(){
+  const d=$('#syncNoticeDismiss'), s=$('#syncNoticeShow');
+  if(d){ d.addEventListener('mousedown',e=>e.preventDefault()); d.addEventListener('click',e=>{ e.stopPropagation(); dismissSyncNotice(); }); }
+  if(s){ s.addEventListener('mousedown',e=>e.preventDefault()); s.addEventListener('click',e=>{ e.stopPropagation(); openFutureTab(); }); }
+})();
 
 function mostRecentRestorableRecord(){
   const today=localDate();
@@ -4031,8 +4170,8 @@ window.__buddy = {
          h12 && h12.items.length===1 && h12.items[0].text==='yesterday' && h12.items[0].done===false,
          'history='+JSON.stringify(m12.history));
 
-      // 13. Merge cap — the UNION of two full-ish devices must re-clamp to HARD_CAP.
-      // Without the clamp, Mac(6) + iPhone(2 new) → 8 active rows (the live bug).
+      // 13. Merge cap — the UNION of two full-ish devices must re-clamp to HARD_CAP, and
+      // the over-cap tasks are MOVED TO FUTURE, never deleted (whale 2026-07-19).
       const bigA=snap({savedAt:2000,today:{date:'2026-06-19',items:[
         item('a1','one',null,1),item('a2','two',null,1),item('a3','three',null,1),
         item('a4','four',null,1),item('a5','five',null,1),item('a6','six',null,1)]}});
@@ -4041,6 +4180,64 @@ window.__buddy = {
       const m13=merge(bigA,bigB);
       const active13=m13.today.items.filter(i=>i.state!=='done').length;
       ok('merge clamps active tasks to HARD_CAP (no 7th/8th)', active13===HARD_CAP, 'active='+active13);
+      const parked13=new Set((m13.deferred||[]).map(d=>d.id));
+      ok('over-cap tasks are PARKED in Future, not deleted',
+         parked13.has('b7') && parked13.has('b8') && !m13.today.items.some(i=>i.id==='b7'||i.id==='b8'),
+         'deferred='+[...parked13].join(','));
+      ok('overflow move writes a sync notice (combined+moved counts)',
+         m13.syncNotice && m13.syncNotice.combined===8 && m13.syncNotice.moved===2 && m13.syncNotice.dismissed===false,
+         JSON.stringify(m13.syncNotice));
+
+      // 13b. Mac WINS the slots: iPhone-minted (UPPERCASE id) tasks overflow first even when
+      // the iPhone save is newer. Mac has 6 (lowercase), iPhone adds 2 (uppercase) → the two
+      // UPPERCASE ids land in Future; all six Mac ids keep their slots.
+      const macFull=snap({savedAt:1000,today:{date:'d',items:[
+        item('c1','m1',null,1),item('c2','m2',null,1),item('c3','m3',null,1),
+        item('c4','m4',null,1),item('c5','m5',null,1),item('c6','m6',null,1)]}});
+      const iosTwo=snap({savedAt:9000,today:{date:'d',items:[   // NEWER save, but still overflows
+        item('AA11','p1',null,1),item('BB22','p2',null,1)]}});
+      const m13b=merge(macFull,iosTwo);
+      const act13b=new Set(m13b.today.items.filter(i=>i.state!=='done').map(i=>i.id));
+      const park13b=new Set((m13b.deferred||[]).map(d=>d.id));
+      ok('Mac tasks keep their slots; iPhone tasks overflow to Future',
+         ['c1','c2','c3','c4','c5','c6'].every(id=>act13b.has(id))
+         && park13b.has('AA11') && park13b.has('BB22')
+         && !act13b.has('AA11') && !act13b.has('BB22'),
+         'active='+[...act13b].join(',')+' | future='+[...park13b].join(','));
+
+      // 13c. Determinism: both merge directions relocate the IDENTICAL set — and re-merging
+      // the settled result is a fixpoint (no re-overflow, no churn), so devices converge.
+      const m13c1=merge(macFull,iosTwo), m13c2=merge(iosTwo,macFull);
+      ok('overflow relocation is symmetric (both directions move the same ids)',
+         canonicalJSON(m13c1.deferred.map(d=>d.id).sort())===canonicalJSON(m13c2.deferred.map(d=>d.id).sort()));
+      const settled=snap({savedAt:9000,today:m13b.today,deferred:m13b.deferred}); settled.syncNotice=m13b.syncNotice;
+      const m13d=merge(settled, JSON.parse(JSON.stringify(settled)));
+      ok('settled overflow is a fixpoint (no re-overflow on re-merge)',
+         m13d.today.items.filter(i=>i.state!=='done').length===HARD_CAP
+         && m13d.deferred.length===m13b.deferred.length,
+         'active='+m13d.today.items.filter(i=>i.state!=='done').length+' future='+m13d.deferred.length);
+
+      // 13e. Dismiss is sticky + syncs: a dismissed notice on ONE side stays dismissed after a
+      // merge with a peer that hasn't dismissed (moved=0 path → pickNotice ORs dismissed).
+      const dmA=snap({savedAt:2000}); dmA.syncNotice={combined:8,moved:2,dismissed:true};
+      const dmB=snap({savedAt:3000}); dmB.syncNotice={combined:8,moved:2,dismissed:false};
+      ok('dismissed notice stays dismissed across a merge (either direction)',
+         merge(dmA,dmB).syncNotice.dismissed===true && merge(dmB,dmA).syncNotice.dismissed===true,
+         JSON.stringify(merge(dmB,dmA).syncNotice));
+
+      // 13f. TRUTHFUL counts when an overflow item is ALREADY parked on the peer: only the
+      // NEWLY-relocated task counts toward the notice (adversarial review finding, 2026-07-19).
+      // A has 6 Mac tasks + U1 already in Future; B still has U1 + U2 active. The union overflows
+      // by 2 (U1,U2), but U1 is already parked → moved must be 1 (U2), not 2.
+      const ovA=snap({savedAt:2000,today:{date:'d',items:[
+        item('a1','1'),item('a2','2'),item('a3','3'),item('a4','4'),item('a5','5'),item('a6','6')]},
+        deferred:[{id:'U1',text:'p1',wake:'',v:1}]});
+      const ovB=snap({savedAt:1900,today:{date:'d',items:[item('U1','p1'),item('U2','p2')]}});
+      const m13f=merge(ovA,ovB);
+      ok('notice counts only NEWLY-moved tasks (already-parked overflow excluded)',
+         m13f.syncNotice && m13f.syncNotice.moved===1 && m13f.syncNotice.combined===7,
+         JSON.stringify(m13f.syncNotice));
+      ok('overlap merge stays symmetric', canonicalJSON(merge(ovA,ovB))===canonicalJSON(merge(ovB,ovA)));
 
       // 14. Merge dedupe — same title from both devices (different ids) collapses to one,
       // and done items are never counted/dropped by the clamp.

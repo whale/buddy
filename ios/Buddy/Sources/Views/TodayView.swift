@@ -87,6 +87,7 @@ struct TodayView: View {
                 .animation((showHistory || showSettings) ? nil : .easeInOut(duration: 0.2), value: activeCount)   // background tint only
 
             VStack(spacing: 8) {          // gap-2 between the cards
+                syncNoticeCard            // "N tasks moved to Future on sync" (synced, dismissible)
                 headerCard                // date only
                 // Settings/History slide up over the LIST card; the header + bottom bar stay put.
                 ZStack {
@@ -215,6 +216,52 @@ struct TodayView: View {
     private var numeralFont: UIFont {
         UIFont(name: "Geist-Medium", size: 62) ?? .systemFont(ofSize: 62, weight: .medium)
     }
+    // "N tasks moved to Future on sync" — a synced, dismissible banner (Mac parity). Almost
+    // always shows at lvl2 (6 active → red), so every colour rides the escalation theme.
+    @ViewBuilder private var syncNoticeCard: some View {
+        if let n = SyncNotice.sanitized(store.syncNotice), !n.dismissed {
+            HStack(alignment: .center, spacing: 10) {
+                Text(syncNoticeText(n))
+                    .font(.geist(14, .regular)).tracking(-0.26)
+                    .foregroundStyle(theme.escalationText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    withAnimation(BuddyAnim.sheetOpen) { showSettings = false; showHistory = true }
+                } label: {
+                    Text("Future")
+                        .font(.geist(14, .medium)).tracking(-0.28)
+                        .foregroundStyle(theme.selInk)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(theme.selBg, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("sync-notice-future")
+                Button {
+                    store.dismissSyncNotice()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(theme.escalationText)
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("sync-notice-dismiss")
+            }
+            .padding(.leading, 24).padding(.trailing, 14).padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
+            .buddyCard(fill: theme.cardBackground, shadow: theme.level != .lvl2)
+            .accessibilityIdentifier("sync-notice")
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+    // Mirrors the Mac's copy exactly (grammar adapts on the counts).
+    private func syncNoticeText(_ n: SyncNotice) -> String {
+        let combinedWord = n.combined == 1 ? "task" : "tasks"
+        let movedPart = n.moved == 1 ? "1 overflow task has" : "\(n.moved) overflow tasks have"
+        return "Sync combined \(n.combined) \(combinedWord). \(movedPart) been moved to the Future tab."
+    }
+
     private var headerCard: some View {
         HStack(alignment: .lastTextBaseline) {
             HStack(alignment: .lastTextBaseline, spacing: 12) {

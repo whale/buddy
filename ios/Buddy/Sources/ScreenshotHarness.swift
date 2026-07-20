@@ -71,6 +71,15 @@ enum ScreenshotHarness {
         case "settings":
             store.seedForScreenshot(tasks: MockData.normalTasks, history: recentHistory())
             return (store, .settings, false, false)
+        case "sync-notice":
+            // The overflow banner sits above the date card; alarmTasks = 6 active → lvl2 (red).
+            store.seedForScreenshot(tasks: MockData.alarmTasks)
+            store.syncNotice = SyncNotice(combined: 9, moved: 3, dismissed: false)
+            return (store, .none, false, false)
+        case "sync-notice-lvl0":
+            store.seedForScreenshot(tasks: MockData.normalTasks)   // ≤4 active → lvl0 (white/black)
+            store.syncNotice = SyncNotice(combined: 9, moved: 3, dismissed: false)
+            return (store, .none, false, false)
         case "celebration":
             store.seedForScreenshot(tasks: MockData.normalTasks)
             return (store, .none, false, true)
