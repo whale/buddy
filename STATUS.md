@@ -1,6 +1,23 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-20. Branch `main`. Latest **Mac**: **`v0.4.25`** (auto-released via CI; DMG + updater manifest live). Latest **iOS**: **TestFlight `0.4.25 (build 38)`** — Apple-confirmed VALID. Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
+_Last updated: 2026-07-21. Branch `main`. Latest **Mac**: **`v0.4.27`** (auto-released via CI; DMG + updater manifest live). Latest **iOS**: **TestFlight `0.4.27 (build 40)`** — Apple-confirmed VALID. Both platforms fully in sync at 0.4.27. Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
+
+## Session summary — 2026-07-20/21 — iOS Boss Mode (mirrored + synced), RULE 8, and two iOS fixes
+
+Shipped to **Mac v0.4.27** + **iOS TestFlight build 40 (0.4.27)** (Apple-confirmed). This batch was iOS-only feature/UI work mirroring existing Mac behaviour, plus a new process rule; each Mac release here was a no-op lockstep rebuild (no Mac code changed).
+
+**iOS Boss Mode — mirrored the Mac, WITH cross-platform sync (0.4.26).** At 5+ done, a row offers "Move to done, and make room for more?" → sweeps finished tasks off the Today list (they stay in the Done tab, roll over, sync). `BuddyTask.clearedAt` is a computed field backed by the per-item `extras` bag (epoch-ms, matching the Mac's `item.clearedAt`), so it rides the EXISTING wire with ZERO merge/contentKey change — a sweep on either device mirrors to the other. `bossMove` v-bumps to carry the change; `clearedAt` resets on cycle/complete/restore. Adversarial review confirmed the sync solid and caught a fit-math bug (the Boss row was unbudgeted in `RowFit` → could clip the bottom row; fixed).
+
+**RULE 8 (CLAUDE.md).** Standing directive: every feature must consider the OTHER platform and ASK the user whether to mirror it (functionality + sync) before it's called done.
+
+**Two iOS fixes (0.4.27).** (1) Boss row message padding 20→32 to align with task rows. (2) The celebration burst never fired on a REAL completion — only the forced `.task` fixture worked. Root cause (found by on-device observation): `TimelineView(.animation)` + `Canvas` silently never starts its clock when the overlay is CREATED via an async state change (a tap callback). Fix: celebration is now ALWAYS mounted + trigger-driven (`.id(celebrationTick)`), uses `.periodic` (deterministic schedule), and gates the `TimelineView` on the populated particles so it's created in the post-`launch()` re-render — which is what makes it tick. Adversarial-reviewed after the fact: no idle battery drain, no touch-swallowing, safe on rapid completions, Mac-parity constants untouched.
+
+**Verified:** iOS 101 unit tests · Boss row on device (lvl0 + lvl2) · clearedAt wire round-trip + merge + "per-item-v beats savedAt" tests · celebration burst confirmed full-screen + uncut on a real completion (new DEBUG `celebration-real` fixture) · `pnpm sync:unlink` two-device live · Mac v0.4.27 assets + iOS build 40 VALID (both at source).
+
+**Outstanding / notes:**
+- iOS-only features still cut a no-op Mac release for version lockstep. Weigh `[skip release]` vs lockstep per change (currently choosing lockstep).
+- `ECOSYSTEM.md` + `PAYMENT-PLAN.md` are uncommitted drafts. **PAYMENT-PLAN §5 says it updated HOSTED-PLAN.md but never did** — HOSTED-PLAN still lists "Lemon Squeezy vs Paddle" (decided: Polar) + "buddy.whale.fyi" (decided: kuma.wimpdecaf.com), and frames the pass backend as "someday" vs PAYMENT-PLAN's day-one blocker. **User decision pending** before committing those drafts.
+- Minor deferred: iOS morning planner shows done tasks (Mac hides them) — pre-existing parity gap, unreachable for cleared items.
 
 ## Session summary — 2026-07-19/20 — sync never deletes tasks + mutual unlink
 
