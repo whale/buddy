@@ -5,6 +5,33 @@ Newest first.
 
 ---
 
+## 2026-07-20/21 — 0.4.27: iOS Boss Mode sync-for-free, and the celebration that only worked in the test
+
+**Sync a mirrored feature for free by riding the per-item `extras` bag.** iOS Boss Mode
+("sweep done off the list") needed `clearedAt` to sync both ways. Instead of a new wire key +
+merge rule, `clearedAt` is a COMPUTED `BuddyTask` property backed by `extras["clearedAt"]` (the
+bag that already carries the Mac's unknown per-item fields). It round-trips the existing wire,
+`pickItem` carries it (v-bump drives propagation), and it's excluded from `contentKey` exactly
+like the Mac — zero merge/contentKey change, and a sweep on either device mirrors. When mirroring
+a feature, check whether the value can ride an existing passthrough before inventing wire schema.
+
+**`TimelineView(.animation)` silently never starts when the view is CREATED via an async state
+change.** The celebration burst rendered from the forced screenshot fixture (which flips the flag
+in `.task`) but NOT on a real task completion (which flips it from a tap callback). Same view,
+same code — only the *timing of the trigger* differed. On-device observation was the only way to
+see it: a temporary full-screen tint proved the overlay MOUNTED and `onAppear`/`launch()` RAN
+(particles populated) — but the `Canvas` never redrew, so the `TimelineView` clock never ticked.
+The happy-path fixture hid it completely. Fixes that finally worked, in combination: (1) keep the
+overlay ALWAYS mounted and swap the child by `.id(trigger)` (don't insert it behind an `if` on
+async toggle); (2) use `.periodic(from:by:)` not `.animation`; (3) GATE the `TimelineView` on the
+populated `parts`/`launched` @State, so it's created in the RE-RENDER that follows `launch()` —
+that post-populate re-render is what actually kicks the clock alive. **Lesson: a UI thing that
+"works in the fixture but not in real use" is often a trigger-TIMING difference (initial-render
+vs async), not a logic bug — and `TimelineView(.animation)` is fragile to async creation. Verify
+animations by driving the REAL interaction path, not a forced flag.**
+
+---
+
 ## 2026-07-19/20 — 0.4.25: sync stops deleting tasks, mutual unlink, and the race the happy path hid
 
 Two sync features, and both taught the same lesson twice: **my own verification passed
