@@ -338,7 +338,7 @@ dependencies = [
 
 [[package]]
 name = "buddy"
-version = "0.4.14"
+version = "0.4.27"
 dependencies = [
  "base64 0.22.1",
  "core-foundation 0.10.1",

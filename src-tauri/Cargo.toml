@@ -39,7 +39,7 @@ core-graphics = "0.24"
 # Set the window's NSWindow collection behaviour so it can appear OVER apps that
 # are in native full-screen mode (CanJoinAllSpaces + FullScreenAuxiliary).
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSScreen"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSWindow", "NSResponder", "NSScreen"] }
 
 [profile.release]
 codegen-units = 1

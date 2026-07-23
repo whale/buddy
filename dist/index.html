@@ -883,17 +883,33 @@ let saveSuppressed=false;        // test hook: freeze persistence so an injected
    store and strands the old data. A file in the app-data dir is origin-independent,
    so it's the real record; localStorage is just a fast cache. Also survives a
    localStorage quota failure (the file write still lands → no silent loss). */
-function fileSave(blobStr){ if(!NATIVE) return; try{ window.__TAURI__.core.invoke('save_state', { blob: blobStr }); }catch(_){} }
+function fileSave(blobStr){
+  if(!NATIVE) return Promise.resolve();
+  try{
+    const p = window.__TAURI__.core.invoke('save_state', { blob: blobStr });
+    return (p && typeof p.catch==='function') ? p.catch(()=>{}) : Promise.resolve(p);
+  }catch(_){ return Promise.resolve(); }
+}
 async function fileLoad(){ if(!NATIVE) return null; try{ return await window.__TAURI__.core.invoke('load_state'); }catch(_){ return null; } }
 async function fileLoadRecovery(){ if(!NATIVE) return null; try{ return await window.__TAURI__.core.invoke('load_recovery_state'); }catch(_){ return null; } }
 
+function writeBlobLocal(blob){
+  try{ localStorage.setItem(STORAGE_KEY, blob); }
+  catch(e){ (memoryStore||(memoryStore={}))[STORAGE_KEY]=blob; console.warn('[buddy] localStorage write failed — relying on the file mirror', e); }
+}
 function writeNow(){
   if(saveSuppressed) return;
   clearTimeout(saveTimer); saveTimer=null;
   const blob=serialize();
-  try{ localStorage.setItem(STORAGE_KEY, blob); }
-  catch(e){ (memoryStore||(memoryStore={}))[STORAGE_KEY]=blob; console.warn('[buddy] localStorage write failed — relying on the file mirror', e); }
+  writeBlobLocal(blob);
   fileSave(blob);                // durable record regardless of localStorage state
+}
+async function writeNowAsync(){
+  if(saveSuppressed) return;
+  clearTimeout(saveTimer); saveTimer=null;
+  const blob=serialize();
+  writeBlobLocal(blob);
+  await fileSave(blob);          // needed before opening a second webview that reads the file
 }
 function save(){ if(saveSuppressed) return;
   // Stamp "last user mutation" — merge() scalar conflicts key off this. Adopting a
@@ -3205,14 +3221,17 @@ async function showMorning(){
   if(NATIVE && !IS_MORNING_WINDOW){
     closeDrawer();                 // tuck first — the guard still sees morning as "down" here
     nativeMorningOpen=true;        // NOW the main window's guards know the planner window is up
+    await writeNowAsync();         // second webview reads the durable file; flush the side-view list first
     await nativeFit('sliver');
     await openNativeMorningWindow();
     return;
   }
+  if(NATIVE && IS_MORNING_WINDOW) await refreshFromDurableState('show-morning');
   morning.classList.remove('morning-leaving','hidden');
   render();
   if(NATIVE && IS_MORNING_WINDOW){
     await fitMorningWindow();
+    if(syncStore) syncNow('morning-visible');
     return;
   }
   await morningMode(true);
@@ -3769,6 +3788,20 @@ function liveRolloverCheck(){
     showMorning();                           // a real day-change → morning
   }
 }
+async function resumeMorningCheck(){
+  if(IS_CONFETTI_WINDOW || IS_MORNING_WINDOW) return;
+  T('resumeMorningCheck');
+  await refreshFromDurableState('system-resume');
+  if(editingId!==null) return;               // don't steal/roll while a field is active
+  const rolled=rolloverAndCarry();
+  if(rolled){ setDate(); writeNow(); render(); }
+  // Wake is the moment Buddy must be first. If today is still unplanned — either
+  // because rollover just happened, or because an earlier wake/focus event missed
+  // its chance — bring Morning forward now.
+  if(!state.today.morningDone) showMorning();
+  else render();
+  if(syncStore) syncNow('system-resume');
+}
 window.addEventListener('focus', liveRolloverCheck);
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') liveRolloverCheck(); });
 setInterval(liveRolloverCheck, 60000);
@@ -3840,7 +3873,7 @@ window.__buddy = {
   deriveBlobKey, encryptBlob, decryptBlob, isEncryptedBlob, makeEncryptedStore, blobStats,  // E2E crypto
 
   openDrawer, closeDrawer,
-  showMorning, render,
+  showMorning, render, refreshFromDurableState, mergeDurableCandidates,
   renderWeather, wxKey, updateWeather,
   restartFresh, fillFromRestartStash,
   restoreLastList, mostRecentRestorableRecord, restoreHistoryTask, doneWord,
@@ -3867,6 +3900,10 @@ window.__buddy = {
     const stashSnap=restartStash; restartStash=null;   // hermetic: a prior Restart must not skew the restore-row test
     try{
       state.tombstones={};
+      const staleMorning=hydrate(migrate({version:1,savedAt:2000,today:{date:localDate(),morningDone:false,items:[{id:'s1',text:'alpha',state:'neutral',v:1}]},history:[],deferred:[],settings:{celebrate:100,reserveSpace:false},pinned:false,tombstones:{},erasedAt:null}));
+      const fullFile=hydrate(migrate({version:1,savedAt:1500,today:{date:localDate(),morningDone:false,items:[{id:'s1',text:'alpha',state:'neutral',v:1},{id:'s2',text:'beta',state:'neutral',v:1}]},history:[],deferred:[],settings:{celebrate:100,reserveSpace:false},pinned:false,tombstones:{},erasedAt:null}));
+      const durableMerged=mergeDurableCandidates([staleMorning, fullFile]);
+      ok('morning durable refresh keeps file-only task', durableMerged.today.items.some(i=>i.id==='s2'), 'ids='+durableMerged.today.items.map(i=>i.id).join(','));
       state.today={ date:localDate(), morningDone:true, items:[
         {id:'s1',text:'alpha',state:'neutral',v:1},{id:'s2',text:'beta',state:'neutral',v:1} ] };
       editingId=null; render();
@@ -4833,6 +4870,7 @@ if(NATIVE){
     // ⌘⌥⌃M: raise, then show/hide morning. Hiding uses leaveMorningToDrawer (NOT skip)
     // so a peek-and-close does NOT mark the day planned — the auto-morning can still fire.
     ev.listen('buddy://morning-toggle', ()=> showMorning());   // ⌘⌥⌃M ALWAYS brings the morning planner forward (not a hide-toggle)
+    ev.listen('buddy://system-resumed', ()=> resumeMorningCheck());
     ev.listen('buddy://morning-closed', async ()=>{
       nativeMorningOpen=false;     // planner window closed → main-window guards back to normal
       await bootReconcileFile();
@@ -4848,7 +4886,8 @@ if(NATIVE){
   } else {
     // Re-shown morning window: Rust emits this after win.show() — render the
     // planner again (the webview kept whatever it last displayed).
-    ev.listen('buddy://morning-open', ()=>{ diag('morning-open',{}); showMorning(); });
+    ev.listen('buddy://morning-open', async ()=>{ diag('morning-open',{}); await refreshFromDurableState('morning-open'); showMorning(); });
+    ev.listen('buddy://system-resumed', ()=>{ if(morningVisible()) refreshFromDurableState('morning-resume').then(()=>render()); });
   }
 }
 /* ---- Report a bug (tray menu) -------------------------------------------------
@@ -5011,6 +5050,26 @@ function boot(){
   if(NATIVE){ bootReconcileFile(); return; }
   bootFinish(false);
 }
+function mergeDurableCandidates(candidates){
+  return (candidates||[]).reduce((acc,h)=>merge(acc,h), null);
+}
+async function refreshFromDurableState(reason){
+  if(!NATIVE || IS_CONFETTI_WINDOW) return false;
+  const currentH=hydrate(migrate(parseRaw(serialize())||{}));
+  const lsH=hydrate(migrate(parseRaw(lsGet(STORAGE_KEY))||{}));
+  const bakH=hydrate(migrate(parseRaw(lsGet(BAK_KEY))||{}));
+  const fileH=hydrate(migrate(parseRaw(await fileLoad())||{}));
+  const recoveryH=hydrate(migrate(parseRaw(await fileLoadRecovery())||{}));
+  const before=(state.today&&state.today.items&&state.today.items.length)||0;
+  const merged = mergeDurableCandidates([currentH, lsH, bakH, fileH, recoveryH]);
+  if(!merged) return false;
+  applyHydrated(merged);
+  if(!merged.hadToday) state.today={ date:localDate(), items:[], morningDone:false };
+  const after=(state.today&&state.today.items&&state.today.items.length)||0;
+  diag('durable-refresh', {reason:String(reason||'').slice(0,40), before, after, file:!!fileH, recovery:!!recoveryH});
+  writeNow();                         // converge this webview cache to the durable truth without re-stamping savedAt
+  return true;
+}
 async function bootReconcileFile(){
   const fileH=hydrate(migrate(parseRaw(await fileLoad())||{}));
   const recoveryH=hydrate(migrate(parseRaw(await fileLoadRecovery())||{}));
@@ -5028,7 +5087,7 @@ async function bootReconcileFile(){
     // Include the localStorage .bak too: it's a same-device snapshot that can hold tasks
     // an accidental empty save zeroed out of the primary/file/recovery. The union-merge
     // brings them back; tombstones/erasedAt still drop anything intentionally deleted.
-    const merged = [lsHydrated, bakHydrated, fileH, recoveryH].reduce((acc,h)=>merge(acc,h), null);
+    const merged = mergeDurableCandidates([lsHydrated, bakHydrated, fileH, recoveryH]);
     if(merged){
       applyHydrated(merged);
       if(!merged.hadToday) state.today={ date:localDate(), items:[], morningDone:false };
@@ -5051,7 +5110,10 @@ boot();
 // edits show up. Local changes push via scheduleSync() (hooked into save()).
 initSyncUI();
 initSync().then(()=>{ if(syncStore) syncNow('boot'); });
-window.addEventListener('focus', ()=>{ if(syncStore) syncNow('focus'); });
+window.addEventListener('focus', ()=>{
+  if(IS_MORNING_WINDOW) refreshFromDurableState('morning-focus').then(()=>render());
+  if(syncStore) syncNow('focus');
+});
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && syncStore) syncNow('focus'); });
 // LIVE sync: poll every 1.5s while visible so the OTHER device's edits show up within ~1.5s
 // (syncNow no-ops when nothing changed, so this is cheap and never flickers the UI).

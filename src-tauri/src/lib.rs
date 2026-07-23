@@ -142,9 +142,14 @@ fn set_morning_mode(app: AppHandle, on: bool) {
 fn open_morning_window(app: AppHandle) {
     if let Some(win) = app.get_webview_window("morning") {
         #[cfg(target_os = "macos")]
-        make_standard_morning_window(&win);
+        {
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+            make_standard_morning_window(&win);
+        }
         let _ = win.show();
         let _ = win.set_focus();
+        #[cfg(target_os = "macos")]
+        activate_and_raise_window(&win);
         // The webview keeps whatever it last showed — without this the re-shown
         // window is BLANK (the planner overlay hid itself when the day was done).
         // Opening the window is an explicit "show me the planner" intent.
@@ -183,6 +188,7 @@ fn open_morning_window(app: AppHandle) {
     #[cfg(target_os = "macos")]
     {
         let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+        activate_and_raise_window(&win);
     }
 }
 
@@ -358,6 +364,27 @@ fn make_standard_morning_window(win: &tauri::WebviewWindow) {
                 if let Some(ns) = (ptr as *const NSWindow).as_ref() {
                     apply_standard_morning_chrome(ns);
                     fit_morning_window_to_visible_screen(ns);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn activate_and_raise_window(win: &tauri::WebviewWindow) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSWindow};
+
+    if let Some(mtm) = MainThreadMarker::new() {
+        let app = NSApplication::sharedApplication(mtm);
+        app.activateIgnoringOtherApps(true);
+    }
+
+    if let Ok(ptr) = win.ns_window() {
+        if !ptr.is_null() {
+            unsafe {
+                if let Some(ns) = (ptr as *const NSWindow).as_ref() {
+                    ns.makeKeyAndOrderFront(None);
                 }
             }
         }
@@ -1212,6 +1239,11 @@ pub fn run() {
                 _ => {}
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Buddy");
+        .build(tauri::generate_context!())
+        .expect("error while building Buddy")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Resumed = event {
+                let _ = app_handle.emit("buddy://system-resumed", ());
+            }
+        });
 }
