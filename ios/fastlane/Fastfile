@@ -85,11 +85,17 @@ platform :ios do
     # waiting on, a green `fastlane beta` means the build is genuinely visible
     # to testers; a swallowed build fails the lane instead (field report
     # 2026-07-10: "you say it's pushed and I don't see anything").
+    # Distribute to the external "Friends" group on every upload. Without this
+    # (distribute_external: false) builds sit on TestFlight visible to NOBODY
+    # external — the exact reason Jess was stranded on build 27 while 34–40
+    # piled up unassigned (2026-07-28). distribute_external submits the build
+    # for Apple's beta review; once it clears, the group gets it automatically.
     upload_to_testflight(
       api_key: api_key,
       skip_waiting_for_build_processing: false,
-      distribute_external: false,
-      notify_external_testers: false
+      distribute_external: true,
+      groups: ["Friends"],
+      notify_external_testers: true
     )
   end
 
