@@ -39,7 +39,11 @@ core-graphics = "0.24"
 # Set the window's NSWindow collection behaviour so it can appear OVER apps that
 # are in native full-screen mode (CanJoinAllSpaces + FullScreenAuxiliary).
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSWindow", "NSResponder", "NSScreen"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSWindow", "NSResponder", "NSScreen", "NSWorkspace"] }
+# Wake/unlock observers (NSWorkspace + distributed notification centers) use the
+# block-based addObserver API, which needs block2 + the Foundation bindings.
+objc2-foundation = { version = "0.3", features = ["NSNotification", "NSDistributedNotificationCenter", "NSString", "NSOperation", "block2"] }
+block2 = "0.6"
 
 [profile.release]
 codegen-units = 1

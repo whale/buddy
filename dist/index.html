@@ -3788,8 +3788,17 @@ function liveRolloverCheck(){
     showMorning();                           // a real day-change → morning
   }
 }
+let resumeCheckBusy=false, resumeCheckAt=0;
 async function resumeMorningCheck(){
   if(IS_CONFETTI_WINDOW || IS_MORNING_WINDOW) return;
+  // Wake AND screen-unlock both emit buddy://system-resumed within ~1s of each
+  // other — run once. The guard also rate-limits any app spamming the (public)
+  // distributed unlock notification.
+  if(resumeCheckBusy || Date.now()-resumeCheckAt<5000) return;
+  resumeCheckBusy=true; resumeCheckAt=Date.now();
+  try{ await resumeMorningCheckInner(); } finally{ resumeCheckBusy=false; }
+}
+async function resumeMorningCheckInner(){
   T('resumeMorningCheck');
   await refreshFromDurableState('system-resume');
   if(editingId!==null) return;               // don't steal/roll while a field is active

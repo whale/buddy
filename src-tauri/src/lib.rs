@@ -391,6 +391,57 @@ fn activate_and_raise_window(win: &tauri::WebviewWindow) {
     }
 }
 
+/// Real wake/unlock triggers. `tauri::RunEvent::Resumed` never fires on macOS
+/// sleep/wake (it's a startup/mobile-lifecycle event), so the v0.4.27 wake
+/// summon was dead code — nothing ran at unlock and Morning stayed buried.
+/// The OS signals that actually fire are NSWorkspaceDidWakeNotification (wake
+/// from sleep — screen usually still locked) and the distributed
+/// "com.apple.screenIsUnlocked" (the moment the user is really back). Emit on
+/// both; the JS `resumeMorningCheck` is idempotent. The short delay lets
+/// loginwindow finish handing focus back so the subsequent raise sticks.
+#[cfg(target_os = "macos")]
+fn emit_system_resumed(app: AppHandle) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        let _ = app.emit("buddy://system-resumed", ());
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn register_wake_observers(app: AppHandle) {
+    use block2::RcBlock;
+    use objc2_app_kit::{NSWorkspace, NSWorkspaceDidWakeNotification};
+    use objc2_foundation::{NSDistributedNotificationCenter, NSNotification, NSString};
+    use std::ptr::NonNull;
+
+    unsafe {
+        let wake_app = app.clone();
+        let wake_block =
+            RcBlock::new(move |_: NonNull<NSNotification>| emit_system_resumed(wake_app.clone()));
+        let token = NSWorkspace::sharedWorkspace()
+            .notificationCenter()
+            .addObserverForName_object_queue_usingBlock(
+                Some(NSWorkspaceDidWakeNotification),
+                None,
+                None,
+                &wake_block,
+            );
+        std::mem::forget(token); // app-lifetime observer — never unregistered
+
+        let unlock_app = app.clone();
+        let unlock_block =
+            RcBlock::new(move |_: NonNull<NSNotification>| emit_system_resumed(unlock_app.clone()));
+        let token = NSDistributedNotificationCenter::defaultCenter()
+            .addObserverForName_object_queue_usingBlock(
+                Some(&NSString::from_str("com.apple.screenIsUnlocked")),
+                None,
+                None,
+                &unlock_block,
+            );
+        std::mem::forget(token);
+    }
+}
+
 /// macOS: Morning should behave like a normal resizable document window. The
 /// drawer starts as a frameless transparent utility, so when Morning turns on we
 /// explicitly restore the standard titled/resizable frame. Avoid
@@ -1054,6 +1105,10 @@ pub fn run() {
             // show the current app icon without any user action.
             #[cfg(target_os = "macos")]
             refresh_app_icon_cache(&handle);
+
+            // Wake + screen-unlock → bring an unplanned Morning forward.
+            #[cfg(target_os = "macos")]
+            register_wake_observers(handle.clone());
 
             // DEV ONLY: auto-fire a celebration a few seconds after launch so the
             // overlay pipeline can be verified without clicking tasks.
