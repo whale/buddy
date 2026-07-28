@@ -1,6 +1,30 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-28. Branch `main`. Latest **Mac**: **`v0.4.29`** (auto-released via CI; DMG + updater manifest live, verified at source). Latest **iOS**: **TestFlight `0.4.27 (build 40)`** — Apple-confirmed VALID. Version skew Mac 0.4.29 vs iOS 0.4.27 is deliberate: 0.4.29 is Mac-window-only (wake summon), no shared plumbing touched. Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
+_Last updated: 2026-07-28 (later). Branch `main`. Latest **Mac**: **`v0.4.31`** (auto-released via CI; DMG + updater manifest live, verified at source). Latest **iOS**: **TestFlight `0.4.31 (build 41)`** — Apple-confirmed VALID, in beta review for the external Friends group. Mac + iOS now VERSION-MATCHED at 0.4.31 (shared blank-task/sync fix shipped both rails). Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
+
+## Session summary — 2026-07-28 (later) — Onboarding a tester + blank-task fix (Mac 0.4.31 / iOS build 41)
+
+**Context:** onboarding a friend (Jess, `iamjessbrown@me.com`) to Buddy on Mac + iPhone. Two real bugs surfaced and both are fixed + shipped.
+
+**1. TestFlight external tester was stranded on ancient build 27.** Root cause: the external **"Friends"** beta group had ZERO builds assigned, and the `beta` lane uploaded with `distribute_external: false` — so every build sat visible to no external tester and piled up unassigned. Diagnosed via the ASC API (betaGroups / builds / betaTesters). Fixes:
+- **PR #152 (merged):** Fastfile `distribute_external: true` + `groups: ["Friends"]` + `notify_external_testers: true` — every `fastlane beta` now auto-distributes to Jess + submits Apple beta review.
+- **PR #155 (open):** added `changelog:` to the same call — external distribution HARD-FAILS without a "What to Test" note (`No changelog provided for new build`), which killed the first 0.4.31 upload. Also bumped iOS `MARKETING_VERSION` 0.4.27 → 0.4.31.
+- Note: internal testers skip Apple review but require the person be a USER on the ASC account (inviting via API is blocked by the safety classifier). Chose external + wait-out-review (~hours) over account access for a casual friend.
+
+**2. Blank task turned the whole drawer red + synced across (PR #154, merged).** An empty-text ACTIVE task (a row added, never typed) counted toward `activeCount` → falsely pushed the drawer to lvl2 (whole-screen red) AND rode the sync wire to the other device. Field-caught in Jess's screenshot: a phantom 6th task turned his drawer red. Three guards, mirrored Mac + iOS:
+- Escalation uses a new committed-only count (`escalationCount`), NOT `activeCount` (the HARD_CAP add-gate still uses `activeCount`).
+- Blanks swept on cold load (Mac `hydrate`, iOS `applyPersistedData`); iOS commits any in-flight edit on TRUE `.background` scenePhase only (NOT `.inactive` — that would discard a row on Control Center / Face ID / app switcher).
+- Empty actives dropped from every `mergeItems` — a blank can never ride the wire or survive a cross-device sync.
+
+**RULE 6 skeptic caught two real issues before the PR** (both fixed): the `.inactive` regression above, and a solo/never-paired device never cleaning a persisted blank (→ added the cold-load sweep).
+
+**Verified:** Mac — repro (6 rows, 1 blank) renders **lvl1** not lvl2, cold-load drops the blank, `smokeTest` `ok:true`, observed in a real browser. iOS — **26 tests pass** incl. 3 new regression tests (merge-drop, load-sweep, escalation-excludes-blank). Both releases confirmed at source: Mac `v0.4.31` (`gh release view`), iOS build 41 `VALID` (script poll + independent ASC check).
+
+**Outstanding:**
+- **PR #155 open** — merge to make the iOS version bump + changelog fix permanent (`[skip release]`).
+- **Build 41 in Apple beta review** — `WAITING_FOR_BETA_REVIEW`. Auto-distributes to Jess when it clears (~hours). A background watcher was polling this session (won't survive session end — re-check with `node scripts/buddy-asc-builds.mjs` or the ASC betaGroups query).
+- **Jess final step:** once build 41 clears, he updates TestFlight to 0.4.31, taps Scan QR, pairs with his Mac.
+- `ECOSYSTEM.md` + `PAYMENT-PLAN.md` STILL uncommitted drafts (public-vs-private decision pending) — now 7+ days old.
 
 ## Session summary — 2026-07-28 — Mac v0.4.29: Morning actually summons on wake/unlock
 
