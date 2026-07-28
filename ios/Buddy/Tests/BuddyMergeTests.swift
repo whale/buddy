@@ -29,6 +29,25 @@ final class BuddyMergeTests: XCTestCase {
         XCTAssertEqual(m?.today?.items.first { $0.id == "t2" }?.text, "B-edit")
     }
 
+    // A blank active row carries no information and must NEVER survive a merge — that's
+    // how a phantom blank reached a second device and falsely tripped lvl2 (2026-07-28).
+    // Empty + whitespace-only actives are dropped; done rows and real text are kept.
+    // Mirrors the Mac mergeItems filter.
+    func testEmptyActiveTaskDroppedFromMerge() {
+        let a = snap(today: TodayState(date: "2026-06-19", items: [
+            item("real", "keep me"),
+            item("blank", ""),
+            item("ws", "   "),
+            item("done", "finished", .done),
+        ]), savedAt: 2000)
+        let b = snap(today: TodayState(date: "2026-06-19", items: []), savedAt: 1000)
+        let items = BuddyMerge.merge(a, b)?.today?.items ?? []
+        XCTAssertNil(items.first { $0.id == "blank" })     // empty active dropped
+        XCTAssertNil(items.first { $0.id == "ws" })        // whitespace-only active dropped
+        XCTAssertNotNil(items.first { $0.id == "real" })   // real text kept
+        XCTAssertNotNil(items.first { $0.id == "done" })   // done row kept unconditionally
+    }
+
     // 2. Higher per-item v wins regardless of savedAt.
     func testHigherItemVersionWins() {
         let m = BuddyMerge.merge(

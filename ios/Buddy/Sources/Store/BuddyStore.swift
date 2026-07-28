@@ -50,6 +50,11 @@ final class BuddyStore {
     var bossReady: Bool { listDoneTasks.count >= Self.bossMin }
     var activeCount: Int         { activeTasks.count }
     var atHardCap: Bool          { activeCount >= Self.hardCap }
+    // Actives with COMMITTED text — drives escalation only. A blank, untitled row
+    // (just added, not yet typed) must never push the red alarm; counting one once
+    // flipped the whole drawer to lvl2 on a phantom 6th task (2026-07-28). Mirrors
+    // Mac's escalationCount(). The hard-cap gate keeps using activeCount.
+    var escalationCount: Int     { today.items.filter { $0.isActive && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count }
 
     // MARK: - Save debounce
     private var saveWorkItem: DispatchWorkItem?
@@ -511,6 +516,11 @@ final class BuddyStore {
     private func applyPersistedData(_ data: Data) -> Bool {
         guard let blob = try? JSONDecoder().decode(PersistedBlob.self, from: data) else { return false }
         today    = blob.today ?? TodayState(date: Self.localDate(), items: [])
+        // A blank active row must not survive a cold load: the merge filter only runs on
+        // sync, so on a solo (never-paired) device an empty persisted before commit
+        // (force-quit / OOM mid-add) would hold a cap slot forever behind a calm drawer
+        // (skeptic 2026-07-28). No edit is in flight at load, so this is always safe.
+        today.items.removeAll { !$0.isDone && $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         history  = (blob.history ?? []).map { var d = $0; d.backfillItemIds(); return d }   // legacy records get stable ids
         deferred = blob.deferred ?? []
         settings = blob.settings ?? .default

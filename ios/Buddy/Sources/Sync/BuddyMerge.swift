@@ -311,7 +311,11 @@ enum BuddyMerge {
             if tombstones[it.id] != nil { continue }
             out.append(it)
         }
-        return out
+        // Drop stray EMPTY active items — a blank, untitled task carries no information
+        // and must never survive a merge or ride the wire (that's how a phantom blank
+        // reached a second device and falsely tripped lvl2, 2026-07-28). Done rows are
+        // always kept. Mirrors the Mac mergeItems filter.
+        return out.filter { $0.isDone || !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     // MARK: - history

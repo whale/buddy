@@ -78,7 +78,10 @@ struct TodayView: View {
     // MARK: Derived
 
     private var activeCount: Int { debugActiveOverride ?? store.activeCount }
-    private var theme: EscalationTheme { EscalationTheme.from(activeCount: activeCount) }
+    // Escalation follows COMMITTED actives (empties excluded) so a blank row never
+    // trips the red alarm. debugActiveOverride still forces a level for screenshots.
+    private var escalationCount: Int { debugActiveOverride ?? store.escalationCount }
+    private var theme: EscalationTheme { EscalationTheme.from(activeCount: escalationCount) }
 
     // MARK: Body
 
@@ -188,6 +191,14 @@ struct TodayView: View {
                 sync?.syncOnForeground()                        // pull + go live on foreground
             }
             else {
+                // TRUE backgrounding (not a transient .inactive from Control Center, the
+                // app switcher, Face ID, or a permission alert) flushes an in-flight edit,
+                // so a just-added, untitled row can't persist and later trip the red alarm
+                // on a phantom count (2026-07-28). Gating to .background is load-bearing:
+                // committing on .inactive would discard the blank row and kick the user
+                // out of editing on a passing interruption (skeptic). .inactive still
+                // pauses sync exactly as before.
+                if phase == .background, let editing = editingId { commitEdit(id: editing) }
                 sync?.pauseSync()                               // stop polling in the background
                 BackgroundSync.schedule()                       // ask iOS for a refresh slot while closed
             }
