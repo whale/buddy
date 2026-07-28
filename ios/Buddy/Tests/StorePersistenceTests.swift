@@ -72,6 +72,46 @@ final class StorePersistenceTests: XCTestCase {
         wipeStoreFiles()
     }
 
+    // A blank active row persisted before commit (force-quit / OOM mid-add) must be swept
+    // on cold load — otherwise on a solo, never-synced device it holds a cap slot forever
+    // behind a calm drawer, since the merge filter only runs on sync (skeptic 2026-07-28).
+    func testEmptyActiveTaskSweptOnLoad() throws {
+        wipeStoreFiles()
+        let today = BuddyStore.localDate()
+        let blob = """
+        { "version": 1, "savedAt": 5000,
+          "today": { "date": "\(today)", "morningDone": false,
+                     "items": [ { "id": "real",  "text": "keep me", "state": "neutral", "v": 1 },
+                                { "id": "blank", "text": "",        "state": "neutral", "v": 1 },
+                                { "id": "ws",    "text": "   ",     "state": "neutral", "v": 1 } ] },
+          "history": [], "deferred": [], "tombstones": {}, "erasedAt": null }
+        """
+        try Data(blob.utf8).write(to: BuddyStore.storeURL)
+
+        let store = BuddyStore()
+
+        XCTAssertEqual(store.today.items.map { $0.id }, ["real"])   // blanks swept, real kept
+        XCTAssertEqual(store.activeCount, 1)
+        wipeStoreFiles()
+    }
+
+    // A just-added, still-blank row counts toward the cap gate (activeCount) but must NOT
+    // drive escalation (escalationCount) — counting it once flipped the whole drawer to
+    // lvl2 on a phantom 6th task (2026-07-28).
+    func testBlankRowExcludedFromEscalationCount() {
+        let store = BuddyStore()
+        store.today = TodayState(date: BuddyStore.localDate(), items: [
+            BuddyTask(id: "1", text: "a", state: .neutral, doneAt: nil, v: 1),
+            BuddyTask(id: "2", text: "b", state: .neutral, doneAt: nil, v: 1),
+            BuddyTask(id: "3", text: "c", state: .neutral, doneAt: nil, v: 1),
+            BuddyTask(id: "4", text: "d", state: .neutral, doneAt: nil, v: 1),
+            BuddyTask(id: "5", text: "e", state: .neutral, doneAt: nil, v: 1),
+            BuddyTask(id: "6", text: "",  state: .neutral, doneAt: nil, v: 1),   // blank 6th
+        ])
+        XCTAssertEqual(store.activeCount, 6)       // cap gate still counts the blank
+        XCTAssertEqual(store.escalationCount, 5)   // escalation ignores it → stays lvl1, not lvl2
+    }
+
     // With a valid backup present, a corrupt primary recovers from the backup.
     func testCorruptPrimaryRecoversFromBackup() throws {
         wipeStoreFiles()

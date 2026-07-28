@@ -982,7 +982,12 @@ function hydrate(blob){
         state:(i.state==='done')?i.state:'neutral',   // legacy 'focused' → neutral ("now" removed)
         src:i.src??null, doneAt:(typeof i.doneAt==='number'?i.doneAt:null),
         doneWord:(typeof i.doneWord==='string'?i.doneWord:null),
-        v:(typeof i.v==='number'&&i.v>0)?i.v:1 })) }   // legacy items pre-v default to 1
+        v:(typeof i.v==='number'&&i.v>0)?i.v:1 }))
+        // A blank active row must not survive a cold load: the merge filter only runs on
+        // sync, so on a solo (never-paired) device an empty persisted before commit would
+        // hold a cap slot forever behind a calm drawer (skeptic 2026-07-28). No edit is in
+        // flight at load, so dropping empty actives here is always safe. Done rows kept.
+        .filter(it => it.state==='done' || String(it.text||'').trim()) }
     : null;
   const extras={};
   for(const k of Object.keys(blob)) if(!KNOWN_WIRE_KEYS.includes(k) && !DROP_WIRE_KEYS.includes(k)) extras[k]=blob[k];
@@ -1106,7 +1111,12 @@ function mergeItems(primary, secondary, tombstones){
     if(it.id in tombstones) continue;
     out.push(it);
   }
-  return out;
+  // Drop stray EMPTY active items — a blank, untitled task carries no information and
+  // must never survive a merge or ride the wire (that's how a phantom blank task
+  // reached a second device and falsely tripped lvl2, 2026-07-28). Done rows are always
+  // kept. Safe because sync is deferred while a row is being edited (see editingActive),
+  // so a live, still-empty edit row is never present at merge time.
+  return out.filter(it => it.state==='done' || String(it.text||'').trim());
 }
 // After a cross-device merge, the UNION of both devices' active tasks can exceed the
 // 6-task cap and carry same-title duplicates (each device minted its own id, so
@@ -2628,7 +2638,13 @@ function render(){
   requestAnimationFrame(fitToday);
   save();                                  // debounced persist after any mutation
 }
-function warnLevel(){ const n=activeCount(); return n>=HARD_CAP?2 : n===SOFT_CAP?1 : 0; }
+// Escalation counts only COMMITTED actives — a blank, untitled row (the just-added
+// row you haven't typed into, or a stray empty that slipped through) must never drive
+// the red alarm. Counting it once flipped the whole drawer to lvl2 on a phantom 6th
+// task (2026-07-28). activeCount() stays as-is for the HARD_CAP gate; only the level
+// ignores empties.
+function escalationCount(){ return state.items.filter(i => i.state!=='done' && String(i.text||'').trim()).length; }
+function warnLevel(){ const n=escalationCount(); return n>=HARD_CAP?2 : n===SOFT_CAP?1 : 0; }
 
 // The sync-overflow notice: a task never silently disappears on sync — if the union of
 // two devices exceeds the cap, the losers are parked in Future and THIS tells the user.
