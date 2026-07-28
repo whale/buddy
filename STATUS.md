@@ -1,6 +1,35 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-21. Branch `main`. Latest **Mac**: **`v0.4.27`** (auto-released via CI; DMG + updater manifest live). Latest **iOS**: **TestFlight `0.4.27 (build 40)`** — Apple-confirmed VALID. Both platforms fully in sync at 0.4.27. Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
+_Last updated: 2026-07-28. Branch `main`. Latest **Mac**: **`v0.4.29`** (auto-released via CI; DMG + updater manifest live, verified at source). Latest **iOS**: **TestFlight `0.4.27 (build 40)`** — Apple-confirmed VALID. Version skew Mac 0.4.29 vs iOS 0.4.27 is deliberate: 0.4.29 is Mac-window-only (wake summon), no shared plumbing touched. Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
+
+## Session summary — 2026-07-28 — Mac v0.4.29: Morning actually summons on wake/unlock
+
+**The v0.4.27 "refresh Morning state on wake" summon was dead code.** It hung off
+`tauri::RunEvent::Resumed`, which never fires on macOS sleep/wake (startup/mobile-lifecycle
+event only). Field evidence: diag log frozen through the 9:02 unlock — no `system-resume`,
+no sync polls, Morning stayed buried behind Ghostty. Fix (PR #150 → **Mac v0.4.29**):
+
+- **Rust:** `register_wake_observers` — `NSWorkspaceDidWakeNotification` (workspace center) +
+  distributed `com.apple.screenIsUnlocked`, via objc2/block2; each emits the existing
+  `buddy://system-resumed` after 800ms (lets loginwindow hand focus back before the raise).
+  Observer tokens deliberately leaked (`mem::forget`) — app-lifetime.
+- **JS:** `resumeMorningCheck` gained a busy + 5s debounce guard — wake and unlock both fire
+  within ~1s (adversarial-review catch), and it rate-limits spoofed distributed notifications.
+
+**Verified:** live dev test — posted a fake `com.apple.screenIsUnlocked` (Swift one-liner),
+Morning raised over all windows, frontmost=Buddy via `lsappinfo`, diag chain
+`system-resume → morning-open` · `smokeTest()` 47/47 · v0.4.29 release assets confirmed at
+source (`gh release view`). **Not yet verified: a real overnight unlock** (800ms delay is a
+judgment call) — check the morning after updating to 0.4.29.
+
+**Outstanding / notes:**
+- iOS mirror: n/a — Mac-window-only affordance (RULE 8 decision, not a lapse).
+- iOS `MARKETING_VERSION` still 0.4.27 — bump to match on the next iOS ship.
+- `ECOSYSTEM.md` + `PAYMENT-PLAN.md` STILL uncommitted drafts (public-vs-private decision
+  pending, see 07-21 notes). Now 7+ days old.
+- Separate observation, unexplained: the two webviews' sync polls froze at 06:54 EDT while the
+  machine later woke at 9:02 — expected while asleep, but worth watching whether polls resume
+  promptly after 0.4.29's wake events (they should: `system-resume` triggers `syncNow`).
 
 ## Session summary — 2026-07-20/21 — iOS Boss Mode (mirrored + synced), RULE 8, and two iOS fixes
 

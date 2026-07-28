@@ -5,7 +5,28 @@ Newest first.
 
 ---
 
-## 2026-07-20/21 — 0.4.27: iOS Boss Mode sync-for-free, and the celebration that only worked in the test
+## 2026-07-28 — 0.4.29: the wake summon that never ran
+
+**`tauri::RunEvent::Resumed` does NOT fire on macOS sleep/wake.** It's a startup/mobile-
+lifecycle event. Any "do X when the Mac wakes/unlocks" must observe the real OS signals:
+`NSWorkspaceDidWakeNotification` (workspace notification center) and the distributed
+`com.apple.screenIsUnlocked`. The v0.4.27 wake feature shipped wired to `Resumed` and was
+dead code for five days — classic "it's not working hard enough" vs "it's not actually
+running". The diag log settled it in one read: zero events at the unlock timestamp.
+
+**You can fake a screen unlock to test wake behaviour** — no sleep cycle needed:
+`swift -e 'import Foundation; DistributedNotificationCenter.default().postNotificationName(Notification.Name("com.apple.screenIsUnlocked"), object: nil, userInfo: nil, deliverImmediately: true)'`
+Pair with `lsappinfo info -only name $(lsappinfo front)` for a no-permissions frontmost check.
+Flip side: any app can post that notification (it's public) — handlers must debounce/rate-limit.
+
+**OS wake + unlock arrive as a PAIR (~1s apart).** Two observers → two emits → the JS handler
+ran twice concurrently (durable-refresh race). Adversarial review caught it; fixed with a
+busy-flag + 5s debounce in `resumeMorningCheck`. When two OS signals mean the same user-facing
+moment, dedupe at the handler, not by dropping one signal (some wakes never lock).
+
+**Single-instance plugin blocks dev-next-to-installed testing.** `pnpm tauri dev` exits
+silently (code 0, no error) while the installed Buddy runs — quit the real app first, and
+re-`open -a Buddy` when done.
 
 **Sync a mirrored feature for free by riding the per-item `extras` bag.** iOS Boss Mode
 ("sweep done off the list") needed `clearedAt` to sync both ways. Instead of a new wire key +
