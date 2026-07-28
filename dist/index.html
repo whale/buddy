@@ -2522,9 +2522,14 @@ if(morningList){ morningList.style.setProperty('--fs','22px'); morningList.style
 let _lastFitH=-1;
 function fitToday(){ fitWrap(todayWrap); _lastFitH=todayWrap.clientHeight;
   // Squeezed mode: flip the row-action column horizontal (gradient scrim) once
-  // rows are too short for the vertical trio (3×30px + gaps ≈ 112px).
-  const firstRow=todayWrap.querySelector('.row-neutral[data-flip]');
-  todayWrap.classList.toggle('squeezed', !!firstRow && firstRow.clientHeight < 112);
+  // rows get too short for the vertical trio (3×30px + gaps ≈ 112px). Threshold is
+  // 150 — the trio plus breathing room — because at 112-150px the icons still fit
+  // but touch the row borders. Measured on the SHORTEST row, not the first: with a
+  // mixed pile (many donezos + many tasks) row heights vary and any one of them
+  // can be the cramped one.
+  const rows=[...todayWrap.querySelectorAll('.row-neutral[data-flip]')];
+  const minRow=rows.length?Math.min(...rows.map(r=>r.clientHeight)):Infinity;
+  todayWrap.classList.toggle('squeezed', minRow < 150);
 }
 new ResizeObserver(()=>{ if(todayWrap.clientHeight===_lastFitH) return; requestAnimationFrame(fitToday); }).observe(todayWrap);
 window.addEventListener('resize',()=>{ _lastFitH=-1; requestAnimationFrame(fitToday); });
