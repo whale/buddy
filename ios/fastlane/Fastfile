@@ -90,12 +90,17 @@ platform :ios do
     # external — the exact reason Jess was stranded on build 27 while 34–40
     # piled up unassigned (2026-07-28). distribute_external submits the build
     # for Apple's beta review; once it clears, the group gets it automatically.
+    # External distribution REQUIRES a "What to Test" note — without `changelog`,
+    # upload_to_testflight hard-fails ("No changelog provided for new build",
+    # 2026-07-28). Default keeps every build shippable; BETA_CHANGELOG overrides it
+    # per-run when a build has something specific to call out.
     upload_to_testflight(
       api_key: api_key,
       skip_waiting_for_build_processing: false,
       distribute_external: true,
       groups: ["Friends"],
-      notify_external_testers: true
+      notify_external_testers: true,
+      changelog: ENV.fetch("BETA_CHANGELOG", "Bug fixes and sync improvements.")
     )
   end
 
