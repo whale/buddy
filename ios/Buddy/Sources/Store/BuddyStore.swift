@@ -22,6 +22,10 @@ final class BuddyStore {
     var settings: BuddySettings = .default
     // --- sync merge foundation (step 2, no network yet) ---
     var tombstones: [String: Double] = [:]  // { itemId: deletedAt } — deletes persist across a merge
+    // { itemId: {v, t} } — a rollover archived this id as DONE, at that version. Absence alone
+    // never wins a union-merge, so without this the peer that never saw the completion re-adds
+    // its own ACTIVE copy and the task resurrects (field report 2026-08-08). Mirrors the Mac.
+    var doneTombs: [String: DoneMark] = [:]
     var erasedAt: Double? = nil             // "erase all" barrier so a real wipe wins over stale pushes
     // "N tasks moved to Future on sync" banner — synced + dismissible (mirrors the Mac's
     // state.syncNotice). Set by a merge that relocated over-cap tasks; cleared on dismiss.
@@ -81,6 +85,18 @@ final class BuddyStore {
     // from another device can't resurrect the deleted task. Mirrors Mac's tombstone().
     private func tombstone(_ id: String) {
         tombstones[id] = Date().timeIntervalSince1970
+    }
+
+    /// Mark an id as "archived done by a rollover" at the version it held. Merge then drops any
+    /// copy at v <= the mark, so the peer's stale ACTIVE copy loses — while an undo (which bumps
+    /// v past the mark) still wins. `t` is MILLISECONDS here (see DoneMark). Mirrors Mac markDone.
+    private func markDone(_ id: String, _ v: Int, _ date: String) {
+        guard !id.isEmpty else { return }
+        let n = Swift.max(1, v)
+        if let prev = doneTombs[id], prev.v > n { return }
+        // Stamped from the ARCHIVED DAY, never the local clock — merge() emits these too, and a
+        // clock read there makes two devices produce different maps from identical inputs.
+        doneTombs[id] = DoneMark(v: n, t: BuddyMerge.dayStamp(date))
     }
 
     // MARK: - Task mutations
@@ -233,10 +249,23 @@ final class BuddyStore {
     /// Mirrors the Mac's mostRecentRestorableRecord + restorableTexts.
     func lastListForRestore() -> [String] {
         for d in history.sorted(by: { $0.date > $1.date }) {
-            let texts = d.items.filter { !$0.done }.map { $0.text }.filter { !$0.isEmpty }
+            let texts = d.items.filter { restorableRow($0) }.map { $0.text }
             if !texts.isEmpty { return Array(texts.prefix(Self.hardCap)) }
         }
         return []
+    }
+
+    /// Is this archived row still offerable? A row whose id was deleted or archived-as-done is
+    /// NOT — restoreLastList mints a fresh item from the TEXT alone, so without this gate a
+    /// completed task walks back in under a brand-new id (a second resurrection route alongside
+    /// the rollover one). Legacy positional ids never match a marker, so this only guards rows
+    /// archived by a build that keeps real ids. Mirrors the Mac's restorableRow.
+    private func restorableRow(_ it: DayItem) -> Bool {
+        if it.done || it.text.isEmpty { return false }
+        if it.id.isEmpty { return true }
+        if tombstones[it.id] != nil { return false }
+        if doneTombs[it.id] != nil { return false }
+        return true
     }
 
     /// Pull that list into today (capped, no dupes). Mirrors the Mac's restoreLastList().
@@ -290,6 +319,7 @@ final class BuddyStore {
         history = []
         deferred = []
         tombstones = [:]
+        doneTombs = [:]
         erasedAt = Date().timeIntervalSince1970
         scheduleSave(immediate: true)
     }
@@ -304,6 +334,7 @@ final class BuddyStore {
         self.history = history
         deferred = []
         tombstones = [:]
+        doneTombs = [:]
         erasedAt = nil
         self.settings = settings
     }
@@ -314,6 +345,7 @@ final class BuddyStore {
         history = []
         deferred = []
         tombstones = [:]
+        doneTombs = [:]
         erasedAt = nil
         scheduleSave(immediate: true)
     }
@@ -326,7 +358,7 @@ final class BuddyStore {
     /// steamroll the other device's scalar fields (mirrors the Mac's serialize()).
     func snapshot() -> SyncSnapshot {
         SyncSnapshot(today: today, history: history, deferred: deferred, settings: settings,
-                     tombstones: tombstones, erasedAt: erasedAt, savedAt: lastMutatedAt,
+                     tombstones: tombstones, doneTombs: doneTombs, erasedAt: erasedAt, savedAt: lastMutatedAt,
                      syncNotice: SyncNotice.sanitized(syncNotice), extras: extras)
     }
 
@@ -352,6 +384,7 @@ final class BuddyStore {
         deferred   = merged.deferred
         if let s = merged.settings { settings = s }
         tombstones = merged.tombstones
+        doneTombs  = merged.doneTombs
         erasedAt   = merged.erasedAt
         syncNotice = SyncNotice.sanitized(merged.syncNotice)
         extras     = merged.extras
@@ -388,6 +421,12 @@ final class BuddyStore {
         guard stored != cur else { return false }          // same day → restore verbatim
         guard !stored.isEmpty else { today.date = cur; return false }
 
+        // Capture the live list BEFORE it is cleared. Carry-forward used to read the freshly
+        // archived HISTORY record instead — which throws identity away (history rows keep only
+        // text), so every task was re-minted with a new id and v:1 each morning. Two devices then
+        // minted two DIFFERENT ids for the same task, and a union-merge cannot tell a re-minted
+        // carry-over from a task you just typed (field report 2026-08-08). Mirrors the Mac.
+        let prevItems = today.items
         let hadLive = !today.items.isEmpty
 
         if hadLive && !history.contains(where: { $0.date == stored }) {
@@ -418,16 +457,30 @@ final class BuddyStore {
         deferred = deferred.filter { !($0.sent ?? false) }
         for i in deferred.indices { deferred[i].sentTid = nil }
 
-        // Carry the archived day's UNFINISHED tasks forward (first hardCap of them, deduped
-        // by text, fresh ids) — but only when there WERE live items pre-rollover. Reads the
-        // record for `stored` (not "did history grow") so the already-archived branch —
-        // where the other device rolled the day first — carries forward too.
-        if hadLive, let rec = history.first(where: { $0.date == stored }) {
-            for it in rec.items.filter({ !$0.done }).prefix(Self.hardCap) {
-                if activeCount < Self.hardCap && !today.items.contains(where: { $0.text == it.text }) {
-                    today.items.append(BuddyTask(id: newId(), text: it.text, state: .neutral))
-                }
-            }
+        // A completed row leaves Today for good. Say so on the wire: absence alone never wins a
+        // union, so without this mark the peer that never saw the completion just re-adds its own
+        // ACTIVE copy on the next merge and the task comes back from the dead.
+        for it in prevItems where it.isDone && !it.id.isEmpty {
+            markDone(it.id, it.v, stored)
+            // Paired plain tombstone — an un-updated peer understands only this one, and without
+            // it the two builds disagree forever about whether the task is live, pushing at each
+            // other every 1.5s with the row visibly flickering. See BuddyMerge.rollbackEscapes.
+            tombstones[it.id] = BuddyMerge.dayStamp(stored)
+        }
+        // Unfinished rows carry forward AS THEMSELVES — same id, same v, same state. Both devices
+        // therefore carry the SAME ids into the new day, so the union is idempotent instead of
+        // doubling up. (state rides through untouched rather than being reset: it is non-done by
+        // construction, and normalising it here would fight the Mac.)
+        for it in prevItems.filter({ !$0.isDone && !$0.id.isEmpty }).prefix(Self.hardCap) {
+            if activeCount >= Self.hardCap { break }
+            if today.items.contains(where: { $0.id == it.id }) { continue }
+            var carried = it
+            carried.doneAt = nil
+            // Normalise to .neutral: the Mac's hydrate() forces every non-done state to 'neutral'
+            // on EVERY load, and `state` is inside contentKey — so a carried .focused would lose
+            // and re-win against the Mac forever. (The earlier comment here had this backwards.)
+            carried.state = .neutral
+            today.items.append(carried)
         }
 
         scheduleSave(immediate: true)
@@ -476,6 +529,7 @@ final class BuddyStore {
             deferred: deferred,
             settings: settings,
             tombstones: tombstones,
+            doneTombs: doneTombs,
             erasedAt: erasedAt,
             syncNotice: SyncNotice.sanitized(syncNotice),
             extras: extras
@@ -525,6 +579,7 @@ final class BuddyStore {
         deferred = blob.deferred ?? []
         settings = blob.settings ?? .default
         tombstones = blob.tombstones ?? [:]
+        doneTombs  = blob.doneTombs ?? [:]
         erasedAt   = blob.erasedAt
         syncNotice = SyncNotice.sanitized(blob.syncNotice)
         extras     = blob.extras ?? [:]
@@ -562,6 +617,7 @@ private struct PersistedBlob: Codable {
     var deferred: [DeferredTask]?
     var settings: BuddySettings?
     var tombstones: [String: Double]?
+    var doneTombs: [String: DoneMark]?
     var erasedAt: Double?
     var syncNotice: SyncNotice?
     // Unknown top-level wire fields (version-skew pass-through). Local-only file, so a

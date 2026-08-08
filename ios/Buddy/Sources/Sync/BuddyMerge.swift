@@ -41,6 +41,12 @@ struct SyncSnapshot {
     var deferred: [DeferredTask]
     var settings: BuddySettings?
     var tombstones: [String: Double]
+    /// id → the item's VERSION when a day-rollover archived it as done (plus when, in ms).
+    /// A rollover DROPS completed rows, and pure absence never wins a union-merge — so the
+    /// peer that never saw the completion just re-added its own ACTIVE copy and the task came
+    /// back from the dead (field report 2026-08-08). This is the missing "it left today, on
+    /// purpose" signal. Version-aware so a later undo (which bumps v past the mark) still wins.
+    var doneTombs: [String: DoneMark] = [:]
     var erasedAt: Double?
     var savedAt: Double
     // A sync moved N over-cap tasks to Future — a dismissible, SYNCED notice (mirrors the
@@ -52,6 +58,44 @@ struct SyncSnapshot {
     // Unknown top-level wire fields (the Mac's doneWordBag/pinned/restartStash and any
     // future peer's additions) — pass through merge/adopt/persist untouched.
     var extras: [String: JSONValue] = [:]
+}
+
+/// A "this id left Today because it was completed" marker: the item's version at archive
+/// time, plus when. Byte-parallel to the Mac's `{v, t}`.
+///
+/// `t` is epoch MILLISECONDS on BOTH platforms and gets NO seconds↔ms conversion at the wire
+/// boundary — unlike `tombstones`, which the Mac writes in ms and iOS writes in seconds. That
+/// unit skew is why doneTombs is age-pruned and tombstones are not: an age check would read
+/// every iPhone-minted tombstone as 1970 and delete it. Keep this field in ms. (Pinned by
+/// BuddyMergeTests + the Mac's mergeTest.)
+struct DoneMark: Codable, Equatable {
+    var v: Int
+    var t: Double
+
+    init(v: Int, t: Double) { self.v = Swift.max(1, v); self.t = t }
+
+    enum CodingKeys: String, CodingKey { case v, t }
+
+    /// Fails CLOSED, exactly like the Mac's sanitizeDoneTombs: anything that is not a usable
+    /// mark THROWS, and the map decoder below drops that entry. Failing open here would be the
+    /// worst possible bug — a junk value would become `v:1`, which vetoes any item at v:1, i.e.
+    /// a task you just typed, and `t:0` means it is never pruned. (Skeptic, 2026-08-08: the
+    /// first version of this accepted null, {}, [1,2], v:0, v:-2 and even a string.)
+    init(from decoder: Decoder) throws {
+        struct Invalid: Error {}
+        if let c = try? decoder.container(keyedBy: CodingKeys.self), let raw = try? c.decodeIfPresent(Int.self, forKey: .v) {
+            guard raw > 0 else { throw Invalid() }
+            self.v = raw
+            let ts = (try? c.decodeIfPresent(Double.self, forKey: .t)) ?? 0
+            self.t = ts > 0 ? ts : 0          // mirror the Mac: only a POSITIVE t counts
+            return
+        }
+        // A bare number (a peer that wrote only the version). Must be a genuine JSON integer.
+        let single = try decoder.singleValueContainer()
+        guard let n = try? single.decode(Int.self), n > 0 else { throw Invalid() }
+        self.v = n
+        self.t = 0
+    }
 }
 
 /// The "N tasks moved to Future on sync" banner state — synced so a dismiss on one device
@@ -89,14 +133,15 @@ enum BuddyMerge {
         }
         let newer = newerIsA ? va : vb
         let older = newerIsA ? vb : va
-        let tombstones = mergeTombstones(va.tombstones, vb.tombstones)
+        var tombstones = mergeTombstones(va.tombstones, vb.tombstones)
+        var doneTombs = mergeDoneTombs(va.doneTombs, vb.doneTombs)
 
         var today: TodayState?
         var carryHistory: [Day] = []
         var overflowItems: [BuddyTask] = []
         if let ta = va.today, let tb = vb.today, ta.date == tb.date {
             let newerT = newer.today!, olderT = older.today!
-            let clamped = clampActive(mergeItems(newerT.items, olderT.items, tombstones))
+            let clamped = clampActive(mergeItems(newerT.items, olderT.items, tombstones, doneTombs))
             overflowItems = clamped.overflow
             today = TodayState(
                 date: ta.date,
@@ -115,12 +160,37 @@ enum BuddyMerge {
                 // dropping it (the Mac has this in merge() too — Swift previously didn't).
                 let oldLive = taWins ? tb : ta
                 if !oldLive.items.isEmpty, !oldLive.date.isEmpty,
-                   CanonicalJSON.compare(oldLive.date, today!.date) < 0,
-                   let rec = todayToHistoryRecord(oldLive) {
-                    carryHistory.append(rec)
+                   CanonicalJSON.compare(oldLive.date, today!.date) < 0 {
+                    if let rec = todayToHistoryRecord(oldLive) { carryHistory.append(rec) }
+                    // ARCHIVING IS A ROLLOVER. The device that rolled first dropped its completed
+                    // rows and marked them; this side is doing the same archive here, so it must
+                    // emit the same marks — otherwise a task completed on the still-unrolled
+                    // device comes back as the rolled device's stale ACTIVE copy (2026-08-08).
+                    // Computed from inputs BOTH devices share, so it stays symmetric.
+                    let stamp = dayStamp(oldLive.date)
+                    var marks = [String: DoneMark]()
+                    for it in oldLive.items where it.isDone && !it.id.isEmpty {
+                        let m = DoneMark(v: Swift.max(1, it.v), t: stamp)
+                        marks[it.id] = marks[it.id].map { $0.v >= m.v ? $0 : m } ?? m
+                        // Pair every mark with a plain tombstone so an UN-UPDATED peer — which has
+                        // never heard of doneTombs — still drops the row instead of re-adding it
+                        // and push-fighting until the phone is updated. Stamped from the archived
+                        // DAY, not the clock, so both devices emit byte-identical maps.
+                        if tombstones[it.id] == nil { tombstones[it.id] = stamp }
+                    }
+                    doneTombs = mergeDoneTombs(doneTombs, marks)
                 }
             } else {
                 today = va.today ?? vb.today
+            }
+            // This branch used to take the later day's list WHOLESALE — no tombstone filter, no
+            // done-marks — so a delete or a completion that landed while the peer had already
+            // rolled was silently undone (skeptic, 2026-08-08). Apply the same gates the
+            // same-date branch does.
+            if today != nil {
+                today!.items = today!.items.filter {
+                    !$0.id.isEmpty && tombstones[$0.id] == nil && !doneMarked($0, doneTombs)
+                }
             }
         }
 
@@ -194,6 +264,7 @@ enum BuddyMerge {
             deferred: deferred,
             settings: newer.settings ?? older.settings,
             tombstones: tombstones,
+            doneTombs: pruneMarks(doneTombs),
             erasedAt: erasedAt,
             savedAt: max(a.savedAt, b.savedAt),
             syncNotice: SyncNotice.sanitized(syncNotice),
@@ -213,6 +284,82 @@ enum BuddyMerge {
         var out = a
         for (id, t) in b { out[id] = Swift.max(out[id] ?? 0, t) }
         return out
+    }
+
+    /// Decode one doneTombs map entry-by-entry so ONE malformed mark from a peer drops that
+    /// entry instead of silently voiding the whole map (Codable's dictionary decode is all-or-
+    /// nothing). Mirrors the Mac's sanitizeDoneTombs, which filters per key.
+    static func sanitizeMarks(_ raw: [String: JSONValue]?) -> [String: DoneMark] {
+        guard let raw = raw else { return [:] }
+        var out = [String: DoneMark]()
+        let enc = JSONEncoder(), dec = JSONDecoder()
+        for (id, v) in raw where !id.isEmpty {
+            guard let data = try? enc.encode(v), let m = try? dec.decode(DoneMark.self, from: data) else { continue }
+            out[id] = m
+        }
+        return out
+    }
+
+    /// Union keeping the HIGHEST mark per id (v first, then t). Symmetric, like every other
+    /// merge rule here. Mirrors the Mac's mergeDoneTombs.
+    static func mergeDoneTombs(_ a: [String: DoneMark], _ b: [String: DoneMark]) -> [String: DoneMark] {
+        var out = a
+        for (id, m) in b {
+            guard let p = out[id] else { out[id] = m; continue }
+            out[id] = (m.v != p.v) ? (m.v > p.v ? m : p) : DoneMark(v: p.v, t: Swift.max(p.t, m.t))
+        }
+        return out
+    }
+
+    /// doneTombs is unioned forever and rides every push, and a rollover adds marks EVERY day —
+    /// so it needs a ceiling. 90 days: a peer that stale can't converge on today's list anyway.
+    /// A mark with no clock (t == 0) is KEPT — "no timestamp" is not "expired".
+    /// Plain `tombstones` are deliberately NOT pruned here (see DoneMark's unit note).
+    static let markRetention: Double = 90 * 86_400_000   // ms
+    static func pruneMarks(_ marks: [String: DoneMark]) -> [String: DoneMark] {
+        // Cutoff is relative to the NEWEST mark, NOT to Date(). Reading the clock inside merge()
+        // makes eviction depend on WHEN you merged: two devices minutes apart disagree at the
+        // boundary, each re-supplies the mark by union, and they push at each other until the
+        // skew passes (forever, on a device with a wrong clock).
+        let newest = marks.values.map { $0.t }.max() ?? 0
+        let cutoff = newest - markRetention
+        var out = [String: DoneMark]()
+        for (id, m) in marks {
+            if m.t > 0 && m.t < cutoff { continue }       // t == 0 means "no clock", never "expired"
+            out[id] = m
+        }
+        return out
+    }
+
+    /// Midnight-UTC of a "YYYY-MM-DD" day, in ms. Marks are stamped from the ARCHIVED DAY, never
+    /// from the local clock, so both devices emit byte-identical maps. Mirrors the Mac's dayStamp.
+    static func dayStamp(_ date: String) -> Double {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        guard let d = f.date(from: date) else { return 0 }
+        return d.timeIntervalSince1970 * 1000
+    }
+
+    /// Is this item superseded by a done-mark? Only when the mark is at or above the item's own
+    /// version — an edit or undo after the archive raises v and escapes the mark.
+    /// STRICTLY greater, not >=. At EQUAL v the two sides hold genuinely concurrent states and
+    /// neither is newer — vetoing there annihilates a real edit with no tombstone, no history row
+    /// and no trace (rename on the phone while the Mac archives it as done). The completing
+    /// device always bumps v ABOVE the peer's stale copy, so `>` still catches every real case.
+    static func doneMarked(_ it: BuddyTask, _ marks: [String: DoneMark]) -> Bool {
+        guard let m = marks[it.id] else { return false }
+        return m.v > Swift.max(1, it.v)
+    }
+
+    /// Was this id removed by a ROLLOVER rather than a user delete? A rollover writes BOTH a
+    /// plain tombstone and a done-mark; a delete writes only the tombstone. The pairing is what
+    /// lets an un-updated peer converge (it honours tombstones even though it has never heard of
+    /// doneTombs), and the mark is what lets a later undo escape the otherwise-absolute veto.
+    static func rollbackEscapes(_ it: BuddyTask, _ marks: [String: DoneMark]) -> Bool {
+        guard let m = marks[it.id] else { return false }
+        return m.v < Swift.max(1, it.v)
     }
 
     /// The surviving version of one today-item present on both sides. FULLY
@@ -296,19 +443,28 @@ enum BuddyMerge {
     }
 
     static func mergeItems(_ primary: [BuddyTask], _ secondary: [BuddyTask],
-                           _ tombstones: [String: Double]) -> [BuddyTask] {
+                           _ tombstones: [String: Double],
+                           _ doneTombs: [String: DoneMark] = [:]) -> [BuddyTask] {
         var sec = [String: BuddyTask]()
         for i in secondary { sec[i.id] = i }
         var seen = Set<String>()
         var out = [BuddyTask]()
+        // Resolve the winner FIRST, then judge it — an undo on the losing side raises v past the
+        // mark and must come back. A plain tombstone stays an unconditional veto UNLESS a
+        // done-mark identifies it as a rollover-archive tombstone this item has outlived.
+        func gone(_ it: BuddyTask) -> Bool {
+            if tombstones[it.id] != nil { return !rollbackEscapes(it, doneTombs) }
+            return doneMarked(it, doneTombs)
+        }
         for it in primary {                 // primary = newer save → keeps its order
             seen.insert(it.id)
-            if tombstones[it.id] != nil { continue }
-            if let other = sec[it.id] { out.append(pickItem(it, other)) } else { out.append(it) }
+            let win = sec[it.id].map { pickItem(it, $0) } ?? it
+            if gone(win) { continue }
+            out.append(win)
         }
         for it in secondary {               // items only on the older save → keep, don't lose
             if seen.contains(it.id) { continue }
-            if tombstones[it.id] != nil { continue }
+            if gone(it) { continue }
             out.append(it)
         }
         // Drop stray EMPTY active items — a blank, untitled task carries no information
@@ -328,7 +484,10 @@ enum BuddyMerge {
         return Day(
             date: t.date, weekday: weekdayName(for: t.date),
             items: t.items.enumerated().map { i, it in
-                DayItem(id: "h-\(t.date)-\(i)", text: it.text, done: it.state == .done)
+                // REAL item id (+ ord for planner order). See DayItem's note: the old
+                // positional id merged two different tasks into one across devices.
+                DayItem(id: it.id.isEmpty ? "h-\(t.date)-\(i)" : it.id,
+                        text: it.text, done: it.state == .done, ord: i)
             }
         )
     }
@@ -347,27 +506,12 @@ enum BuddyMerge {
         return dow[cal.component(.weekday, from: d) - 1]
     }
 
-    /// Natural sort key for the positional per-day ids (h-<date>-<i>) so merged records
-    /// keep planner order even past index 9; foreign ids sort lexicographically after.
-    /// Mirrors the Mac's histIdKey (regex ^h-(.+)-(\d+)$ — greedy, so the LAST hyphen
-    /// group is the numeric index).
-    static func histIdKey(_ id: String) -> (d: String, i: Int, raw: String?) {
-        if id.hasPrefix("h-"), let lastDash = id.lastIndex(of: "-"), lastDash > id.index(id.startIndex, offsetBy: 1) {
-            let digits = id[id.index(after: lastDash)...]
-            let mid = id[id.index(id.startIndex, offsetBy: 2)..<lastDash]
-            if !digits.isEmpty, digits.allSatisfy({ $0.isASCII && $0.isNumber }), !mid.isEmpty {
-                return (d: String(mid), i: Int(digits) ?? 0, raw: nil)
-            }
-        }
-        return (d: "", i: 0, raw: id)
-    }
-    static func histIdCompare(_ a: String, _ b: String) -> Int {
-        let ka = histIdKey(a), kb = histIdKey(b)
-        if ka.raw != nil || kb.raw != nil {
-            return CanonicalJSON.compare(ka.raw ?? "", kb.raw ?? "")
-        }
-        if ka.d != kb.d { return CanonicalJSON.compare(ka.d, kb.d) }
-        return ka.i == kb.i ? 0 : (ka.i < kb.i ? -1 : 1)
+    /// Row order: explicit `ord`, else the index parsed out of a LEGACY positional id, else 0
+    /// (DayItem.order). Id breaks ties so the ordering is total and identical on both platforms.
+    /// Mirrors the Mac's histRowCompare.
+    static func histRowCompare(_ a: DayItem, _ b: DayItem) -> Int {
+        if a.order != b.order { return a.order < b.order ? -1 : 1 }
+        return CanonicalJSON.compare(a.id, b.id)
     }
 
     /// Merge two same-date records SYMMETRICALLY: union by id, done-wins, text conflicts
@@ -384,7 +528,13 @@ enum BuddyMerge {
             guard let p = byId[it.id] else { byId[it.id] = it; order.append(it.id); continue }
             let done = p.done || it.done                                   // done-wins
             let base = CanonicalJSON.lessOrEqual(ck(p), ck(it)) ? p : it   // stable text winner
-            byId[it.id] = DayItem(id: base.id, text: base.text, done: done)
+            // Prefer a DEFINED ord over a fallback: `order` returns 0 for a row carrying no
+            // ordering at all, and min() would let that zero permanently flatten a real order the
+            // first time it met a copy stripped by an older peer.
+            let ord: Int
+            if let a = p.ord, let b = it.ord { ord = Swift.min(a, b) }
+            else { ord = p.ord ?? it.ord ?? Swift.min(p.order, it.order) }
+            byId[it.id] = DayItem(id: base.id, text: base.text, done: done, ord: ord)
         }
         let wx = x.weekday, wy = y.weekday
         let weekday = (!wx.isEmpty && !wy.isEmpty)
@@ -393,7 +543,7 @@ enum BuddyMerge {
         // Stable sort (JS Array.sort is stable) — an equal-key pair keeps first-seen order.
         let items = order.compactMap { byId[$0] }.enumerated()
             .sorted { l, r in
-                let c = histIdCompare(l.element.id, r.element.id)
+                let c = histRowCompare(l.element, r.element)
                 return c != 0 ? c < 0 : l.offset < r.offset
             }
             .map { $0.element }

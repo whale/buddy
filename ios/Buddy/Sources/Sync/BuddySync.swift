@@ -92,6 +92,8 @@ enum BuddySync {
             }
         var tomb = [String: JSONValue]()
         for (id, t) in b.tombstones { tomb[id] = .number(t * msFactor) }
+        var dtomb = [String: JSONValue]()
+        for (id, m) in b.doneTombs { dtomb[id] = .object(["v": .int(Int64(m.v)), "t": .number(m.t)]) }
         let s: [String: JSONValue] = [
             "celebrate": b.settings.map { .int(Int64($0.celebrate)) } ?? .null,
             "reserveSpace": .bool(b.settings?.reserveSpace ?? false),
@@ -106,6 +108,7 @@ enum BuddySync {
             "m": .bool(b.today?.morningDone ?? false),
             "t": .array(items), "h": .array(hist), "d": .array(defs),
             "tomb": .object(tomb),
+            "dtomb": .object(dtomb),
             "e": b.erasedAt.map { .number($0 * msFactor) } ?? .null,
             "n": notice,
             "s": .object(s),
@@ -293,7 +296,27 @@ struct SyncWire: Codable {
         }
     }
 
-    struct HistItem: Codable { var id: String; var text: String; var done: Bool }
+    // `ord` is the planner order the OLD positional id (h-<date>-<i>) used to imply. It must
+    // round-trip: dropping it here would silently strip the Mac's ordering on every iOS pass.
+    struct HistItem: Codable {
+        var id: String; var text: String; var done: Bool; var ord: Int?
+        init(id: String, text: String, done: Bool, ord: Int? = nil) {
+            self.id = id; self.text = text; self.done = done; self.ord = ord
+        }
+        enum CodingKeys: String, CodingKey { case id, text, done, ord }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id   = (try? c.decode(String.self, forKey: .id)) ?? ""
+            text = (try? c.decode(String.self, forKey: .text)) ?? ""
+            done = (try? c.decode(Bool.self, forKey: .done)) ?? false
+            ord  = (try? c.decodeIfPresent(Int.self, forKey: .ord)) ?? nil
+        }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(id, forKey: .id); try c.encode(text, forKey: .text)
+            try c.encode(done, forKey: .done); try c.encodeIfPresent(ord, forKey: .ord)
+        }
+    }
 
     struct HistDay: Codable {
         var date: String; var weekday: String; var items: [HistItem]
@@ -370,6 +393,9 @@ struct SyncWire: Codable {
     var deferred: [Deferred]
     var settings: BuddySettings?
     var tombstones: [String: Double]    // id → epoch ms
+    // id → {v, t}: version at which a rollover archived the id as done. `t` is ms on BOTH
+    // platforms and takes NO seconds↔ms conversion (see DoneMark).
+    var doneTombs: [String: DoneMark]
     var erasedAt: Double?               // epoch ms
     var syncNotice: SyncNotice?         // "N tasks moved to Future" banner (synced, dismissible)
     var unlinkedAt: Double?             // epoch ms — mutual-unlink marker (dissolves the link)
@@ -382,10 +408,10 @@ struct SyncWire: Codable {
     // hybrid blob's stale envelope is DROPPED, never re-emitted through extras
     // (mirrors the Mac's DROP_WIRE_KEYS).
     static let knownKeys: Set<String> = ["version", "savedAt", "today", "history",
-                                         "deferred", "settings", "tombstones", "erasedAt",
+                                         "deferred", "settings", "tombstones", "doneTombs", "erasedAt",
                                          "syncNotice", "unlinkedAt", "enc", "iv", "ct"]
     private enum CodingKeys: String, CodingKey {
-        case version, savedAt, today, history, deferred, settings, tombstones, erasedAt, syncNotice, unlinkedAt
+        case version, savedAt, today, history, deferred, settings, tombstones, doneTombs, erasedAt, syncNotice, unlinkedAt
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -396,6 +422,7 @@ struct SyncWire: Codable {
         deferred   = (try? c.decodeIfPresent([Deferred].self, forKey: .deferred)) ?? []
         settings   = (try? c.decodeIfPresent(BuddySettings.self, forKey: .settings)) ?? nil
         tombstones = (try? c.decodeIfPresent([String: Double].self, forKey: .tombstones)) ?? [:]
+        doneTombs  = BuddyMerge.sanitizeMarks((try? c.decodeIfPresent([String: JSONValue].self, forKey: .doneTombs)) ?? nil)
         erasedAt   = (try? c.decodeIfPresent(Double.self, forKey: .erasedAt)) ?? nil
         syncNotice = SyncNotice.sanitized((try? c.decodeIfPresent(SyncNotice.self, forKey: .syncNotice)) ?? nil)
         unlinkedAt = (try? c.decodeIfPresent(Double.self, forKey: .unlinkedAt)) ?? nil
@@ -413,6 +440,7 @@ struct SyncWire: Codable {
         try c.encode(deferred, forKey: .deferred)
         try c.encodeIfPresent(settings, forKey: .settings)
         try c.encode(tombstones, forKey: .tombstones)
+        try c.encode(doneTombs, forKey: .doneTombs)
         try c.encodeIfPresent(erasedAt, forKey: .erasedAt)
         try c.encodeIfPresent(SyncNotice.sanitized(syncNotice), forKey: .syncNotice)
         try c.encodeIfPresent(unlinkedAt, forKey: .unlinkedAt)
@@ -429,13 +457,14 @@ struct SyncWire: Codable {
                   extras: t.extras)
         }
         history = s.history.map { d in HistDay(date: d.date, weekday: d.weekday,
-                     items: d.items.map { HistItem(id: $0.id, text: $0.text, done: $0.done) },
+                     items: d.items.map { HistItem(id: $0.id, text: $0.text, done: $0.done, ord: $0.ord) },
                      extras: d.extras) }
         deferred = s.deferred.map { Deferred(id: $0.id, text: $0.text, wake: $0.wake,
                                              sent: $0.sent, sentTid: $0.sentTid, v: $0.v,
                                              extras: $0.extras) }
         settings = s.settings
         tombstones = s.tombstones.mapValues { $0 * MS }
+        doneTombs = s.doneTombs                          // already ms — no conversion (see DoneMark)
         erasedAt = s.erasedAt.map { $0 * MS }
         syncNotice = SyncNotice.sanitized(s.syncNotice)   // counts, not timestamps — no ms conversion
         unlinkedAt = s.unlinkedAt.map { $0 * MS }
@@ -453,13 +482,14 @@ struct SyncWire: Codable {
                 }, morningDone: t.morningDone, extras: t.extras)
             },
             history: history.map { Day(date: $0.date, weekday: $0.weekday,
-                        items: $0.items.map { DayItem(id: $0.id, text: $0.text, done: $0.done) },
+                        items: $0.items.map { DayItem(id: $0.id, text: $0.text, done: $0.done, ord: $0.ord) },
                         extras: $0.extras) },
             deferred: deferred.map { DeferredTask(id: $0.id, text: $0.text, wake: $0.wake,
                                                   sent: $0.sent, sentTid: $0.sentTid, v: $0.v,
                                                   extras: $0.extras) },
             settings: settings,
             tombstones: tombstones.mapValues { $0 / MS },
+            doneTombs: doneTombs,                        // already ms — no conversion (see DoneMark)
             erasedAt: erasedAt.map { $0 / MS },
             savedAt: savedAt / MS,
             syncNotice: SyncNotice.sanitized(syncNotice),

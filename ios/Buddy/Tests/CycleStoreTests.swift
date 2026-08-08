@@ -143,4 +143,62 @@ final class CycleStoreTests: XCTestCase {
         XCTAssertNotNil(BuddyMerge.merge(newer, older)?.today?.items.first?.clearedAt,
                         "higher item-v wins over global savedAt → the sweep propagates from the older device")
     }
+
+    // MARK: - Rollover identity (the 2026-08-08 resurrection, store side)
+
+    /// Carry-forward used to re-mint every task (new id, v back to 1), so two devices minted two
+    /// DIFFERENT ids for the same task each morning and a union-merge could not tell a carry-over
+    /// from a task you just typed. Unfinished rows must now carry forward AS THEMSELVES.
+    func testRolloverCarriesUnfinishedForwardWithSameIdAndVersion() {
+        let s = BuddyStore()
+        var carried = BuddyTask(id: "keep-me", text: "carry me", state: .neutral)
+        carried.v = 4
+        s.today = TodayState(date: "2020-01-01", items: [carried], morningDone: true)
+        s.history = []
+        XCTAssertTrue(s.performRolloverIfNeeded())
+        XCTAssertEqual(s.today.items.map { $0.id }, ["keep-me"])
+        XCTAssertEqual(s.today.items.first?.v, 4)
+    }
+
+    /// A completed row leaves Today for good — and must say so on the wire, or the peer that
+    /// never saw the completion re-adds its own active copy on the next merge.
+    func testRolloverLeavesADoneMarkForCompletedTasks() {
+        let s = BuddyStore()
+        var done = BuddyTask(id: "gp", text: "Ghost pricing pages", state: .done,
+                             doneAt: Date(timeIntervalSince1970: 100))
+        done.v = 3
+        s.today = TodayState(date: "2020-01-01", items: [done], morningDone: true)
+        s.history = []
+        XCTAssertTrue(s.performRolloverIfNeeded())
+        XCTAssertFalse(s.today.items.contains { $0.id == "gp" })
+        XCTAssertEqual(s.doneTombs["gp"]?.v, 3)
+    }
+
+    /// The archived record keeps the REAL item id, not a positional one.
+    func testRolloverArchivesWithRealItemIds() {
+        let s = BuddyStore()
+        s.today = TodayState(date: "2020-01-01", items: [neutral("aaa"), neutral("bbb")], morningDone: true)
+        s.history = []
+        XCTAssertTrue(s.performRolloverIfNeeded())
+        XCTAssertEqual(s.history.first { $0.date == "2020-01-01" }?.items.map { $0.id }, ["aaa", "bbb"])
+    }
+
+    /// The restore paths mint a fresh item from the TEXT alone, so a done-marked row must never
+    /// be offered back — the second resurrection route.
+    func testRestoreSkipsDoneMarkedRows() {
+        let s = BuddyStore()
+        var done = BuddyTask(id: "gp", text: "Ghost pricing pages", state: .done,
+                             doneAt: Date(timeIntervalSince1970: 100))
+        done.v = 2
+        s.today = TodayState(date: "2020-01-01", items: [done, neutral("live")], morningDone: true)
+        s.history = []
+        _ = s.performRolloverIfNeeded()
+        // The archived row for "gp" is done anyway; force the corrupted shape (done flag lost)
+        // to prove the MARKER is what stops it, not the flag.
+        if let idx = s.history.firstIndex(where: { $0.date == "2020-01-01" }),
+           let row = s.history[idx].items.firstIndex(where: { $0.id == "gp" }) {
+            s.history[idx].items[row].done = false
+        }
+        XCTAssertFalse(s.lastListForRestore().contains("Ghost pricing pages"))
+    }
 }
