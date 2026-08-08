@@ -15,6 +15,18 @@ touches colors" still runs the interaction pass on its platform — the
       write "n/a — trivial".
 - [ ] `pnpm ui:smoke` — 4/4 (wraps `__buddy.smokeTest()`: add/edit/Enter/Tab,
       escalation colors incl. lvl1 red pattern, merge suite, mid-edit sync guard)
+- [ ] `pnpm test:merge` — prints EVERY failing assertion in `mergeTest`/`syncTest`/
+      `skewTest` by name. `sync:validate` only reports the aggregate, which is
+      useless while iterating on merge logic.
+- [ ] `pnpm test:crossbuild` — **required for ANY change to merge semantics.** Boots
+      one page on `origin/main`'s `dist/index.html` and one on the working tree's,
+      feeds both the same wire blobs, and asserts they agree on what survives.
+      Every other suite runs ONE build against itself, so nothing else in the repo
+      can fail on an updated-Mac vs old-iPhone divergence — and that window is
+      measured in DAYS (Mac auto-releases on merge; iOS ships manually, RULE 5).
+      If the two builds disagree about whether a row is live, they push at each
+      other every 1.5s with the task visibly flickering. That is worse than most
+      bugs you'd be fixing. Caught exactly this on 2026-08-08.
 - [ ] `cd ios && xcodebuild test …BuddyTests` — unit suite (incl. token parity
       vs `design/escalation-tokens.json`, merge vectors shared with the Mac)
 - [ ] `cd ios && xcodebuild test …BuddyUITests` — interaction suite on a real
