@@ -5546,15 +5546,20 @@ function buddyUiShowing(){ return morningUp() || !drawer.classList.contains('tra
 const BG_POLL_MS = 60000;
 let lastBgPollAt = 0, lastHeartbeatAt = 0;
 setInterval(()=>{
-  if(!syncStore) return;
   const vis = document.visibilityState, showing = buddyUiShowing();
+  // Heartbeat FIRST — BEFORE the syncStore guard, and independent of pairing. It answers exactly
+  // one question: is this timer still running? macOS throttles/suspends background webview
+  // timers, so "no sync lines" has two completely different causes — the poll is gated off, or
+  // the whole interval is dead — and the log could not tell them apart. That ambiguity is what
+  // made the 2026-08-08 report so slow to pin down. Gating the heartbeat behind syncStore would
+  // reintroduce the same blind spot on any UNPAIRED device (it hid the answer during this very
+  // investigation: zero ticks, and the cause turned out to be an unpaired dev container, not a
+  // dead timer — the real answer was in an unrelated console line).
+  if(Date.now()-lastHeartbeatAt >= BG_POLL_MS){ lastHeartbeatAt = Date.now(); diag('tick', {vis, showing, sync:!!syncStore}); }
+  if(!syncStore) return;
   if(vis==='visible' && showing){ lastBgPollAt = Date.now(); syncNow('poll'); return; }
   if(Date.now()-lastBgPollAt < BG_POLL_MS) return;
   lastBgPollAt = Date.now();
-  // Heartbeat FIRST, and unconditionally: it is the only line that proves the timer is alive
-  // when no sync pass runs. Without it, "not polling" and "polling, finding nothing" look
-  // identical in the log — which is exactly what made the 2026-08-08 report so slow to pin down.
-  if(Date.now()-lastHeartbeatAt >= BG_POLL_MS){ lastHeartbeatAt = Date.now(); diag('tick', {vis, showing}); }
   syncNow('poll-bg');                       // background: must never reveal the drawer (renderSyncNotice)
 }, 1500);
 </script>
