@@ -358,4 +358,103 @@ final class BuddyMergeTests: XCTestCase {
         let back = try JSONDecoder().decode(SyncWire.self, from: data).toSnapshot()
         XCTAssertEqual(back.history.first?.items.first?.ord, 3)
     }
+
+    // MARK: - Second-review findings (all of these passed the first suite, and were all real)
+
+    /// EQUAL v is a genuine conflict, not a veto. `>=` annihilated a concurrent rename with no
+    /// tombstone, no history row and no trace at all.
+    func testEqualVersionConcurrentEditIsNotAnnihilated() {
+        let day2 = "2026-06-20"
+        let a = snap(today: TodayState(date: day2, items: []), savedAt: 2000, doneTombs: ["gp": dmark(8)])
+        let b = snap(today: TodayState(date: day2, items: [item("gp", "renamed on the phone", .neutral, 8)]), savedAt: 1000)
+        XCTAssertEqual(ids(BuddyMerge.merge(a, b)), ["gp"])
+        XCTAssertEqual(ids(BuddyMerge.merge(b, a)), ["gp"])
+    }
+
+    /// merge() must be a PURE function of its inputs. It emits done-marks, and a clock read there
+    /// makes two devices produce different maps from identical inputs — which churns contentKey
+    /// and makes them push at each other forever. The stamp is midnight of the ARCHIVED DAY.
+    func testMergeEmittedMarksAreClockFreeAndSymmetric() {
+        let rolled = snap(today: TodayState(date: "2026-06-20", items: [item("gp", "x", .neutral, 3)]), savedAt: 1000)
+        let done = snap(today: TodayState(date: "2026-06-19", items: [
+            item("gp", "x", .done, 4, Date(timeIntervalSince1970: 5000))]), savedAt: 2000)
+        let m1 = BuddyMerge.merge(rolled, done), m2 = BuddyMerge.merge(done, rolled)
+        XCTAssertEqual(m1?.doneTombs["gp"]?.t, BuddyMerge.dayStamp("2026-06-19"))
+        XCTAssertEqual(m1?.doneTombs["gp"]?.t, m2?.doneTombs["gp"]?.t)
+        XCTAssertEqual(m1?.doneTombs["gp"]?.v, m2?.doneTombs["gp"]?.v)
+        // …and byte-identical on both platforms: the Mac stamps the same way.
+        XCTAssertEqual(BuddyMerge.dayStamp("2026-06-19"), 1_781_827_200_000)   // == Date.parse(...) on the Mac
+    }
+
+    /// Retention is measured from the NEWEST mark, not from Date(). A clock-based cutoff made
+    /// eviction depend on WHEN you merged: two devices minutes apart disagree at the boundary,
+    /// each re-supplies the mark by union, and they ping-pong until the skew passes.
+    func testMarkRetentionIsRelativeToNewestMarkNotTheClock() {
+        let m = BuddyMerge.merge(
+            snap(savedAt: 2000, doneTombs: ["old": dmark(1, 1000),
+                                            "recent": dmark(1, 1000 + BuddyMerge.markRetention + 1)]),
+            snap(savedAt: 1000))
+        XCTAssertNil(m?.doneTombs["old"])
+        XCTAssertNotNil(m?.doneTombs["recent"])
+    }
+
+    /// A rollover pairs every done-mark with a PLAIN tombstone, so a peer on an OLDER build (which
+    /// has never heard of doneTombs but does honour tombstones) drops the row instead of re-adding
+    /// it and push-fighting. The mark is what lets a later undo escape that veto — and a user
+    /// DELETE, which writes no mark, stays unconditional.
+    func testRollbackTombstonePairing() {
+        let day2 = "2026-06-20"
+        let archived = snap(today: TodayState(date: day2, items: []), tombstones: ["gp": 1000],
+                            savedAt: 2000, doneTombs: ["gp": dmark(4, 1000)])
+        let stale = snap(today: TodayState(date: day2, items: [item("gp", "Ghost pricing pages", .neutral, 3)]), savedAt: 1000)
+        XCTAssertEqual(ids(BuddyMerge.merge(archived, stale)), [])
+        XCTAssertEqual(ids(BuddyMerge.merge(stale, archived)), [])
+
+        let undone = snap(today: TodayState(date: day2, items: [item("gp", "Ghost pricing pages", .neutral, 5)]), savedAt: 1000)
+        XCTAssertEqual(ids(BuddyMerge.merge(archived, undone)), ["gp"])
+        XCTAssertEqual(ids(BuddyMerge.merge(undone, archived)), ["gp"])
+
+        let deleted = snap(today: TodayState(date: day2, items: []), tombstones: ["gp": 1000], savedAt: 2000)
+        XCTAssertEqual(ids(BuddyMerge.merge(deleted, undone)), [])
+        XCTAssertEqual(ids(BuddyMerge.merge(undone, deleted)), [])
+    }
+
+    /// The DoneMark decoder must fail CLOSED, exactly like the Mac. Failing open turns junk into
+    /// `v:1` — which vetoes any item at v:1, i.e. a task you just typed — and `t:0`, never pruned.
+    func testDoneMarkDecoderFailsClosedOnJunk() throws {
+        let junk = """
+        {"a":null,"b":{},"c":[1,2],"d":{"t":1},"e":{"v":0,"t":1},"f":{"v":-2},"g":"4","h":0,"i":-3,
+         "ok":{"v":4,"t":99},"bare":7,"negT":{"v":4,"t":-5}}
+        """
+        let raw = try JSONDecoder().decode([String: JSONValue].self, from: Data(junk.utf8))
+        let marks = BuddyMerge.sanitizeMarks(raw)
+        for bad in ["a", "b", "c", "d", "e", "f", "g", "h", "i"] {
+            XCTAssertNil(marks[bad], "\(bad) should have been dropped, got \(String(describing: marks[bad]))")
+        }
+        XCTAssertEqual(marks["ok"], DoneMark(v: 4, t: 99))
+        XCTAssertEqual(marks["bare"], DoneMark(v: 7, t: 0))
+        XCTAssertEqual(marks["negT"]?.t, 0, "a negative t must normalise to 0, like the Mac")
+    }
+
+    /// A peer that strips `ord` must not flatten a real order to zero. min() with a fallback 0
+    /// destroyed the day's planner order permanently, even after the peer updated.
+    func testStrippedOrdCannotFlattenTheDaysOrder() {
+        let full = Day(date: "2026-06-19", weekday: "Friday", items: [
+            DayItem(id: "zzz", text: "first", done: false, ord: 0),
+            DayItem(id: "aaa", text: "second", done: false, ord: 1)])
+        let stripped = Day(date: "2026-06-19", weekday: "Friday", items: [
+            DayItem(id: "zzz", text: "first", done: false),
+            DayItem(id: "aaa", text: "second", done: false)])
+        let m = BuddyMerge.mergeHistRecord(full, stripped)
+        XCTAssertEqual(m.items.map { $0.id }, ["zzz", "aaa"])
+        XCTAssertEqual(m.items.map { $0.ord }, [0, 1])
+    }
+
+    /// The legacy positional-id parse must match the Mac's regex, which requires a NON-EMPTY
+    /// middle segment — "h-5" scores 0 on both, not 0 here and 5 there.
+    func testLegacyOrderParseMatchesTheMacRegex() {
+        XCTAssertEqual(DayItem(id: "h-2026-06-19-10", text: "", done: false).order, 10)
+        XCTAssertEqual(DayItem(id: "h-5", text: "", done: false).order, 0)
+        XCTAssertEqual(DayItem(id: "zzz-foreign", text: "", done: false).order, 0)
+    }
 }

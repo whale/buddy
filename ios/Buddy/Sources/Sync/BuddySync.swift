@@ -422,7 +422,7 @@ struct SyncWire: Codable {
         deferred   = (try? c.decodeIfPresent([Deferred].self, forKey: .deferred)) ?? []
         settings   = (try? c.decodeIfPresent(BuddySettings.self, forKey: .settings)) ?? nil
         tombstones = (try? c.decodeIfPresent([String: Double].self, forKey: .tombstones)) ?? [:]
-        doneTombs  = (try? c.decodeIfPresent([String: DoneMark].self, forKey: .doneTombs)) ?? [:]
+        doneTombs  = BuddyMerge.sanitizeMarks((try? c.decodeIfPresent([String: JSONValue].self, forKey: .doneTombs)) ?? nil)
         erasedAt   = (try? c.decodeIfPresent(Double.self, forKey: .erasedAt)) ?? nil
         syncNotice = SyncNotice.sanitized((try? c.decodeIfPresent(SyncNotice.self, forKey: .syncNotice)) ?? nil)
         unlinkedAt = (try? c.decodeIfPresent(Double.self, forKey: .unlinkedAt)) ?? nil

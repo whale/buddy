@@ -714,18 +714,40 @@ const tombstone = id => { if(id){ (state.tombstones||(state.tombstones={}))[id]=
 // Mark an item as "archived done by a rollover" at the version it held. Merge then drops
 // any copy of that id at v <= the mark, so the peer's stale ACTIVE copy loses — while an
 // undo (which bumps v past the mark) still wins. Highest mark always survives a union.
-const markDone = (id, v) => {
+/* `t` is derived from the ARCHIVED DAY, never from the local clock. merge() is documented
+   as a pure function of its inputs, and it emits marks too — a Date.now() there makes the two
+   devices produce different maps from identical inputs, which churns blobContentKey and makes
+   them push at each other forever. Midnight-UTC of the day being archived is data both sides
+   already share. (Retention is in days anyway, so the precision loss is free.) */
+const dayStamp = date => { const t = Date.parse(String(date||'')+'T00:00:00Z'); return t>0 ? t : 0; };
+const markDone = (id, v, date) => {
   if(!id) return;
   const m = (state.doneTombs||(state.doneTombs={}));
   const n = (v|0)||1, prev = m[id];
-  if(!prev || n >= (prev.v|0)) m[id] = { v:n, t:Date.now() };
+  if(!prev || n >= (prev.v|0)) m[id] = { v:n, t:dayStamp(date) };
 };
-// Is this item superseded by a done-mark? True only when the mark is at or above the
-// item's own version — an edit/undo after the archive raises v and escapes the mark.
+/* Is this item superseded by a done-mark?
+   STRICTLY greater, not >=. At EQUAL v the two sides hold genuinely concurrent states and
+   neither is newer — vetoing there silently annihilates a real edit with no tombstone, no
+   history row and no trace (rename a task on the phone while the Mac archives it as done, and
+   the rename simply evaporates). The device that completed the task always bumps v ABOVE the
+   peer's stale copy, so `>` still vetoes every case this was built for; `pickItem`'s content
+   tiebreak handles the equal-v collision the way every other field does. */
 const doneMarked = (it, marks) => {
   if(!it || !it.id || !marks) return false;
   const m = marks[it.id];
-  return !!m && (m.v|0) >= ((it.v|0)||1);
+  return !!m && (m.v|0) > ((it.v|0)||1);
+};
+/* Was this id removed by a ROLLOVER (as opposed to a user delete)? A rollover writes BOTH a
+   plain tombstone and a done-mark; a delete writes only the tombstone. That pairing is what
+   lets an un-updated peer converge: it doesn't understand doneTombs, but it does understand
+   tombstones, so it drops the row too instead of re-adding it and starting a push-fight that
+   would last until the phone is updated. The mark is what lets a later undo escape the
+   otherwise-unconditional tombstone. */
+const rollbackEscapes = (it, tombstones, marks) => {
+  if(!it || !it.id || !marks) return false;
+  const m = marks[it.id];
+  return !!m && (m.v|0) < ((it.v|0)||1);      // edited/undone AFTER the archive → let it back
 };
 let editingId = null;
 let futureCursor = -1;   // Tab-cursor over the Future panel's rows (−1 = none); reset when the panel opens
@@ -1135,12 +1157,19 @@ function mergeDoneTombs(a, b){
    the unit skew first if that map ever needs a ceiling too.
    A mark with no `t` (t:0) is kept — absence of a clock must never mean "expired". */
 const MARK_RETENTION_MS = 90*86400000;
-function pruneMarks(marks, tombstones){
-  const cutoff = Date.now() - MARK_RETENTION_MS;
+function pruneMarks(marks){
+  // Cutoff is relative to the NEWEST mark in the map, NOT to Date.now(). Reading the local
+  // clock inside merge() makes eviction a function of *when* you merged: two devices a few
+  // minutes apart disagree about a mark near the boundary, each re-supplies it to the other by
+  // union, and they push at each other until the skew passes (forever, on a device with a
+  // wrong clock). Deriving the cutoff from the data keeps merge a pure function of its inputs.
+  const entries = Object.entries(marks||{});
+  let newest = 0;
+  for(const [,m] of entries) if(m.t > newest) newest = m.t;
+  const cutoff = newest - MARK_RETENTION_MS;
   const out = {};
-  for(const [id,m] of Object.entries(marks||{})){
-    if(tombstones && (id in tombstones)) continue;    // a hard delete already covers this id
-    if(m.t && m.t < cutoff) continue;
+  for(const [id,m] of entries){
+    if(m.t && m.t < cutoff) continue;                 // a mark with no clock (t:0) is never "expired"
     out[id] = m;
   }
   return out;
@@ -1172,21 +1201,23 @@ function mergeItems(primary, secondary, tombstones, doneTombs){
   const seen = new Set();
   const out = [];
   const marks = doneTombs || {};
+  // Resolve the winner FIRST, then judge it — an undo on the losing side raises v past the
+  // mark and must be allowed back. A plain tombstone is still an unconditional veto UNLESS a
+  // done-mark identifies it as a rollover-archive tombstone that this item has since outlived.
+  const gone = it => (it.id in tombstones)
+    ? !rollbackEscapes(it, tombstones, marks)
+    : doneMarked(it, marks);
   for(const it of (primary||[])){               // primary = newer save → keeps its order
     if(!it||!it.id) continue;
     seen.add(it.id);
-    if(it.id in tombstones) continue;
     const other = sec.get(it.id);
-    // Resolve the winner FIRST, then test the done-mark against the winner's version — an
-    // undo on the losing side raises v past the mark and must be allowed to come back.
     const win = other ? pickItem(it, other) : it;
-    if(doneMarked(win, marks)) continue;         // a rollover archived this id as done
+    if(gone(win)) continue;
     out.push(win);
   }
   for(const it of (secondary||[])){              // items only on the older save → keep, don't lose
     if(!it||!it.id||seen.has(it.id)) continue;
-    if(it.id in tombstones) continue;
-    if(doneMarked(it, marks)) continue;
+    if(gone(it)) continue;
     out.push(it);
   }
   // Drop stray EMPTY active items — a blank, untitled task carries no information and
@@ -1278,7 +1309,12 @@ function mergeHistRecord(x, y){
     const done = !!(p.done||it.done);                                  // done-wins
     const ck = h => canonicalJSON({id:h.id,text:h.text,done:!!h.done}); // projected: both platforms share these fields
     const base = ck(p) <= ck(it) ? p : it;                             // stable text winner
-    items.set(it.id, { ...base, done, ord: Math.min(histOrd(p), histOrd(it)) });
+    // Prefer a DEFINED ord over a fallback: histOrd() returns 0 for a row that carries no
+    // ordering at all, and min() would let that zero permanently flatten a real order the
+    // first time it met a copy stripped by an older peer.
+    const ordP = (typeof p.ord==='number') ? p.ord : null, ordI = (typeof it.ord==='number') ? it.ord : null;
+    const ord = (ordP!=null && ordI!=null) ? Math.min(ordP, ordI) : (ordP ?? ordI ?? Math.min(histOrd(p), histOrd(it)));
+    items.set(it.id, { ...base, done, ord });
   }
   const wx=x.weekday||'', wy=y.weekday||'';
   const weekday = (wx&&wy) ? (wx<=wy?wx:wy) : (wx||wy);
@@ -1350,8 +1386,18 @@ function merge(a, b){
       // otherwise a task completed on the still-unrolled device comes back as the rolled
       // device's stale ACTIVE copy, which is exactly the 2026-08-08 field report. Computed
       // from inputs BOTH devices share, so it stays symmetric.
+      const stamp = dayStamp(oldLive.date);
       const marks = {};
-      for(const it of oldLive.items){ if(it && it.id && it.state==='done') marks[it.id] = Math.max(marks[it.id]|0, (it.v|0)||1); }
+      for(const it of oldLive.items){
+        if(!it || !it.id || it.state!=='done') continue;
+        const v = (it.v|0)||1;
+        if(!marks[it.id] || v >= marks[it.id].v) marks[it.id] = { v, t:stamp };
+        // Pair every mark with a plain tombstone so an UN-UPDATED peer — which has no idea
+        // what doneTombs are — still drops the row instead of re-adding it and push-fighting
+        // until the phone is updated. Stamped from the archived DAY, not the clock, so both
+        // devices emit byte-identical maps.
+        if(!(it.id in tombstones)) tombstones[it.id] = stamp;
+      }
       doneTombs = mergeDoneTombs(doneTombs, marks);
     }
     // This branch used to take the later day's list WHOLESALE — no tombstone filter, no
@@ -1429,7 +1475,7 @@ function merge(a, b){
     deferred,
     settings: newer.settings,
     pinned: newer.pinned,
-    tombstones, doneTombs: pruneMarks(doneTombs, tombstones), erasedAt,
+    tombstones, doneTombs: pruneMarks(doneTombs), erasedAt,
     savedAt: Math.max(a.savedAt||0, b.savedAt||0),
     restartStash: newer.restartStash || older.restartStash || null,
     syncNotice: syncNotice || null,
@@ -2265,6 +2311,7 @@ function rolloverAndCarry(){
   // Two devices then minted two different ids for the same task, and a union-merge cannot
   // tell a re-minted carry-over from a task you just typed (field report 2026-08-08).
   const prevItems=(state.today.items||[]).slice();
+  const prevDate=state.today.date;               // the day being archived — stamps the markers
   const rolled=maybeRollover();
   if(rolled){
     restartStash=null;                        // a real new day re-plans; an old set-aside is stale
@@ -2273,7 +2320,14 @@ function rolloverAndCarry(){
     // A completed row leaves Today for good. Say so on the wire: absence alone never wins a
     // union, so without this mark the peer that never saw the completion just re-adds its own
     // ACTIVE copy on the next merge and the task comes back from the dead.
-    prevItems.forEach(it=>{ if(it && it.id && it.state==='done') markDone(it.id, it.v); });
+    prevItems.forEach(it=>{
+      if(!it || !it.id || it.state!=='done') return;
+      markDone(it.id, it.v, prevDate);
+      // Paired plain tombstone — see markDone/rollbackEscapes. An un-updated peer understands
+      // only this one, and without it the two builds disagree forever about whether the task
+      // is live, pushing at each other every 1.5s with the row visibly flickering.
+      (state.tombstones||(state.tombstones={}))[it.id] = dayStamp(prevDate);
+    });
     // Unfinished rows carry forward AS THEMSELVES — same id, same v, same state. Both devices
     // therefore carry the SAME ids into the new day, so the union is idempotent instead of
     // doubling up. (state is passed through untouched rather than reset to 'neutral': it is
@@ -2791,12 +2845,12 @@ function renderSyncNotice(){
   // Reveal the tucked drawer ONCE per new notice (like the update banner) so it's actually seen.
   // NOT on a background sync pass: openDrawer() takes key focus (nativeFocus) and resizes the
   // window, so Buddy would slide over whatever the user is working in — the exact opposite of a
-  // calm app. The signature is still recorded, and the banner is already rendered above, so the
-  // next real reveal shows it. (Before background polling existed this branch was unreachable
-  // while tucked; adding the slow poll is what put it in reach — skeptic, 2026-08-08.)
-  if(sig!==syncNoticeSeen){
+  // calm app. Crucially the signature is NOT consumed when suppressed: recording it there would
+  // burn the one-shot reveal on a pass nobody saw, and since background polling is exactly when
+  // overflow now arrives, the reveal would effectively never fire again.
+  if(sig!==syncNoticeSeen && !(NATIVE && syncInBackgroundPass)){
     syncNoticeSeen=sig;
-    if(NATIVE && !syncInBackgroundPass && !morningUp() && !state.pinned){ clearTimeout(closeTimer); openDrawer(); }
+    if(NATIVE && !morningUp() && !state.pinned){ clearTimeout(closeTimer); openDrawer(); }
   }
 }
 function dismissSyncNotice(){
@@ -4755,6 +4809,70 @@ window.__buddy = {
       const noClock = merge(snap({savedAt:2000, doneTombs:{ nc:{v:2,t:0} }}), snap({savedAt:1000}));
       ok('a done-mark with no timestamp is kept, not treated as expired',
          !!noClock.doneTombs.nc, JSON.stringify(noClock.doneTombs));
+
+      // 31. EQUAL v is a genuine conflict, not a veto. Completing bumps v ABOVE the peer's stale
+      // copy, so `>` still catches every real case — while `>=` silently annihilated a concurrent
+      // rename (no tombstone, no history row, no trace at all). Skeptic, 2026-08-08.
+      const tieA = snap({savedAt:2000, doneTombs:{ gp:dmark(8) }, today:{date:day2,morningDone:false,items:[]}});
+      const tieB = snap({savedAt:1000, today:{date:day2,morningDone:false,items:[ item('gp','renamed on the phone',null,8) ]}});
+      ok('an equal-v concurrent edit is NOT annihilated by a done-mark',
+         ids(merge(tieA,tieB)).includes('gp') && ids(merge(tieB,tieA)).includes('gp'),
+         ids(merge(tieA,tieB))+' | '+ids(merge(tieB,tieA)));
+
+      // 32. merge() must be a PURE function of its inputs — no wall clock. Two devices merging
+      // the same pair at different moments have to produce byte-identical output, or
+      // blobContentKey differs and they push at each other forever.
+      const pureA = snap({ savedAt:1000, today:{date:day2,morningDone:false,items:[ item('gp','x',null,3) ]} });
+      const pureB = snap({ savedAt:2000, today:{date:'2026-06-19',morningDone:false,items:[ item('gp','x','done',4,5000) ]} });
+      const p1 = canonicalJSON(merge(pureA,pureB)), p2 = canonicalJSON(merge(pureA,pureB));
+      // The mark's `t` must be midnight of the ARCHIVED DAY exactly — not "some plausible
+      // timestamp". Date.now() would also start with 17, so a loose check proves nothing.
+      const pureMark = merge(pureA,pureB).doneTombs.gp;
+      ok('merge is clock-free: byte-identical output, mark stamped from the archived DAY',
+         p1===p2 && pureMark && pureMark.t===Date.parse('2026-06-19T00:00:00Z'),
+         't='+(pureMark&&pureMark.t)+' expected='+Date.parse('2026-06-19T00:00:00Z'));
+      // …and both orders agree, marks included.
+      ok('done-marks emitted by merge are symmetric',
+         canonicalJSON(merge(pureA,pureB).doneTombs)===canonicalJSON(merge(pureB,pureA).doneTombs),
+         canonicalJSON(merge(pureA,pureB).doneTombs)+' vs '+canonicalJSON(merge(pureB,pureA).doneTombs));
+
+      // 33. Retention is measured from the NEWEST mark, not from Date.now(). A clock-based
+      // cutoff made eviction depend on WHEN you merged: two devices minutes apart disagree at
+      // the boundary, each re-supplies the mark by union, and they ping-pong until the skew
+      // passes — permanently on a device with a wrong clock.
+      const relA = snap({savedAt:2000, doneTombs:{ old:dmark(1, 1000), recent:dmark(1, 1000+MARK_RETENTION_MS+1) }});
+      const rel = merge(relA, snap({savedAt:1000}));
+      ok('mark retention is relative to the newest mark, not the local clock',
+         !rel.doneTombs.old && !!rel.doneTombs.recent, JSON.stringify(rel.doneTombs));
+
+      // 34. A rollover pairs every done-mark with a PLAIN tombstone. That pairing is what lets a
+      // peer running an OLDER build converge: it has no idea what doneTombs are, but it does
+      // honour tombstones, so it drops the row instead of re-adding it and push-fighting until
+      // the phone is updated. A user DELETE writes only a tombstone — and stays unconditional.
+      const rbA = snap({ savedAt:2000, tombstones:{ gp:1000 }, doneTombs:{ gp:dmark(4,1000) }, today:{date:day2,morningDone:false,items:[]} });
+      const rbB = snap({ savedAt:1000, today:{date:day2,morningDone:false,items:[ item('gp','Ghost pricing pages',null,3) ]} });
+      ok('a rollover tombstone + mark still vetoes the peer\'s stale copy',
+         !ids(merge(rbA,rbB)).includes('gp') && !ids(merge(rbB,rbA)).includes('gp'),
+         ids(merge(rbA,rbB))+' | '+ids(merge(rbB,rbA)));
+      // …but an undo AFTER the archive escapes it (that is the whole point of the mark).
+      const rbC = snap({ savedAt:1000, today:{date:day2,morningDone:false,items:[ item('gp','Ghost pricing pages',null,5) ]} });
+      ok('an undo after the archive escapes the paired rollover tombstone',
+         ids(merge(rbA,rbC)).includes('gp') && ids(merge(rbC,rbA)).includes('gp'),
+         ids(merge(rbA,rbC))+' | '+ids(merge(rbC,rbA)));
+      // …and a plain DELETE (tombstone, no mark) is never escapable, at any version.
+      const delOnly = snap({ savedAt:2000, tombstones:{ gp:1000 }, today:{date:day2,morningDone:false,items:[]} });
+      ok('a user delete stays unconditional (no mark ⇒ no escape hatch)',
+         !ids(merge(delOnly,rbC)).includes('gp') && !ids(merge(rbC,delOnly)).includes('gp'),
+         ids(merge(delOnly,rbC))+' | '+ids(merge(rbC,delOnly)));
+
+      // 35. History ord: a row stripped of `ord` by an older peer must not flatten a real order
+      // to zero (min() with a fallback 0 destroyed the day's order permanently).
+      const ordFull={date:'2026-06-19',weekday:'Fri',items:[{id:'zzz',ord:0,text:'first',done:false},{id:'aaa',ord:1,text:'second',done:false}]};
+      const ordStripped={date:'2026-06-19',weekday:'Fri',items:[{id:'zzz',text:'first',done:false},{id:'aaa',text:'second',done:false}]};
+      const h35=mergeHistRecord(ordFull, ordStripped);
+      ok('a peer that strips `ord` cannot flatten the day\'s order',
+         h35.items.map(i=>i.id).join(',')==='zzz,aaa' && h35.items.map(i=>i.ord).join(',')==='0,1',
+         JSON.stringify(h35.items.map(i=>i.id+':'+i.ord)));
     }catch(e){ ok('mergeTest ran without throwing', false, e&&e.message); }
     const failed=R.filter(r=>!r.pass);
     return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };

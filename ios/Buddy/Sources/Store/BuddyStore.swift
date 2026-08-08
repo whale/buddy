@@ -90,11 +90,13 @@ final class BuddyStore {
     /// Mark an id as "archived done by a rollover" at the version it held. Merge then drops any
     /// copy at v <= the mark, so the peer's stale ACTIVE copy loses — while an undo (which bumps
     /// v past the mark) still wins. `t` is MILLISECONDS here (see DoneMark). Mirrors Mac markDone.
-    private func markDone(_ id: String, _ v: Int) {
+    private func markDone(_ id: String, _ v: Int, _ date: String) {
         guard !id.isEmpty else { return }
         let n = Swift.max(1, v)
         if let prev = doneTombs[id], prev.v > n { return }
-        doneTombs[id] = DoneMark(v: n, t: Date().timeIntervalSince1970 * 1000)
+        // Stamped from the ARCHIVED DAY, never the local clock — merge() emits these too, and a
+        // clock read there makes two devices produce different maps from identical inputs.
+        doneTombs[id] = DoneMark(v: n, t: BuddyMerge.dayStamp(date))
     }
 
     // MARK: - Task mutations
@@ -458,7 +460,13 @@ final class BuddyStore {
         // A completed row leaves Today for good. Say so on the wire: absence alone never wins a
         // union, so without this mark the peer that never saw the completion just re-adds its own
         // ACTIVE copy on the next merge and the task comes back from the dead.
-        for it in prevItems where it.isDone && !it.id.isEmpty { markDone(it.id, it.v) }
+        for it in prevItems where it.isDone && !it.id.isEmpty {
+            markDone(it.id, it.v, stored)
+            // Paired plain tombstone — an un-updated peer understands only this one, and without
+            // it the two builds disagree forever about whether the task is live, pushing at each
+            // other every 1.5s with the row visibly flickering. See BuddyMerge.rollbackEscapes.
+            tombstones[it.id] = BuddyMerge.dayStamp(stored)
+        }
         // Unfinished rows carry forward AS THEMSELVES — same id, same v, same state. Both devices
         // therefore carry the SAME ids into the new day, so the union is idempotent instead of
         // doubling up. (state rides through untouched rather than being reset: it is non-done by
@@ -468,6 +476,10 @@ final class BuddyStore {
             if today.items.contains(where: { $0.id == it.id }) { continue }
             var carried = it
             carried.doneAt = nil
+            // Normalise to .neutral: the Mac's hydrate() forces every non-done state to 'neutral'
+            // on EVERY load, and `state` is inside contentKey — so a carried .focused would lose
+            // and re-win against the Mac forever. (The earlier comment here had this backwards.)
+            carried.state = .neutral
             today.items.append(carried)
         }
 

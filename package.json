@@ -13,6 +13,7 @@
     "icons:qa": "bash scripts/icon-qa.sh",
     "ui:smoke": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-ui-smoke.spec.js --reporter=line",
     "test:merge": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-merge.spec.js --reporter=line",
+    "test:crossbuild": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-crossbuild.spec.js --reporter=line",
     "sync:live": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-two-device.spec.js --reporter=line",
     "sync:unlink": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-unlink-live.spec.js --reporter=line",
     "sync:validate": "NODE_PATH=$(npm root -g) node scripts/buddy-sync-validate.mjs",

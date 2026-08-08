@@ -120,9 +120,16 @@ struct DayItem: Codable {
     }
 
     /// Sort key: explicit `ord`, else the index parsed out of a LEGACY positional id, else 0.
+    /// Mirrors the Mac's `/^h-.+-(\d+)$/`, which requires a NON-EMPTY middle segment — so "h-5"
+    /// scores 0 on both platforms, not 0 here and 5 there.
     var order: Int {
         if let o = ord { return o }
-        guard let dash = id.lastIndex(of: "-"), id.hasPrefix("h-") else { return 0 }
+        guard id.hasPrefix("h-"), let dash = id.lastIndex(of: "-"),
+              // "h-5" has its LAST dash at index 1, so the middle segment would be an INVERTED
+              // range — which traps at runtime, not just returns empty. Bound it before slicing.
+              let midStart = id.index(id.startIndex, offsetBy: 2, limitedBy: id.endIndex),
+              midStart < dash
+        else { return 0 }
         return Int(id[id.index(after: dash)...]) ?? 0
     }
 }
