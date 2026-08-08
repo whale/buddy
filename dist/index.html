@@ -5418,14 +5418,25 @@ document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState=
 // the Mac PUSHED its own edits and never PULLED, so the phone's day sat unseen for hours and
 // then landed in one lump (which is what tripped the red alarm). Two speeds, not on/off:
 // fast while visible, one slow catch-up pass a minute while tucked (~1440/day).
+// The slow pass deliberately does NOT check document.visibilityState. macOS reports a fully
+// OCCLUDED window as hidden, so that check and the buddyUiShowing() gate are two different
+// ways to reach the same dead end, and the event log can't say which one actually stopped the
+// user's Mac on 2026-08-08 (both are consistent with "polled for 2.5h, then nothing for 3.5h").
+// Rather than bet on one, the once-a-minute catch-up runs regardless — one request a minute is
+// cheap, and it is robust to either cause. The 1.5s fast poll keeps both gates.
 function buddyUiShowing(){ return morningUp() || !drawer.classList.contains('translate-x-full'); }
 const BG_POLL_MS = 60000;
-let lastBgPollAt = 0;
+let lastBgPollAt = 0, lastHeartbeatAt = 0;
 setInterval(()=>{
-  if(!syncStore || document.visibilityState!=='visible') return;
-  if(buddyUiShowing()){ lastBgPollAt = Date.now(); syncNow('poll'); return; }
+  if(!syncStore) return;
+  const vis = document.visibilityState, showing = buddyUiShowing();
+  if(vis==='visible' && showing){ lastBgPollAt = Date.now(); syncNow('poll'); return; }
   if(Date.now()-lastBgPollAt < BG_POLL_MS) return;
   lastBgPollAt = Date.now();
+  // Heartbeat FIRST, and unconditionally: it is the only line that proves the timer is alive
+  // when no sync pass runs. Without it, "not polling" and "polling, finding nothing" look
+  // identical in the log — which is exactly what made the 2026-08-08 report so slow to pin down.
+  if(Date.now()-lastHeartbeatAt >= BG_POLL_MS){ lastHeartbeatAt = Date.now(); diag('tick', {vis, showing}); }
   syncNow('poll-bg');                       // background: must never reveal the drawer (renderSyncNotice)
 }, 1500);
 </script>
