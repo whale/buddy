@@ -46,10 +46,12 @@ final class MorningStoreTests: XCTestCase {
         // only the UNFINISHED tasks carry forward, in order
         XCTAssertEqual(s.today.items.map { $0.text }, ["undone one", "undone two"])
         XCTAssertTrue(s.today.items.allSatisfy { $0.state == .neutral })
-        // yesterday archived in full (done + undone), with stable h-<date>-<i> ids
+        // yesterday archived in full (done + undone), keyed by the REAL item ids so the two
+        // devices agree which archived row is which (positional ids did not — 2026-08-08)
         XCTAssertEqual(s.history.first?.date, "2020-01-01")
         XCTAssertEqual(s.history.first?.items.count, 3)
-        XCTAssertEqual(s.history.first?.items.first?.id, "h-2020-01-01-0")
+        XCTAssertEqual(s.history.first?.items.map { $0.id }, ["a", "b", "c"])
+        XCTAssertEqual(s.history.first?.items.map { $0.order }, [0, 1, 2])
     }
 
     func testRolloverCarriesAllUnfinishedUpToHardCap() {
@@ -78,7 +80,7 @@ final class MorningStoreTests: XCTestCase {
     }
 
     // Slice 2: already-archived + live items that DIFFER from the record → the live list
-    // merges into the record (done-wins, union by positional id) instead of vanishing.
+    // merges into the record (done-wins, union by id) instead of vanishing.
     func testRolloverMergesLiveItemsIntoExistingRecord() {
         let s = BuddyStore()
         s.today = TodayState(date: "2020-01-01", items: [
@@ -86,14 +88,30 @@ final class MorningStoreTests: XCTestCase {
             task("b", "y")                  // live-only second task → appended to the record
         ], morningDone: true)
         s.history = [Day(date: "2020-01-01", weekday: "Wednesday",
-                         items: [DayItem(id: "h-2020-01-01-0", text: "x", done: false)])]
+                         items: [DayItem(id: "a", text: "x", done: false)])]
         _ = s.performRolloverIfNeeded()
         let rec = s.history.first { $0.date == "2020-01-01" }
         XCTAssertEqual(rec?.items.count, 2)
-        XCTAssertEqual(rec?.items.first { $0.id == "h-2020-01-01-0" }?.done, true)   // done-wins
-        XCTAssertEqual(rec?.items.first { $0.id == "h-2020-01-01-1" }?.text, "y")    // live-only kept
+        XCTAssertEqual(rec?.items.first { $0.id == "a" }?.done, true)   // done-wins
+        XCTAssertEqual(rec?.items.first { $0.id == "b" }?.text, "y")    // live-only kept
         // and the unfinished "y" carries forward
         XCTAssertEqual(s.today.items.map { $0.text }, ["y"])
+    }
+
+    /// TRANSITION: a record archived by an OLD build keys its rows positionally, so it cannot
+    /// match a new build's real-id rows and the day carries BOTH for a few days. Cosmetic and
+    /// self-limiting — and strictly preferred over a text-keyed merge, which would have to agree
+    /// byte-for-byte on Unicode normalization across JS and Swift to avoid a permanent
+    /// push ping-pong. Pinned so the duplication is a KNOWN cost, not a surprise.
+    func testLegacyPositionalRecordDoesNotMergeWithRealIdRows() {
+        let s = BuddyStore()
+        s.today = TodayState(date: "2020-01-01", items: [task("a", "x", .done)], morningDone: true)
+        s.history = [Day(date: "2020-01-01", weekday: "Wednesday",
+                         items: [DayItem(id: "h-2020-01-01-0", text: "x", done: false)])]
+        _ = s.performRolloverIfNeeded()
+        let rec = s.history.first { $0.date == "2020-01-01" }
+        XCTAssertEqual(rec?.items.count, 2)          // legacy row + real-id row, for this day only
+        XCTAssertEqual(rec?.items.first { $0.id == "a" }?.done, true)
     }
 
     func testEmptyYesterdayArchivesNothingButStillShowsMorning() {

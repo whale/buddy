@@ -10,9 +10,14 @@ final class BuddyMergeTests: XCTestCase {
     private func snap(today: TodayState? = TodayState(date: "2026-06-19", items: []),
                       history: [Day] = [], deferred: [DeferredTask] = [],
                       settings: BuddySettings? = nil, tombstones: [String: Double] = [:],
-                      erasedAt: Double? = nil, savedAt: Double = 1000) -> SyncSnapshot {
+                      erasedAt: Double? = nil, savedAt: Double = 1000,
+                      doneTombs: [String: DoneMark] = [:]) -> SyncSnapshot {
         SyncSnapshot(today: today, history: history, deferred: deferred,
-                     settings: settings, tombstones: tombstones, erasedAt: erasedAt, savedAt: savedAt)
+                     settings: settings, tombstones: tombstones, doneTombs: doneTombs,
+                     erasedAt: erasedAt, savedAt: savedAt)
+    }
+    private func dmark(_ v: Int, _ t: Double? = nil) -> DoneMark {
+        DoneMark(v: v, t: t ?? Date().timeIntervalSince1970 * 1000)
     }
     private func item(_ id: String, _ text: String, _ st: TaskState = .neutral,
                       _ v: Int = 1, _ doneAt: Date? = nil) -> BuddyTask {
@@ -215,5 +220,142 @@ final class BuddyMergeTests: XCTestCase {
         let bills = (m?.today?.items ?? []).filter { $0.isActive && $0.text == "Check on Anthropic bill" }.count
         XCTAssertEqual(bills, 1)
         XCTAssertTrue((m?.today?.items ?? []).contains { $0.id == "dn" && $0.isDone })
+    }
+
+    // MARK: - The 2026-08-08 resurrection ("I checked off Ghost pricing pages, it keeps coming back")
+    //
+    // A rollover DROPS completed rows, and pure absence never wins a union — so the peer that
+    // never saw the completion re-added its own stale ACTIVE copy every single day. doneTombs
+    // is the missing "it left today, on purpose" signal. Byte-parallel to the Mac's tests 23-31.
+
+    /// SYMMETRIC: both devices rolled. One carries the done-mark, the other carried the task
+    /// forward still active. The mark wins, in BOTH argument orders.
+    func testDoneMarkBeatsPeersStaleCarriedForwardCopy() {
+        let day2 = "2026-06-20"
+        let a = snap(today: TodayState(date: day2, items: [item("keep", "Ghost Navigation")]),
+                     savedAt: 2000, doneTombs: ["gp": dmark(4)])
+        let b = snap(today: TodayState(date: day2, items: [
+            item("keep", "Ghost Navigation"), item("gp", "Ghost pricing pages", .neutral, 3)]), savedAt: 1000)
+        XCTAssertEqual(ids(BuddyMerge.merge(a, b)), ["keep"])
+        XCTAssertEqual(ids(BuddyMerge.merge(b, a)), ["keep"])
+    }
+
+    /// ASYMMETRIC (the user's ACTUAL scenario): device A rolled to day2 carrying the task
+    /// ACTIVE; device B has not rolled and still holds it DONE on day1. This lands in merge()'s
+    /// DIFFERENT-DATE branch, which used to take the later day's list wholesale — no tombstones,
+    /// no marks — so the completion was silently undone.
+    func testDifferentDateBranchHonoursACompletionOnTheUnrolledDevice() {
+        let rolled = snap(today: TodayState(date: "2026-06-20", items: [item("gp", "Ghost pricing pages", .neutral, 3)]), savedAt: 1000)
+        let unrolled = snap(today: TodayState(date: "2026-06-19", items: [
+            item("gp", "Ghost pricing pages", .done, 4, Date(timeIntervalSince1970: 5000))]), savedAt: 2000)
+        XCTAssertEqual(ids(BuddyMerge.merge(rolled, unrolled)), [])
+        XCTAssertEqual(ids(BuddyMerge.merge(unrolled, rolled)), [])
+        // …and the completed day is still archived, done — nothing is lost, it just isn't live.
+        let hist = BuddyMerge.merge(rolled, unrolled)?.history.first { $0.date == "2026-06-19" }
+        XCTAssertEqual(hist?.items.first { $0.id == "gp" }?.done, true)
+    }
+
+    /// Same wholesale-copy hole, for a plain DELETE.
+    func testDifferentDateBranchHonoursTombstones() {
+        let rolled = snap(today: TodayState(date: "2026-06-20", items: [item("gone", "deleted elsewhere")]), savedAt: 1000)
+        let peer = snap(today: TodayState(date: "2026-06-19", items: [item("other", "x")]),
+                        tombstones: ["gone": 9999], savedAt: 2000)
+        XCTAssertFalse(ids(BuddyMerge.merge(rolled, peer)).contains("gone"))
+        XCTAssertFalse(ids(BuddyMerge.merge(peer, rolled)).contains("gone"))
+    }
+
+    /// A done-mark must NOT veto a later UNDO — undo bumps v past the mark. This is exactly
+    /// why the mark is version-aware instead of a plain tombstone.
+    func testUndoAboveTheMarkSurvives() {
+        let day2 = "2026-06-20"
+        let a = snap(today: TodayState(date: day2, items: []), savedAt: 1000, doneTombs: ["gp": dmark(4)])
+        let b = snap(today: TodayState(date: day2, items: [item("gp", "Ghost pricing pages", .neutral, 5)]), savedAt: 2000)
+        XCTAssertEqual(ids(BuddyMerge.merge(a, b)), ["gp"])
+        XCTAssertEqual(ids(BuddyMerge.merge(b, a)), ["gp"])
+    }
+
+    /// Marks union by HIGHEST version, and survive a round trip through the wire so an
+    /// un-upgraded peer echoing the blob back can't drop or weaken them.
+    func testDoneMarksTakeHighestVersionAndSurviveTheWire() throws {
+        let m = BuddyMerge.merge(snap(savedAt: 2000, doneTombs: ["x": dmark(2)]),
+                                 snap(savedAt: 1000, doneTombs: ["x": dmark(7)]))
+        XCTAssertEqual(m?.doneTombs["x"]?.v, 7)
+        let data = try JSONEncoder().encode(SyncWire(m!))
+        let back = try JSONDecoder().decode(SyncWire.self, from: data).toSnapshot()
+        XCTAssertEqual(back.doneTombs["x"]?.v, 7)
+    }
+
+    /// Done-marks age out at 90 days so the map can't grow forever…
+    func testStaleDoneMarksArePruned() {
+        let stale = Date().timeIntervalSince1970 * 1000 - 100 * 86_400_000
+        let m = BuddyMerge.merge(snap(savedAt: 2000, doneTombs: ["stale": dmark(1, stale), "fresh": dmark(1)]),
+                                 snap(savedAt: 1000))
+        XCTAssertNil(m?.doneTombs["stale"])
+        XCTAssertNotNil(m?.doneTombs["fresh"])
+    }
+
+    /// …but a PLAIN tombstone must never be age-pruned. iOS writes them in SECONDS
+    /// (timeIntervalSince1970) while the Mac writes MILLISECONDS, so an age check reads every
+    /// iPhone-minted tombstone as 1970 and deletes it — resurrecting every task ever deleted on
+    /// the phone. Pinned here and on the Mac so it can't come back.
+    func testSecondsUnitTombstoneIsNeverAgedOut() {
+        let m = BuddyMerge.merge(snap(tombstones: ["iosDel": 1_783_625_135.289], savedAt: 2000),
+                                 snap(today: TodayState(date: "2026-06-19", items: [item("iosDel", "deleted on iPhone")]), savedAt: 1000))
+        XCTAssertNotNil(m?.tombstones["iosDel"])
+        XCTAssertFalse(ids(m).contains("iosDel"))
+    }
+
+    /// A mark with no clock (t == 0) is kept — "no timestamp" is not "expired".
+    func testDoneMarkWithoutTimestampIsKept() {
+        let m = BuddyMerge.merge(snap(savedAt: 2000, doneTombs: ["nc": DoneMark(v: 2, t: 0)]), snap(savedAt: 1000))
+        XCTAssertNotNil(m?.doneTombs["nc"])
+    }
+
+    /// HISTORY: two devices order the same day differently, so the old positional ids
+    /// (h-<date>-<i>) collided and merged two DIFFERENT tasks into one — destroying a text and
+    /// handing the survivor the other's checkmark. Real item ids fix it.
+    func testHistoryMergesByRealIdNotPosition() {
+        let a = Day(date: "2026-06-19", weekday: "Friday", items: [
+            DayItem(id: "gp", text: "Ghost pricing pages", done: true, ord: 0),
+            DayItem(id: "nav", text: "Ghost Navigation", done: false, ord: 1)])
+        let b = Day(date: "2026-06-19", weekday: "Friday", items: [
+            DayItem(id: "nav", text: "Ghost Navigation", done: false, ord: 0),
+            DayItem(id: "gp", text: "Ghost pricing pages", done: true, ord: 1)])
+        let m = BuddyMerge.mergeHistRecord(a, b)
+        XCTAssertEqual(m.items.count, 2)
+        XCTAssertEqual(m.items.first { $0.id == "gp" }?.done, true)
+        XCTAssertEqual(m.items.first { $0.id == "nav" }?.done, false)
+        // symmetric
+        let r = BuddyMerge.mergeHistRecord(b, a)
+        XCTAssertEqual(m.items.map { $0.id }, r.items.map { $0.id })
+    }
+
+    /// A day can legitimately hold a DONE "Foo" and an ACTIVE "Foo" (clampActive only dedupes
+    /// ACTIVE titles). Both must survive — a text-keyed merge would delete one.
+    func testHistoryKeepsDoneAndActiveSameTitleAsTwoRows() {
+        let rec = BuddyMerge.todayToHistoryRecord(TodayState(date: "2026-06-19", items: [
+            item("f1", "Email Sam", .done, 2, Date(timeIntervalSince1970: 100)),
+            item("f2", "Email Sam")]))!
+        let m = BuddyMerge.mergeHistRecord(rec, rec)
+        XCTAssertEqual(m.items.count, 2)
+        XCTAssertEqual(m.items.filter { $0.done }.count, 1)
+    }
+
+    /// Archived rows keep the REAL item id + an order (so the Mac and iOS agree row-for-row).
+    func testHistoryRecordKeepsRealItemIdAndOrder() {
+        let rec = BuddyMerge.todayToHistoryRecord(TodayState(date: "2026-06-19", items: [
+            item("aaa", "first"), item("bbb", "second")]))!
+        XCTAssertEqual(rec.items.map { $0.id }, ["aaa", "bbb"])
+        XCTAssertEqual(rec.items.map { $0.order }, [0, 1])
+    }
+
+    /// `ord` must ROUND-TRIP the wire — dropping it would silently strip the Mac's ordering
+    /// on every iOS pass.
+    func testHistoryOrdRoundTripsTheWire() throws {
+        let s = snap(history: [Day(date: "2026-06-19", weekday: "Friday",
+                                   items: [DayItem(id: "z", text: "z", done: false, ord: 3)])])
+        let data = try JSONEncoder().encode(SyncWire(s))
+        let back = try JSONDecoder().decode(SyncWire.self, from: data).toSnapshot()
+        XCTAssertEqual(back.history.first?.items.first?.ord, 3)
     }
 }

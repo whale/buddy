@@ -83,16 +83,23 @@ struct BuddyTask: Identifiable, Codable, Equatable {
 
 // MARK: - A day in history
 // Mirrors: state.history[] in the web app — flat {id, text, done} (not full TaskState).
-// The id is the Mac's stable per-day key `h-<date>-<i>`, so two devices archiving the
-// same day produce identical ids and merge() unions history by id (not by position).
+// The id is the REAL task id, so two devices archiving the same day agree on which row is
+// which and merge() can union history by id. It used to be the positional key `h-<date>-<i>`,
+// which only LOOKED stable: the index is that device's list position and the two devices
+// order the day differently, so `h-<date>-1` meant a different task on each — and the union
+// collapsed two tasks into one, destroying a text and moving a checkmark (2026-08-08).
+// `ord` carries the planner order that the positional id used to imply.
 struct DayItem: Codable {
     var id: String
     var text: String
     var done: Bool
+    var ord: Int?
 
-    init(id: String, text: String, done: Bool) { self.id = id; self.text = text; self.done = done }
+    init(id: String, text: String, done: Bool, ord: Int? = nil) {
+        self.id = id; self.text = text; self.done = done; self.ord = ord
+    }
 
-    enum CodingKeys: String, CodingKey { case id, text, done }
+    enum CodingKeys: String, CodingKey { case id, text, done, ord }
 
     // Tolerant decode: history records written before ids existed get a synthesized
     // positional id on load (the caller passes the date+index via a fallback id).
@@ -101,6 +108,22 @@ struct DayItem: Codable {
         text = (try? c.decode(String.self, forKey: .text)) ?? ""
         done = (try? c.decode(Bool.self, forKey: .done)) ?? false
         id   = (try? c.decode(String.self, forKey: .id)) ?? ""   // backfilled by Day.normalizedItems
+        ord  = (try? c.decodeIfPresent(Int.self, forKey: .ord)) ?? nil
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(text, forKey: .text)
+        try c.encode(done, forKey: .done)
+        try c.encodeIfPresent(ord, forKey: .ord)
+    }
+
+    /// Sort key: explicit `ord`, else the index parsed out of a LEGACY positional id, else 0.
+    var order: Int {
+        if let o = ord { return o }
+        guard let dash = id.lastIndex(of: "-"), id.hasPrefix("h-") else { return 0 }
+        return Int(id[id.index(after: dash)...]) ?? 0
     }
 }
 

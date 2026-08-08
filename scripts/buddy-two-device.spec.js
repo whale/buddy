@@ -37,17 +37,23 @@ test.beforeAll(async () => {
 test.afterAll(async () => server && server.close());
 
 // Boot one "device": fresh page + storage, sync configured with the shared key.
-async function bootDevice(browser, cfg, syncKey) {
+// `seedToday` (optional) is applied BEFORE sync is configured. That ordering is load-bearing
+// for any back-dated scenario: setSync pushes immediately, and merge()'s different-date rule
+// makes the CALENDAR-LATER day live — so a device that boots on today's date and pushes first
+// will beat a back-dated seed applied afterwards, archiving it into history and leaving both
+// devices staring at an empty list.
+async function bootDevice(browser, cfg, syncKey, seedToday) {
   const ctx = await browser.newContext();           // isolated storage = its own device
   const page = await ctx.newPage();
   await page.goto(`http://localhost:${PORT}/index.html`);
-  await page.evaluate(([url, anon, key]) => {
+  await page.evaluate(([url, anon, key, seed]) => {
     const B = window.__buddy;
     B.clear();
     document.getElementById('morning').classList.add('hidden');
     B.state.today.morningDone = true;
+    if (seed) { B.state.today = seed; B.state.savedAt = Date.now(); B.flush(); }
     return B.setSync({ enabled: true, url, key: anon, syncKey: key });
-  }, [cfg.url, cfg.anon, syncKey]);
+  }, [cfg.url, cfg.anon, syncKey, seedToday || null]);
   return page;
 }
 
@@ -139,4 +145,80 @@ test('two live devices: future→today, undo, dedupe — full convergence', asyn
   });
   await settle(mac, 3000); await settle(phone, 1000);
   await expect.poll(async () => (await key(mac)) === (await key(phone)), { timeout: 25000 }).toBe(true);
+});
+
+// The 2026-08-08 field report: "I've already checked off Ghost pricing pages, but I still
+// see the task showing up."
+//
+// A rollover DROPS completed rows, and pure absence never wins a union-merge — so the peer
+// that never saw the completion re-added its own stale ACTIVE copy every single day.
+//
+// The ASYMMETRIC case is the one that actually bites and the one a "both devices roll over"
+// test walks straight past: the phone completes the task at 23:50, the Mac is tucked and never
+// pulls, the Mac rolls over at midnight carrying its still-active copy forward, and only THEN
+// do they meet — in merge()'s different-date branch, which used to take the later day's list
+// wholesale (no tombstones, no done-marks).
+test('a task completed on one device stays gone after the other rolls over', async ({ browser }) => {
+  test.setTimeout(120000);
+  const cfg = readSecret();
+  test.skip(!cfg || !cfg.url, 'no .supabase-buddy.secret — live backend creds required');
+  // MUST be a real 43-char base64url key — isValidSyncKey rejects anything else, initSync then
+  // leaves syncStore null, and every syncNow silently returns null. A test that never syncs
+  // "passes" for the wrong reason, so the assertions below also check the pass actually ran.
+  const syncKey = require('crypto').randomBytes(32).toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  const yesterday = new Date(Date.now() - 86400000);
+  const day1 = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+
+  // Both devices start on YESTERDAY holding the same two tasks under the same ids —
+  // seeded before their first push (see bootDevice).
+  const seed = () => ({ date: day1, morningDone: true, items: [
+    { id: 'gp-shared', text: 'Ghost pricing pages', state: 'neutral', v: 1, src: null, doneAt: null, doneWord: null },
+    { id: 'nav-shared', text: 'Ghost Navigation', state: 'neutral', v: 1, src: null, doneAt: null, doneWord: null },
+  ] });
+  const mac = await bootDevice(browser, cfg, syncKey, seed());
+  const phone = await bootDevice(browser, cfg, syncKey, seed());
+  expect(await sync(mac)).not.toBeNull();
+  expect(await sync(phone)).not.toBeNull();
+  expect(await mac.evaluate(() => window.__buddy.state.today.date)).toBe(day1);
+  expect(await phone.evaluate(() => window.__buddy.state.items.map(i => i.id))).toContain('gp-shared');
+
+  // The PHONE completes it and pushes. The Mac is "tucked" — it never pulls this.
+  await phone.evaluate(() => {
+    const B = window.__buddy;
+    const it = B.state.items.find(i => i.id === 'gp-shared');
+    it.state = 'done'; it.doneAt = Date.now(); it.v = (it.v | 0) + 1;
+    B.state.savedAt = Date.now(); B.flush(); return B.syncNow('harness');
+  });
+
+  // Midnight: the MAC rolls over WITHOUT having pulled, carrying its still-active copy forward.
+  await mac.evaluate(() => {
+    const B = window.__buddy;
+    B.rolloverAndCarry();
+    B.state.savedAt = Date.now(); B.flush();
+  });
+  expect(await mac.evaluate(() => window.__buddy.state.items.map(i => i.id)))
+    .toContain('gp-shared');   // pre-merge the Mac genuinely still thinks it's live
+
+  // Now they meet. The completion must win on BOTH devices, in either sync order.
+  for (let i = 0; i < 3; i++) {
+    expect(await sync(mac)).not.toBeNull();
+    expect(await sync(phone)).not.toBeNull();
+  }
+  const active = p => p.evaluate(() =>
+    window.__buddy.state.items.filter(i => i.state !== 'done').map(i => i.text));
+  await expect.poll(async () => (await active(mac)).join('|'), { timeout: 25000 })
+    .not.toContain('Ghost pricing pages');
+  await expect.poll(async () => (await active(phone)).join('|'), { timeout: 25000 })
+    .not.toContain('Ghost pricing pages');
+  // …and the task the user did NOT finish is still there. Killing both would be its own bug.
+  expect(await active(mac)).toContain('Ghost Navigation');
+  expect(await active(phone)).toContain('Ghost Navigation');
+
+  // The completion is preserved in history, not merely deleted.
+  const archived = await mac.evaluate(d =>
+    (window.__buddy.state.history.find(h => h.date === d) || { items: [] })
+      .items.filter(i => i.text === 'Ghost pricing pages').map(i => i.done), day1);
+  expect(archived).toContain(true);
 });

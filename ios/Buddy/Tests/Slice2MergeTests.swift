@@ -109,7 +109,7 @@ final class Slice2MergeTests: XCTestCase {
             let rec = m?.history.first { $0.date == "2026-06-22" }
             XCTAssertEqual(rec?.items.first?.text, "late edit")
             XCTAssertEqual(rec?.items.first?.done, false)
-            XCTAssertEqual(rec?.items.first?.id, "h-2026-06-22-0")   // Mac-stable positional id
+            XCTAssertEqual(rec?.items.first?.id, "y2")   // the REAL item id, so both devices agree
         }
     }
 
@@ -205,17 +205,20 @@ final class Slice2MergeTests: XCTestCase {
             savedAt: 1_750_000_123.456,
             extras: ["pinned": .bool(true), "restartStash": .object(["texts": .array([.string("x")]), "date": .string("2026-06-20")])]
         )
-        let expected = #"{"d":[{"id":"d1","text":"plain","wake":""},{"id":"d2","sent":true,"sentTid":"m1","text":"later","wake":"2026-06-25"}],"e":null,"h":[{"date":"2026-06-20","items":[{"done":true,"id":"h-2026-06-20-0","text":"yesterday"}],"weekday":"Friday"},{"date":"2026-06-19","items":[{"done":false,"id":"h-2026-06-19-0","text":"old"}],"weekday":""}],"m":true,"n":null,"s":{"celebrate":80,"reserveSpace":false},"t":[{"id":"m1","state":"neutral","text":"alpha \"quoted\"\nline","v":1},{"doneAt":1750000005000,"id":"m2","state":"done","text":"done ✓","v":2}],"td":"2026-06-21","tomb":{"gone":1750000004000}}"#
+        let expected = #"{"d":[{"id":"d1","text":"plain","wake":""},{"id":"d2","sent":true,"sentTid":"m1","text":"later","wake":"2026-06-25"}],"dtomb":{},"e":null,"h":[{"date":"2026-06-20","items":[{"done":true,"id":"h-2026-06-20-0","text":"yesterday"}],"weekday":"Friday"},{"date":"2026-06-19","items":[{"done":false,"id":"h-2026-06-19-0","text":"old"}],"weekday":""}],"m":true,"n":null,"s":{"celebrate":80,"reserveSpace":false},"t":[{"id":"m1","state":"neutral","text":"alpha \"quoted\"\nline","v":1},{"doneAt":1750000005000,"id":"m2","state":"done","text":"done ✓","v":2}],"td":"2026-06-21","tomb":{"gone":1750000004000}}"#
         XCTAssertEqual(BuddySync.contentKey(s), expected)
 
         // Minimal blob with NO settings → the Mac renders celebrate as null.
         let empty = snap(today: TodayState(date: "2026-06-21", items: []), settings: nil, savedAt: 0)
         XCTAssertEqual(BuddySync.contentKey(empty),
-                       #"{"d":[],"e":null,"h":[],"m":false,"n":null,"s":{"celebrate":null,"reserveSpace":false},"t":[],"td":"2026-06-21","tomb":{}}"#)
+                       #"{"d":[],"dtomb":{},"e":null,"h":[],"m":false,"n":null,"s":{"celebrate":null,"reserveSpace":false},"t":[],"td":"2026-06-21","tomb":{}}"#)
     }
 
-    // MARK: - histId natural sort (h-<date>-<i>): numeric index order past 9; foreign ids last.
-    func testHistIdNaturalSortInMergedRecord() {
+    // MARK: - history row order. Rows sort by `ord` (explicit, or parsed out of a LEGACY
+    // positional id h-<date>-<i> so numeric order survives past 9), then by id. An id carrying
+    // NO order information at all falls to 0 and sorts first, tie-broken by id — arbitrary, but
+    // it must be arbitrary the SAME way on both platforms (the Mac's histOrd does exactly this).
+    func testHistoryRowOrderInMergedRecord() {
         let x = Day(date: "2026-06-19", weekday: "Friday", items: [
             DayItem(id: "h-2026-06-19-10", text: "ten", done: false),
             DayItem(id: "zzz-foreign", text: "foreign", done: false),
@@ -224,7 +227,7 @@ final class Slice2MergeTests: XCTestCase {
             DayItem(id: "h-2026-06-19-2", text: "two", done: true),
         ])
         let m = BuddyMerge.mergeHistRecord(x, y)
-        XCTAssertEqual(m.items.map { $0.id }, ["h-2026-06-19-2", "h-2026-06-19-10", "zzz-foreign"])
+        XCTAssertEqual(m.items.map { $0.id }, ["zzz-foreign", "h-2026-06-19-2", "h-2026-06-19-10"])
     }
 
     // MARK: - mergeHistRecord: done-wins + deterministic text winner + weekday min, symmetric.
