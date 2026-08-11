@@ -47,23 +47,28 @@ test('text typed BEFORE a foreign re-render is never lost', async ({ page }) => 
   expect(s.texts, 'the row being edited was swept while it still had text').toContain('My new task');
 });
 
-test('an untitled row nobody is editing is swept, freeing its cap slot', async ({ page }) => {
+test('a REAL stranded row is swept even though editingId still points at it', async ({ page }) => {
   await boot(page, ['one', 'two', 'three', 'four', 'five']);
-  // A corpse: blank, active, and NOT the row being edited (editingId is null here). This is the
-  // exact state the user was stuck in — five visible tasks, cap says six.
+  // Reproduce the strand the way the app actually creates one: add a row (so the editor is
+  // live), then let a foreign render tear it out. In WebKit no blur fires, so editingId is left
+  // pointing AT THE CORPSE — which is exactly why guarding the sweep on editingId made it a
+  // no-op in the only case that matters.
+  await page.evaluate(() => window.addAndEdit());
+  await page.waitForTimeout(150);
+  await page.evaluate(() => { document.activeElement.blur(); });   // focus gone, row not committed
   const s = await page.evaluate(() => {
     const B = window.__buddy;
-    B.state.items.push({ id:'ghost', text:'', state:'neutral', v:1, src:null, doneAt:null, doneWord:null });
-    const before = window.__buddy.activeCount();
+    B.state.items.push({ id:'corpse', text:'', state:'neutral', v:1, src:null, doneAt:null, doneWord:null });
     B.render();
-    return { before, after: window.__buddy.activeCount(),
-             ghostGone: !B.state.items.some(i => i.id==='ghost'),
-             addRow: !!B.todayWrap.querySelector('.addrow') };
+    return { blanks: B.state.items.filter(i => i.state!=='done' && !i.text.trim()).length,
+             active: B.activeCount(),
+             addRow: !!B.todayWrap.querySelector('.addrow'),
+             editingId: B.editingId };
   });
-  expect(s.before, 'setup wrong — the corpse should have counted').toBe(6);
-  expect(s.ghostGone, 'the stranded blank row survived a render').toBeTruthy();
-  expect(s.after, 'the cap slot was not freed').toBe(5);
+  expect(s.blanks, 'a stranded untitled row survived the render').toBe(0);
+  expect(s.active, 'the cap slot was never freed').toBe(5);
   expect(s.addRow, 'still no way to add a 6th task').toBeTruthy();
+  expect(s.editingId, 'a dangling guard leaves the whole key layer inert').toBeNull();
 });
 
 test('what you SEE and what the cap counts never disagree', async ({ page }) => {
@@ -100,7 +105,7 @@ test('the untitled placeholder is not gated on being focused', async ({ page }) 
   });
   expect(ph.content, 'an untitled row renders nothing at all — an invisible band').not.toBe('none');
   // RULE 1: it must ride the token, not a hardcoded dark colour that vanishes on red.
-  expect(ph.color).not.toBe('rgba(0, 0, 0, 0.2)');
+  expect(ph.color, 'placeholder must ride --ink-dim, not a hardcoded dark').toBe('rgba(0, 0, 0, 0.45)');
 });
 
 // THE ACTUAL REPORTED GESTURE, mouse only: you're editing a task, you click Add, you type.
@@ -117,4 +122,18 @@ test('click a task, click Add, type — the new task keeps every character', asy
   await page.waitForTimeout(200);
   const s = await snap(page);
   expect(s.texts).toEqual(['one', 'two', 'three', 'four', 'five', 'sixth task']);
+});
+
+// A sync pass landing in the one frame between addAndEdit() and startEdit() must not delete the
+// row being added. editingActive() HEALS the guard in that frame (no contenteditable exists yet),
+// so anything relying on editingId to protect the new row deletes it — and the keystrokes then
+// fall through to the global key layer as SHORTCUTS.
+test('a sync heal between add and focus does not eat the new row', async ({ page }) => {
+  await boot(page, ['aaa']);
+  await page.evaluate(() => { window.addAndEdit(); window.editingActive(); window.__buddy.render(); });
+  await page.waitForTimeout(150);
+  await page.keyboard.type('typed after the race');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  expect((await snap(page)).texts).toEqual(['aaa', 'typed after the race']);
 });

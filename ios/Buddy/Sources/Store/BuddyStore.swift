@@ -68,7 +68,11 @@ final class BuddyStore {
         let keep = today.items.filter { !($0.isActive && $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
         guard keep.count != today.items.count else { return }
         today.items = keep
-        scheduleSave(immediate: true)
+        // saveToDisk(), NOT scheduleSave(): the latter stamps lastMutatedAt, which is the
+        // "last USER mutation" clock merge uses as its scalar tiebreak. Sweeping a ghost on
+        // foreground is not a user edit — stamping it would let simply unlocking the phone win
+        // morningDone/settings/syncNotice against a Mac that genuinely edited later.
+        saveToDisk()
     }
     // Actives with COMMITTED text — drives escalation only. A blank, untitled row
     // (just added, not yet typed) must never push the red alarm; counting one once

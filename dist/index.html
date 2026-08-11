@@ -753,6 +753,11 @@ const rollbackEscapes = (it, tombstones, marks) => {
   return !!m && (m.v|0) < ((it.v|0)||1);      // edited/undone AFTER the archive → let it back
 };
 let editingId = null;
+// The row addAndEdit() just created, from the moment it exists until startEdit() actually
+// focuses it. editingId cannot do this job: editingActive() HEALS it (it sees no contenteditable
+// in that one frame and clears it), after which the sweeper below would delete the row the user
+// is about to type into — and the keystrokes fall through to the global key layer as shortcuts.
+let pendingAddId = null;
 let futureCursor = -1;   // Tab-cursor over the Future panel's rows (−1 = none); reset when the panel opens
 let donezoCatchupTimer = null;   // re-render when a SYNC-adopted done item finishes its savor beat
 let cursor = 0;                  // keyboard cursor index (0..items.length, last = Add row)
@@ -2674,6 +2679,7 @@ function startEdit(id){
   const el=wrap.querySelector(`[data-tid="${id}"]`);
   if(!el) return;
   editingId=id;
+  if(pendingAddId===id) pendingAddId=null;    // the editor is live now; the sweeper can see it
   el.dataset.editStart=(state.items.find(x=>x.id===id)||{}).text||'';   // v-bump baseline (see blur)
   el.setAttribute('contenteditable','true'); el.classList.remove('empty'); el.focus();
   const r=document.createRange(); r.selectNodeContents(el); r.collapse(false);
@@ -2776,8 +2782,6 @@ function playFlip(wrap, prev){
   }
 }
 function render(){
-  // The v-bump baseline lives in a DOM dataset on the row being edited, so the rebuild below
-  // destroys it. Carry it across, or a restored edit looks unchanged on blur and skips touch().
   pruneStrandedBlanks();
   const lvl=warnLevel();
   drawer.classList.toggle('lvl1', lvl===1);
@@ -2840,18 +2844,34 @@ function render(){
    on another row, the Donezo morph ~1.2s after a completion, a sync adopt) strands the row in
    state with text:''. That corpse still counts toward HARD_CAP, so the drawer showed FIVE tasks
    and silently refused a sixth (field report 2026-08-09).
-   Sweeping it here makes the cap free itself on the very next render instead of waiting for a
-   sync merge to notice. `editingId` is the guard: the row you are actually typing into is blank
-   for a moment too, and must never be swept out from under you. A leaked guard is healed by
-   editingActive(), after which the corpse is swept normally.
-   NOTE: this does NOT restore the lost focus — typing after such a render still goes nowhere.
-   Fixing that properly means not tearing the edited row out of the DOM at all; restoring focus
-   afterwards races every other focus mover and is strictly worse (proven, skeptic 2026-08-11). */
+
+   The guard is DOM liveness, deliberately NOT `editingId`. In exactly the case this exists for,
+   WebKit leaves editingId POINTING AT THE CORPSE — so guarding on it protects the one row we came
+   to remove, and the sweeper becomes a no-op in the only situation that matters (skeptic
+   2026-08-11, who caught this after a first probe that called editingActive() and healed the
+   guard as a side effect, making it look like it worked). What must be protected is a row with a
+   REAL live editor, plus the one-frame gap where addAndEdit has created a row that startEdit
+   hasn't focused yet.
+
+   Sweeping also HEALS a leaked editingId: left dangling it makes the global key layer inert, so
+   Return itself stops working.
+   NOTE: this does NOT restore lost focus — typing after such a render still goes nowhere. Fixing
+   that means not tearing the edited row out of the DOM at all; restoring focus afterwards races
+   every other focus mover and is strictly worse (proven, skeptic 2026-08-11). */
+function liveEditId(){
+  const ae = document.activeElement;
+  return (ae && ae.isContentEditable && ae.dataset && ae.dataset.tid) ? ae.dataset.tid : null;
+}
 function pruneStrandedBlanks(){
   if(!Array.isArray(state.items)) return;
-  const keep = state.items.filter(it => !(it && it.state!=='done' && !String(it.text||'').trim() && it.id!==editingId));
+  const live = liveEditId();
+  const keep = state.items.filter(it => !(it && it.state!=='done'
+    && !String(it.text||'').trim() && it.id!==live && it.id!==pendingAddId));
   if(keep.length !== state.items.length) state.items = keep;
+  // A guard pointing at a row that no longer exists blocks every keystroke — clear it.
+  if(editingId!==null && !state.items.some(x=>x.id===editingId)) editingId=null;
 }
+
 
 // Escalation counts only COMMITTED actives — a blank, untitled row (the just-added
 // row you haven't typed into, or a stray empty that slipped through) must never drive
@@ -3544,8 +3564,7 @@ function addAndEdit(){
   const it=newItem('');
   state.items.push(it);
   justAddedId=it.id;
-  editingId=it.id;                 // claim the edit NOW: render() runs before the rAF below, and
-                                   // pruneStrandedBlanks would otherwise sweep this brand-new row
+  pendingAddId=it.id;              // protect it until startEdit() lands (see pendingAddId)
   cursor=state.items.length-1;                 // cursor follows the new task
   render();
   requestAnimationFrame(()=>startEdit(it.id));
@@ -4044,7 +4063,10 @@ document.addEventListener('keydown', e=>{
    ==================================================================== */
 function liveRolloverCheck(){
   T('liveRollover');
-  if(editingId!==null) return;               // defer until the edit commits
+  // editingActive() rather than `editingId!==null`: it HEALS a guard left dangling by a render
+  // that tore the field out. Testing the raw global meant an UNPAIRED Mac (no sync pass to heal
+  // it) stayed wedged forever — no rollover, and the key layer inert (skeptic 2026-08-11).
+  if(editingActive()) return;                // defer until the edit commits
   const rolled=rolloverAndCarry();           // SAME path as boot — carries unfinished forward + wakes deferred
   if(rolled){
     setDate();
@@ -4138,7 +4160,7 @@ window.__buddy = {
   // Mirrors a page reload but in-process (used to assert load/rollover).
   boot,
   rollover: maybeRollover,
-  activeCount, escalationCount, pruneStrandedBlanks,   // cap gate + alarm gate + the blank-row sweeper
+  activeCount, escalationCount, pruneStrandedBlanks, liveEditId,   // cap gate + alarm gate + the blank-row sweeper
   get todayWrap(){ return todayWrap; }, get morningList(){ return morningList; },   // the row containers have no id — tests MUST reach them through here, not `#todayWrap` (which silently matches nothing)
   get editingId(){ return editingId; },
 
