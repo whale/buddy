@@ -49,7 +49,10 @@
   #drawer.translate-x-full{ opacity:0; transform:translateX(22px) scale(.975); pointer-events:none; }
   .no-sb{scrollbar-width:none} .no-sb::-webkit-scrollbar{display:none}
   [contenteditable]:focus{outline:none}
-  [contenteditable].empty:before{content:attr(data-ph);color:rgba(0,0,0,.2)}
+  /* Gated on [contenteditable] this only showed WHILE editing, so a stranded untitled row was a
+     blank white band the eye reads as padding — invisible, yet holding a cap slot. Show it
+     always, and via the token so it adapts on red (RULE 1) instead of staying dark. */
+  .empty:before{content:attr(data-ph);color:var(--ink-dim)}
 
   /* press feedback intentionally OFF — no click movement (text was shrinking/icons bouncing) */
   .pressable:active{ transform:none; }
@@ -2495,6 +2498,12 @@ function removeItem(id){ tombstone(id); state.items=state.items.filter(x=>x.id!=
 // add-cap key off THIS, not raw row count — so completing things eases red and
 // done rows can pile up without blocking new work. (Raw .length still bounds
 // nothing here; the cap is on active work.)
+/* Counts blanks DELIBERATELY. It is the only thing bounding how many rows the drawer can hold,
+   and a blank row is a slot you are actively using. The 2026-08-09 report ("five tasks, won't let
+   me add a sixth") was NOT this counter being wrong — it was a blank row being STRANDED by a
+   re-render and then never cleaned up. The cure is to not leave corpses (see pruneStrandedBlanks),
+   not to stop counting them: making this trim removed the bound entirely and let the drawer
+   render a seventh row it has no space for (skeptic 2026-08-11). */
 const activeCount = () => state.items.filter(i => i.state!=='done').length;
 const DONEZO_DELAY = 1200;          // savor beat before a done row morphs to a "done" word (was 2000 — read as lag, whale 2026-07-16)
 let donezoEnterId = null;           // one-shot: the row that just became a Donezo (enter anim)
@@ -2767,6 +2776,9 @@ function playFlip(wrap, prev){
   }
 }
 function render(){
+  // The v-bump baseline lives in a DOM dataset on the row being edited, so the rebuild below
+  // destroys it. Carry it across, or a restored edit looks unchanged on blur and skips touch().
+  pruneStrandedBlanks();
   const lvl=warnLevel();
   drawer.classList.toggle('lvl1', lvl===1);
   drawer.classList.toggle('lvl2', lvl===2);
@@ -2821,6 +2833,26 @@ function render(){
   requestAnimationFrame(fitToday);
   save();                                  // debounced persist after any mutation
 }
+/* Sweep untitled rows that nobody is editing.
+   renderToday() rebuilds every row from scratch, and the ONLY thing that commits typed text or
+   cleans up a blank row is the contenteditable's `blur` handler — which WebKit does NOT fire when
+   the focused node is REMOVED rather than left. So a render triggered by something else (ticking ✓
+   on another row, the Donezo morph ~1.2s after a completion, a sync adopt) strands the row in
+   state with text:''. That corpse still counts toward HARD_CAP, so the drawer showed FIVE tasks
+   and silently refused a sixth (field report 2026-08-09).
+   Sweeping it here makes the cap free itself on the very next render instead of waiting for a
+   sync merge to notice. `editingId` is the guard: the row you are actually typing into is blank
+   for a moment too, and must never be swept out from under you. A leaked guard is healed by
+   editingActive(), after which the corpse is swept normally.
+   NOTE: this does NOT restore the lost focus — typing after such a render still goes nowhere.
+   Fixing that properly means not tearing the edited row out of the DOM at all; restoring focus
+   afterwards races every other focus mover and is strictly worse (proven, skeptic 2026-08-11). */
+function pruneStrandedBlanks(){
+  if(!Array.isArray(state.items)) return;
+  const keep = state.items.filter(it => !(it && it.state!=='done' && !String(it.text||'').trim() && it.id!==editingId));
+  if(keep.length !== state.items.length) state.items = keep;
+}
+
 // Escalation counts only COMMITTED actives — a blank, untitled row (the just-added
 // row you haven't typed into, or a stray empty that slipped through) must never drive
 // the red alarm. Counting it once flipped the whole drawer to lvl2 on a phantom 6th
@@ -3026,7 +3058,12 @@ function renderToday(wrap=todayWrap, morning=false){
     // listener keeps it.text live during typing, so comparing against it always
     // said "unchanged" and the finished edit kept its old v (which let a mid-edit
     // wire echo win the equal-v merge tiebreak and truncate the text).
-    txt.addEventListener('blur',()=>{ const started = txt.dataset.editStart!==undefined ? txt.dataset.editStart : it.text; delete txt.dataset.editStart; it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable'); editingId=null; if(!it.text){ tombstone(it.id); state.items=state.items.filter(x=>x.id!==it.id); } else if(it.text!==started){ touch(it); } render(); });
+    txt.addEventListener('blur',()=>{ const started = txt.dataset.editStart!==undefined ? txt.dataset.editStart : it.text; delete txt.dataset.editStart; it.text=txt.textContent.trim(); txt.removeAttribute('contenteditable');
+      // Only relinquish the guard if it still points at THIS row. A rebuilt row's blur can land
+      // LATE (Chromium fires it when the node is removed; WebKit doesn't), and by then the user
+      // may already be editing a different row — clearing it blindly killed that new edit and ate
+      // the keystrokes (skeptic 2026-08-11: "click a task, click Add, type" lost the text).
+      if(editingId===it.id) editingId=null; if(!it.text){ tombstone(it.id); state.items=state.items.filter(x=>x.id!==it.id); } else if(it.text!==started){ touch(it); } render(); });
     row.appendChild(txt);
 
     // Right action column reveals on hover (like before). Editing is now click-the-text
@@ -3501,10 +3538,14 @@ $('#devMorning').addEventListener('click',showMorning);
    ==================================================================== */
 let justAddedId=null;            // the one row that should play the enter animation
 function addAndEdit(){
-  if(activeCount()>=HARD_CAP) return;     // visible-but-inert at the cap
+  // Refusing SILENTLY is what made this unreportable: no row, no message, no log line — the
+  // user just presses Return and nothing happens. Say so in the diagnostics at least.
+  if(activeCount()>=HARD_CAP){ diag('add-blocked-cap', {n:activeCount()}); return; }
   const it=newItem('');
   state.items.push(it);
   justAddedId=it.id;
+  editingId=it.id;                 // claim the edit NOW: render() runs before the rAF below, and
+                                   // pruneStrandedBlanks would otherwise sweep this brand-new row
   cursor=state.items.length-1;                 // cursor follows the new task
   render();
   requestAnimationFrame(()=>startEdit(it.id));
@@ -4097,6 +4138,10 @@ window.__buddy = {
   // Mirrors a page reload but in-process (used to assert load/rollover).
   boot,
   rollover: maybeRollover,
+  activeCount, escalationCount, pruneStrandedBlanks,   // cap gate + alarm gate + the blank-row sweeper
+  get todayWrap(){ return todayWrap; }, get morningList(){ return morningList; },   // the row containers have no id — tests MUST reach them through here, not `#todayWrap` (which silently matches nothing)
+  get editingId(){ return editingId; },
+
   rolloverAndCarry,                          // the REAL day-change path (archive + carry + done-marks)
   eraseAll,                                  // sync step 2: erase + stamp erasedAt (merge barrier)
   syncOnce, makeFakeCASStore, makeSupabaseCASStore,   // sync step 5: CAS loop + reference + live store

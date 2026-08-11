@@ -188,6 +188,7 @@ struct TodayView: View {
                 // Roll the day over BEFORE syncing — a phone suspended overnight must not
                 // push a yesterday-dated blob and drag the other device back a day.
                 store.performRolloverIfNeeded()
+                store.sweepStrandedBlanks()                     // an untitled row left by an interrupted add must not hold a cap slot
                 sync?.syncOnForeground()                        // pull + go live on foreground
             }
             else {
@@ -632,6 +633,7 @@ struct TodayView: View {
         editingId = nil
         store.isEditing = false         // edit committed — the next sync pass may adopt again
         store.commitEdit(id: id, text: text)
+        store.sweepStrandedBlanks()     // and clear any earlier untitled row still holding a slot
     }
 
     // MARK: - Date + weather helpers
