@@ -27,12 +27,21 @@ async function boot(page, items) {
     B.openDrawer(); B.render();
   }, items);
 }
-const snap = page => page.evaluate(() => ({
-  texts: window.__buddy.state.items.map(i => i.text),
-  active: window.__buddy.activeCount(),
-  escalation: window.__buddy.escalationCount(),
-  editing: window.editingActive(),
-}));
+// Deliberately built from state + the DOM only — NO accessor this branch adds. A test that fails
+// on main merely because `__buddy.activeCount` is undefined proves nothing about behaviour.
+// (Also: never call editingActive() to inspect the guard — it HEALS it as a side effect, so any
+// check that touches it is self-fulfilling.)
+const snap = page => page.evaluate(() => {
+  const items = window.__buddy.state.items;
+  const inMorning = el => !!el.closest('#morning');
+  const addRows = [...document.querySelectorAll('.addrow')].filter(el => !inMorning(el));
+  return {
+    texts: items.map(i => i.text),
+    active: items.filter(i => i.state !== 'done').length,
+    blanks: items.filter(i => i.state !== 'done' && !String(i.text || '').trim()).length,
+    addRow: addRows.length > 0,
+  };
+});
 
 test('text typed BEFORE a foreign re-render is never lost', async ({ page }) => {
   await boot(page, ['one', 'two', 'three']);
@@ -60,34 +69,32 @@ test('a REAL stranded row is swept even though editingId still points at it', as
     const B = window.__buddy;
     B.state.items.push({ id:'corpse', text:'', state:'neutral', v:1, src:null, doneAt:null, doneWord:null });
     B.render();
-    return { blanks: B.state.items.filter(i => i.state!=='done' && !i.text.trim()).length,
-             active: B.activeCount(),
-             addRow: !!B.todayWrap.querySelector('.addrow'),
-             editingId: B.editingId };
+    return null;
   });
-  expect(s.blanks, 'a stranded untitled row survived the render').toBe(0);
-  expect(s.active, 'the cap slot was never freed').toBe(5);
-  expect(s.addRow, 'still no way to add a 6th task').toBeTruthy();
-  expect(s.editingId, 'a dangling guard leaves the whole key layer inert').toBeNull();
+  const after = await snap(page);
+  expect(after.blanks, 'a stranded untitled row survived the render').toBe(0);
+  expect(after.active, 'the cap slot was never freed').toBe(5);
+  expect(after.addRow, 'still no way to add a 6th task').toBeTruthy();
+  // A dangling guard makes the global key layer inert — prove it behaviourally rather than by
+  // reading editingId, so this asserts what the USER experiences.
+  await page.keyboard.press('a');            // 'a' opens a new task row
+  await page.waitForTimeout(150);
+  await page.keyboard.type('sixth');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  expect((await snap(page)).texts, 'the keyboard was dead after the strand').toContain('sixth');
 });
 
 test('what you SEE and what the cap counts never disagree', async ({ page }) => {
   await boot(page, ['one', 'two', 'three', 'four', 'five']);
   // Exactly the reported state: five real tasks plus one stranded untitled row.
-  const s = await page.evaluate(() => {
+  await page.evaluate(() => {
     const B = window.__buddy;
     B.state.items.push({ id: 'ghost', text: '', state: 'neutral', v: 1, src: null, doneAt: null, doneWord: null });
     B.render();
-    return {
-      active: window.__buddy.activeCount(),
-      escalation: window.__buddy.escalationCount(),
-      // NB: the row containers are created in JS with no id, so `#todayWrap` silently matches
-      // NOTHING and any assertion built on it is vacuous. Reach them through __buddy.
-      addRow: !!window.__buddy.todayWrap.querySelector('.addrow'),
-    };
   });
+  const s = await snap(page);
   expect(s.active, 'cap counter disagrees with what the user sees').toBe(5);
-  expect(s.escalation).toBe(5);
   expect(s.addRow, 'the Add row vanished with 5 visible tasks').toBeTruthy();
 });
 
@@ -99,7 +106,8 @@ test('the untitled placeholder is not gated on being focused', async ({ page }) 
     const el = document.createElement('div');
     el.className = 'empty';
     el.setAttribute('data-ph', 'Untitled');
-    window.__buddy.todayWrap.appendChild(el);
+    const anyRow = [...document.querySelectorAll('.buddy-row')].find(r => !r.closest('#morning'));
+    anyRow.parentNode.appendChild(el);
     const c = getComputedStyle(el, '::before');
     return { content: c.content, color: c.color };
   });
@@ -115,7 +123,7 @@ test('click a task, click Add, type — the new task keeps every character', asy
   await boot(page, ['one', 'two', 'three', 'four', 'five']);
   await page.locator('[data-tid="seed4"]').click();          // start editing "five"
   await page.waitForTimeout(120);
-  await page.evaluate(() => window.__buddy.todayWrap.querySelector('.addrow').click());
+  await page.evaluate(() => [...document.querySelectorAll('.addrow')].filter(el => !el.closest('#morning'))[0].click());
   await page.waitForTimeout(180);
   await page.keyboard.type('sixth task');
   await page.keyboard.press('Enter');
@@ -136,4 +144,63 @@ test('a sync heal between add and focus does not eat the new row', async ({ page
   await page.keyboard.press('Enter');
   await page.waitForTimeout(150);
   expect((await snap(page)).texts).toEqual(['aaa', 'typed after the race']);
+});
+
+// pendingAddId protects a brand-new row until its editor is live. If it is only cleared inside
+// startEdit(), any path where startEdit bails (`if(!el) return`, or the morning/drawer wrap
+// flipping between render() and the rAF) pins it to a live blank row FOREVER — immune to the
+// sweeper. That is the reported bug made permanent, with `active` climbing past the cap.
+test('a failed startEdit does not pin the blank row forever', async ({ page }) => {
+  await boot(page, ['one', 'two', 'three']);
+  await page.evaluate(() => {
+    const realRAF = window.requestAnimationFrame;
+    // Simulate startEdit bailing: run the add, but make its rAF callback find nothing.
+    window.requestAnimationFrame = cb => realRAF(() => {
+      const rows = [...document.querySelectorAll('.buddy-row')].filter(r => !r.closest('#morning'));
+      rows.forEach(r => r.removeAttribute('data-tid'));
+      cb();
+      window.requestAnimationFrame = realRAF;
+    });
+    window.addAndEdit();
+  });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => { window.__buddy.render(); window.__buddy.render(); });
+  await page.waitForTimeout(80);
+  const s = await snap(page);
+  expect(s.blanks, 'the blank row is pinned and can never be swept').toBe(0);
+  expect(s.active, 'a pinned blank row is eating a cap slot').toBe(3);
+});
+
+// A stranded row that still has TEXT is not swept — so the guard stays dangling unless render()
+// heals it. Dangling, the whole key layer is inert AND mousedown refuses to re-enter that row.
+test('a foreign render never leaves the keyboard dead', async ({ page }) => {
+  await boot(page, ['one']);
+  await page.evaluate(() => window.addAndEdit());
+  await page.waitForTimeout(150);
+  await page.keyboard.type('Buy milk');
+  await page.evaluate(() => window.__buddy.render());   // rips the field out; text survives
+  await page.waitForTimeout(100);
+  await page.keyboard.press('a');                       // 'a' must still open a new row
+  await page.waitForTimeout(150);
+  await page.keyboard.type('another');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  const s = await snap(page);
+  expect(s.texts, 'the keyboard was dead after a foreign render').toContain('another');
+  expect(s.texts, 'the in-progress text was lost').toContain('Buy milk');
+});
+
+// A blank row that outlives the sweeper must not be archived as a permanent "Untitled" ghost
+// in the Done tab. Done rows are always kept, however they are worded.
+test('an untitled row is never archived into history', async ({ page }) => {
+  await boot(page, ['real task']);
+  const rec = await page.evaluate(() => {
+    const B = window.__buddy;
+    B.state.today.items.push({ id:'ghost', text:'   ', state:'neutral', v:1, src:null, doneAt:null, doneWord:null });
+    B.state.today.items.push({ id:'fin', text:'finished', state:'done', v:2, doneAt:Date.now()-9e5, src:null, doneWord:null });
+    return B.todayToHistoryRecord(B.state.today);
+  });
+  expect(rec.items.map(i => i.id).sort(), 'a blank row was archived as an Untitled ghost')
+    .toEqual(['fin', 'seed0']);                      // the real task and the done one, not 'ghost'
+  expect(rec.items.some(i => !String(i.text || '').trim())).toBe(false);
 });
