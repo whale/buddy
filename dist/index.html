@@ -2679,7 +2679,6 @@ function startEdit(id){
   const el=wrap.querySelector(`[data-tid="${id}"]`);
   if(!el) return;
   editingId=id;
-  if(pendingAddId===id) pendingAddId=null;    // the editor is live now; the sweeper can see it
   el.dataset.editStart=(state.items.find(x=>x.id===id)||{}).text||'';   // v-bump baseline (see blur)
   el.setAttribute('contenteditable','true'); el.classList.remove('empty'); el.focus();
   const r=document.createRange(); r.selectNodeContents(el); r.collapse(false);
@@ -2834,6 +2833,12 @@ function render(){
   justAddedId=null;                // enter animation is one-shot, consumed above
   donezoEnterId=null;              // Donezo enter animation is one-shot too
   renderDots();
+  // Heal a guard the rebuild just orphaned. pruneStrandedBlanks only clears editingId when the row
+  // was SWEPT — a stranded row that still has TEXT survives, leaving the guard dangling: the global
+  // key layer goes inert, and mousedown early-returns on `editingId===it.id`, so the user cannot
+  // even click back into the row they were typing in. Until now that only cleared on the 60s
+  // rollover tick. This is the report's second face — "pressing return wasn't sticking".
+  editingActive();
   requestAnimationFrame(fitToday);
   save();                                  // debounced persist after any mutation
 }
@@ -3567,7 +3572,12 @@ function addAndEdit(){
   pendingAddId=it.id;              // protect it until startEdit() lands (see pendingAddId)
   cursor=state.items.length-1;                 // cursor follows the new task
   render();
-  requestAnimationFrame(()=>startEdit(it.id));
+  // Clear the flag unconditionally, NOT inside startEdit: startEdit early-returns when it can't
+  // find the row (`if(!el) return`), and it picks morningList-vs-todayWrap at rAF time — one frame
+  // after render() populated the other one. Either path used to leave pendingAddId pinned to a
+  // live blank row FOREVER, making it immune to the sweeper: the reported bug, now permanent, and
+  // active climbing past HARD_CAP to 7 (skeptic 2026-08-12).
+  requestAnimationFrame(()=>{ startEdit(it.id); pendingAddId=null; });
 }
 
 /* ====================================================================
