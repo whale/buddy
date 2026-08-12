@@ -187,6 +187,14 @@ struct TodayView: View {
             if phase == .active {
                 // Roll the day over BEFORE syncing — a phone suspended overnight must not
                 // push a yesterday-dated blob and drag the other device back a day.
+                // Heal a wedged edit guard FIRST. store.isEditing is set by this view and cleared
+                // in exactly one place (commitEdit). If an editor is ever torn down without that
+                // running — a sheet presented over it, a scene teardown — it stays true for the
+                // session and silently disables sync-adopt, rollover AND the sweep below, which
+                // brings this very bug back. editingId is the view's own source of truth for
+                // whether a field is actually up, so it is what can say so. (The Mac has the same
+                // hazard and heals it via editingActive(); this is the iOS equivalent.)
+                if editingId == nil && store.isEditing { store.isEditing = false }
                 store.performRolloverIfNeeded()
                 store.sweepStrandedBlanks()                     // an untitled row left by an interrupted add must not hold a cap slot
                 sync?.syncOnForeground()                        // pull + go live on foreground

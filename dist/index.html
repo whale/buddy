@@ -1290,7 +1290,11 @@ function todayToHistoryRecord(today){
   const wd = DOW[new Date(today.date+'T00:00:00').getDay()];
   return {
     date: today.date, weekday: wd,
-    items: today.items.map((it,i)=>({ id:it.id||`h-${today.date}-${i}`, ord:i, text:it.text, done: it.state==='done' })),
+    // Drop untitled actives: a stranded blank that outlived the sweeper would otherwise be
+    // archived as a permanent "Untitled" ghost in the Done tab. Done rows are always kept.
+    items: today.items
+      .filter(it => it.state==='done' || String(it.text||'').trim())
+      .map((it,i)=>({ id:it.id||`h-${today.date}-${i}`, ord:i, text:it.text, done: it.state==='done' })),
   };
 }
 // Sort key: explicit `ord` when present, else the index parsed out of a LEGACY positional
@@ -2863,6 +2867,12 @@ function render(){
    NOTE: this does NOT restore lost focus — typing after such a render still goes nowhere. Fixing
    that means not tearing the edited row out of the DOM at all; restoring focus afterwards races
    every other focus mover and is strictly worse (proven, skeptic 2026-08-11). */
+/* PER-WINDOW, deliberately noted: `morning` is a separate Tauri webview with its own document,
+   state, editingId and pendingAddId — so this cannot see a row being edited in the OTHER window,
+   and a drawer-side render can sweep a blank row the morning planner is typing into. Bounded, not
+   fixed: mergeItems and mergeDurableCandidates both strip blank actives on every cross-window
+   reconcile, and the sweep writes no tombstone, so the morning window's committed text still wins.
+   Don't assume this guard is global. */
 function liveEditId(){
   const ae = document.activeElement;
   return (ae && ae.isContentEditable && ae.dataset && ae.dataset.tid) ? ae.dataset.tid : null;
@@ -4170,7 +4180,7 @@ window.__buddy = {
   // Mirrors a page reload but in-process (used to assert load/rollover).
   boot,
   rollover: maybeRollover,
-  activeCount, escalationCount, pruneStrandedBlanks, liveEditId,   // cap gate + alarm gate + the blank-row sweeper
+  activeCount, escalationCount, pruneStrandedBlanks, liveEditId, todayToHistoryRecord,   // cap gate + alarm gate + the blank-row sweeper
   get todayWrap(){ return todayWrap; }, get morningList(){ return morningList; },   // the row containers have no id — tests MUST reach them through here, not `#todayWrap` (which silently matches nothing)
   get editingId(){ return editingId; },
 

@@ -189,3 +189,18 @@ test('a foreign render never leaves the keyboard dead', async ({ page }) => {
   expect(s.texts, 'the keyboard was dead after a foreign render').toContain('another');
   expect(s.texts, 'the in-progress text was lost').toContain('Buy milk');
 });
+
+// A blank row that outlives the sweeper must not be archived as a permanent "Untitled" ghost
+// in the Done tab. Done rows are always kept, however they are worded.
+test('an untitled row is never archived into history', async ({ page }) => {
+  await boot(page, ['real task']);
+  const rec = await page.evaluate(() => {
+    const B = window.__buddy;
+    B.state.today.items.push({ id:'ghost', text:'   ', state:'neutral', v:1, src:null, doneAt:null, doneWord:null });
+    B.state.today.items.push({ id:'fin', text:'finished', state:'done', v:2, doneAt:Date.now()-9e5, src:null, doneWord:null });
+    return B.todayToHistoryRecord(B.state.today);
+  });
+  expect(rec.items.map(i => i.id).sort(), 'a blank row was archived as an Untitled ghost')
+    .toEqual(['fin', 'seed0']);                      // the real task and the done one, not 'ghost'
+  expect(rec.items.some(i => !String(i.text || '').trim())).toBe(false);
+});
