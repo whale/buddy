@@ -201,4 +201,32 @@ final class CycleStoreTests: XCTestCase {
         }
         XCTAssertFalse(s.lastListForRestore().contains("Ghost pricing pages"))
     }
+
+    // MARK: - Stranded untitled rows (field report 2026-08-09, Mac; reachable on iOS too)
+
+    /// A blank row counts toward the hard cap on purpose — it is a slot you are using. But one
+    /// that gets STRANDED silently costs a task slot: five visible tasks and no way to add a sixth.
+    func testStrandedBlankRowIsSweptAndFreesItsCapSlot() {
+        let s = BuddyStore()
+        s.today = TodayState(date: BuddyStore.localDate(), items:
+            (0..<5).map { neutral("t\($0)") } + [BuddyTask(id: "ghost", text: "", state: .neutral)],
+            morningDone: true)
+        XCTAssertEqual(s.activeCount, 6)
+        XCTAssertTrue(s.atHardCap)          // the user sees five, the cap says six
+        s.sweepStrandedBlanks()
+        XCTAssertEqual(s.activeCount, 5)
+        XCTAssertFalse(s.atHardCap)
+        XCTAssertFalse(s.today.items.contains { $0.id == "ghost" })
+    }
+
+    /// …but the row you are TYPING into is blank for a moment too, and must never be swept.
+    func testRowBeingEditedIsNeverSwept() {
+        let s = BuddyStore()
+        s.today = TodayState(date: BuddyStore.localDate(),
+                             items: [neutral("a"), BuddyTask(id: "fresh", text: "", state: .neutral)],
+                             morningDone: true)
+        s.isEditing = true
+        s.sweepStrandedBlanks()
+        XCTAssertTrue(s.today.items.contains { $0.id == "fresh" })
+    }
 }

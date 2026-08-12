@@ -54,6 +54,26 @@ final class BuddyStore {
     var bossReady: Bool { listDoneTasks.count >= Self.bossMin }
     var activeCount: Int         { activeTasks.count }
     var atHardCap: Bool          { activeCount >= Self.hardCap }
+
+    /// Drop untitled rows that nobody is editing.
+    /// A blank row still counts toward the hard cap (deliberately — it is a slot you are using),
+    /// so one that gets STRANDED silently costs the user a task slot: five visible tasks, and the
+    /// Add row gone with no explanation (field report 2026-08-09, reported on the Mac; the phone
+    /// can reach the same state because an edit interrupted by backgrounding is committed but a
+    /// blank one leaves the row behind). `isEditing` is the guard — the row being typed into is
+    /// blank for a moment too and must never be swept out from under the user. Mirrors the Mac's
+    /// pruneStrandedBlanks().
+    func sweepStrandedBlanks() {
+        guard !isEditing else { return }
+        let keep = today.items.filter { !($0.isActive && $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+        guard keep.count != today.items.count else { return }
+        today.items = keep
+        // saveToDisk(), NOT scheduleSave(): the latter stamps lastMutatedAt, which is the
+        // "last USER mutation" clock merge uses as its scalar tiebreak. Sweeping a ghost on
+        // foreground is not a user edit — stamping it would let simply unlocking the phone win
+        // morningDone/settings/syncNotice against a Mac that genuinely edited later.
+        saveToDisk()
+    }
     // Actives with COMMITTED text — drives escalation only. A blank, untitled row
     // (just added, not yet typed) must never push the red alarm; counting one once
     // flipped the whole drawer to lvl2 on a phantom 6th task (2026-07-28). Mirrors
