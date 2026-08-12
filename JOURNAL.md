@@ -5,6 +5,67 @@ Newest first.
 
 ---
 
+## 2026-08-12 — Four reviews, four real bugs, and a merge that ate half the fix
+
+**Absence is not a signal in a union-merge.** `today.items` is a CRDT keyed by id. Every
+destructive op emitted a tombstone except the day rollover, which just... dropped the row. The
+peer that never saw the completion re-added its copy every morning. If a merge is a union, every
+removal needs a marker; "it's gone from my list" says nothing to the other device.
+
+**A shared-plumbing fix must be legible to an un-updated peer.** The first `doneTombs` design had
+the new build retiring a row the old build kept re-adding — each "correcting" the other every
+1.5s, task visibly flickering, until the phone updated (DAYS, because the two platforms ship on
+different rails). Pairing every done-mark with a plain tombstone the old build already understands
+made it converge. **`scripts/buddy-crossbuild.spec.js`** now boots one page on the base build and
+one on the branch; nothing else in the repo can fail on that.
+
+**`merge()` must be a pure function of its inputs — including the clock.** Two devices merging the
+same pair at different moments produced different `doneTombs` (one stamped `Date.now()`, the other
+a bare number read back as `t:0`), and `pruneMarks` read the wall clock mid-merge, so a skewed
+clock ping-ponged forever. Stamp from the ARCHIVED DAY; make retention relative to the newest mark.
+
+**Near-miss worth its own line:** age-pruning `tombstones` would have deleted every iPhone-minted
+one. The Mac writes them in **milliseconds**, iOS in **seconds** — an age check reads every phone
+tombstone as 1970. Would have resurrected every task ever deleted on the phone. An existing test
+caught it; both platforms now pin it.
+
+**WebKit does not fire `blur` when a focused node is REMOVED. Chromium does.** That single
+divergence is the whole "5 tasks, can't add a 6th" bug: a rebuilt row strands with `text:''`,
+counts toward the cap, and leaves `editingId` dangling (which makes the key layer inert). Any
+test suite pinned to one engine is blind to a whole class of this. `pnpm test:edit` runs both.
+
+**Restoring focus after a teardown races every other focus mover.** Attempt #1 at that fix was
+strictly worse than the bug: on "click a task → click Add → type" it destroyed the typing in both
+engines, jumped the caret mid-word, and left completed rows editable. The right shape is to not
+tear the edited row out of the DOM at all. Sweeping the corpse is the cheap 80% and is what
+shipped; the root fix is still owed.
+
+**A guard cannot protect the thing it is supposed to remove.** Attempt #2 guarded the sweep on
+`editingId` — but in exactly the failing case WebKit leaves `editingId` POINTING AT THE CORPSE. It
+was a no-op in the only situation that mattered, and the suite was green because the tests seeded
+the ghost with `editingId` already null, a state a real strand never reaches. Guard on DOM
+liveness (`document.activeElement.isContentEditable`), not on a global.
+
+**Never inspect a self-healing guard.** `editingActive()` HEALS `editingId` as a side effect, so
+any check that calls it fixes what it is measuring. A reviewer's first probe did exactly that and
+pronounced a broken fix working. Assert what the USER experiences — press a key, see if a row
+appears — not the internal flag.
+
+**`gh pr merge` merges whatever the remote had when it resolved the ref.** PR #157 landed four
+commits short of the branch that was reviewed, including the blocker fix. Mac 0.4.33 and iOS build
+43 shipped without it. It was caught ONLY because the iOS build reported the wrong version number
+(the bump was in a missing commit) — otherwise it would have shipped silently and been reported as
+done. **"The PR merged" is not proof of what actually landed.** Check `git log origin/<branch>` and
+grep the shipped file for the fix before calling anything shipped (RULE 7, extended).
+
+**Verification hygiene, three own-goals in one session:** a `#todayWrap` selector that matched
+nothing (the element is created in JS with no id) and was reported as a verified observation; a
+"tests fail without the fix" claim measured against my own earlier commit instead of the base
+branch; and tests that failed on base only because an accessor didn't exist yet. If a check CAN'T
+fail, it isn't a check.
+
+---
+
 ## 2026-07-28 — 0.4.29: the wake summon that never ran
 
 **`tauri::RunEvent::Resumed` does NOT fire on macOS sleep/wake.** It's a startup/mobile-
