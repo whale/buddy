@@ -1,6 +1,80 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-07-28. Branch `main`. Latest **Mac**: **`v0.4.29`** (auto-released via CI; DMG + updater manifest live, verified at source). Latest **iOS**: **TestFlight `0.4.27 (build 40)`** — Apple-confirmed VALID. Version skew Mac 0.4.29 vs iOS 0.4.27 is deliberate: 0.4.29 is Mac-window-only (wake summon), no shared plumbing touched. Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
+_Last updated: 2026-08-12. Branch `main`. Latest **Mac**: **`v0.4.34`** (auto-released, assets confirmed at source). Latest **iOS**: **TestFlight `0.4.34 (build 44)`** — Apple-confirmed VALID. Versions match deliberately: this batch touched SHARED plumbing (sync/merge/rollover + the edit guard), so both rails had to ship (RULE 5). Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
+
+## Session summary — 2026-08-08/12 — Two field reports: resurrecting tasks, and a cap that lied
+
+Shipped **Mac v0.4.32 / v0.4.34** and **iOS TestFlight build 42 / build 44**. Two separate
+bugs, four adversarial reviews, and one bad merge worth remembering.
+
+### 1. "I checked off Ghost pricing pages and it keeps coming back" (Mac 0.4.32 / iOS build 42)
+
+`today.items` is a CRDT merged by union keyed by id. Every destructive op in Buddy emits a
+tombstone — **except the day rollover**, which expressed "drop the completed rows" as pure
+ABSENCE. Absence never wins a union, so the peer that never saw the completion re-added its own
+still-active copy, every morning. Rollover also RE-MINTED carried-forward tasks (`newItem(text)`
+→ new id, v back to 1), so the two devices minted different ids for the same task each day and
+merge could not tell a carry-over from a task you just typed.
+
+- **`doneTombs`** — new wire field `{id: {v, t}}`, the version at which a rollover archived an id
+  as done. Version-aware so a later undo still returns. Paired with a plain tombstone so an
+  UN-UPDATED peer converges instead of push-fighting every 1.5s.
+- **`merge()`'s different-date branch** took the calendar-later day's list WHOLESALE — no
+  tombstones, no marks. That is the branch the bug actually lands in (one device rolled, one
+  didn't), and it silently undid genuine deletes too.
+- Rollover carries items forward with the SAME id and v. History rows keep the REAL item id +
+  `ord` (the positional `h-<date>-<i>` key only LOOKED stable — the index is that device's list
+  position, so the union collapsed two different tasks into one, destroying a text and moving a
+  checkmark).
+- Restore paths skip tombstoned/done-marked rows (a second resurrection route).
+- **Background sync**: the Mac only PULLED while the drawer was on screen, so it pushed all day
+  and never pulled — the phone's day then landed in one lump and tripped the red alarm. Now
+  two-speed: 1.5s visible, one catch-up pass a minute otherwise.
+
+### 2. "I was at 5 tasks and it wouldn't let me add the 6th" (Mac 0.4.34 / iOS build 44)
+
+`renderToday()` wipes and rebuilds every row, and the ONLY thing that commits typed text or
+cleans up a blank row is the contenteditable's `blur` handler — which **WebKit does not fire when
+the focused node is REMOVED** (Chromium does). So any foreign render (ticking ✓ on another row,
+the Donezo morph ~1.2s after a completion, a sync adopt) stranded the just-added row with
+`text:''`. That corpse counts toward HARD_CAP → five visible tasks, Add row gone, no explanation.
+A stranded row that still had TEXT also left `editingId` dangling, which makes the global key
+layer inert AND blocks re-entering that row — the report's second face ("pressing return wasn't
+sticking").
+
+`pruneStrandedBlanks()` sweeps untitled actives every render, guarded by **DOM liveness**
+(`liveEditId()`), plus `pendingAddId` for the frame between `addAndEdit()` and `startEdit()`.
+`render()` calls `editingActive()` to heal an orphaned guard. iOS got `sweepStrandedBlanks()`.
+
+## Verified
+- Mac 18 Playwright specs · `sync:validate` 10/10 · iOS 130 tests, Debug AND Release.
+- Both regression suites confirmed FAILING without their fix, in BOTH engines.
+- New `scripts/buddy-crossbuild.spec.js` boots one page on `origin/main` and one on the branch —
+  the only thing in the repo that can fail on an updated-Mac vs old-iPhone divergence.
+- Live two-device backend test reproduces the resurrection field report end to end.
+- **Native, observed** (RULE 4): with Buddy occluded, `tick` fires every 60s — a TUCKED drawer
+  reports `visibilityState: "visible"` with `buddyUiShowing()` false, and macOS does NOT suspend
+  those timers. Both halves of the background-sync fix confirmed on the real app.
+- Release assets confirmed at source (`gh release view`, ASC build list).
+
+## NOT verified / still owed
+- **The edit fix (0.4.34) was never verified natively** — Playwright only, not the shipping
+  WKWebView. Needs Buddy quit (single-instance lock).
+- **Typing AFTER a foreign render still goes nowhere.** Deliberately out of scope: the real fix is
+  to not tear the edited row out of the DOM at all. Restoring focus afterwards races every other
+  focus mover and was measurably WORSE (see JOURNAL).
+- `liveEditId()` is PER-WINDOW: the morning planner is a separate webview, so a drawer-side render
+  can sweep a blank it is editing. Bounded (blank actives are stripped on every reconcile, no
+  tombstone written), documented in code, not fixed.
+- Pre-existing history rows corrupted by the old positional-id merge are NOT rewritten; they age
+  out. Days archived across the upgrade boundary may show a task twice (transitional, self-limiting).
+- iOS `isEditing` heals only on foreground; a sheet presented over a live editor is untested
+  (needs XCUITest).
+- `ECOSYSTEM.md` + `PAYMENT-PLAN.md` STILL uncommitted drafts (public-vs-private decision pending).
+
+## Next milestone
+Native verification pass of 0.4.34 on a real build, then decide whether to fix the
+"typing after a re-render" root cause properly (don't tear the edited row out of the DOM).
 
 ## Session summary — 2026-07-28 — Mac v0.4.29: Morning actually summons on wake/unlock
 
