@@ -106,7 +106,8 @@ test('the untitled placeholder is not gated on being focused', async ({ page }) 
     const el = document.createElement('div');
     el.className = 'empty';
     el.setAttribute('data-ph', 'Untitled');
-    document.querySelector('.buddy-row').parentNode.appendChild(el);
+    const anyRow = [...document.querySelectorAll('.buddy-row')].find(r => !r.closest('#morning'));
+    anyRow.parentNode.appendChild(el);
     const c = getComputedStyle(el, '::before');
     return { content: c.content, color: c.color };
   });
@@ -122,7 +123,7 @@ test('click a task, click Add, type — the new task keeps every character', asy
   await boot(page, ['one', 'two', 'three', 'four', 'five']);
   await page.locator('[data-tid="seed4"]').click();          // start editing "five"
   await page.waitForTimeout(120);
-  await page.evaluate(() => window.__buddy.todayWrap.querySelector('.addrow').click());
+  await page.evaluate(() => [...document.querySelectorAll('.addrow')].filter(el => !el.closest('#morning'))[0].click());
   await page.waitForTimeout(180);
   await page.keyboard.type('sixth task');
   await page.keyboard.press('Enter');
@@ -143,4 +144,48 @@ test('a sync heal between add and focus does not eat the new row', async ({ page
   await page.keyboard.press('Enter');
   await page.waitForTimeout(150);
   expect((await snap(page)).texts).toEqual(['aaa', 'typed after the race']);
+});
+
+// pendingAddId protects a brand-new row until its editor is live. If it is only cleared inside
+// startEdit(), any path where startEdit bails (`if(!el) return`, or the morning/drawer wrap
+// flipping between render() and the rAF) pins it to a live blank row FOREVER — immune to the
+// sweeper. That is the reported bug made permanent, with `active` climbing past the cap.
+test('a failed startEdit does not pin the blank row forever', async ({ page }) => {
+  await boot(page, ['one', 'two', 'three']);
+  await page.evaluate(() => {
+    const realRAF = window.requestAnimationFrame;
+    // Simulate startEdit bailing: run the add, but make its rAF callback find nothing.
+    window.requestAnimationFrame = cb => realRAF(() => {
+      const rows = [...document.querySelectorAll('.buddy-row')].filter(r => !r.closest('#morning'));
+      rows.forEach(r => r.removeAttribute('data-tid'));
+      cb();
+      window.requestAnimationFrame = realRAF;
+    });
+    window.addAndEdit();
+  });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => { window.__buddy.render(); window.__buddy.render(); });
+  await page.waitForTimeout(80);
+  const s = await snap(page);
+  expect(s.blanks, 'the blank row is pinned and can never be swept').toBe(0);
+  expect(s.active, 'a pinned blank row is eating a cap slot').toBe(3);
+});
+
+// A stranded row that still has TEXT is not swept — so the guard stays dangling unless render()
+// heals it. Dangling, the whole key layer is inert AND mousedown refuses to re-enter that row.
+test('a foreign render never leaves the keyboard dead', async ({ page }) => {
+  await boot(page, ['one']);
+  await page.evaluate(() => window.addAndEdit());
+  await page.waitForTimeout(150);
+  await page.keyboard.type('Buy milk');
+  await page.evaluate(() => window.__buddy.render());   // rips the field out; text survives
+  await page.waitForTimeout(100);
+  await page.keyboard.press('a');                       // 'a' must still open a new row
+  await page.waitForTimeout(150);
+  await page.keyboard.type('another');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  const s = await snap(page);
+  expect(s.texts, 'the keyboard was dead after a foreign render').toContain('another');
+  expect(s.texts, 'the in-progress text was lost').toContain('Buy milk');
 });
