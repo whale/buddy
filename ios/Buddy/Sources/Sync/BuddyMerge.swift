@@ -483,12 +483,16 @@ enum BuddyMerge {
         guard let t = today, !t.date.isEmpty, !t.items.isEmpty else { return nil }
         return Day(
             date: t.date, weekday: weekdayName(for: t.date),
-            items: t.items.enumerated().map { i, it in
-                // REAL item id (+ ord for planner order). See DayItem's note: the old
-                // positional id merged two different tasks into one across devices.
-                DayItem(id: it.id.isEmpty ? "h-\(t.date)-\(i)" : it.id,
-                        text: it.text, done: it.state == .done, ord: i)
-            }
+            // Drop untitled actives: a stranded blank that outlived the sweep would otherwise be
+            // archived as a permanent "Untitled" ghost in the Done tab. Done rows are always kept.
+            items: t.items
+                .filter { $0.isDone || !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .enumerated().map { i, it in
+                    // REAL item id (+ ord for planner order). See DayItem's note: the old
+                    // positional id merged two different tasks into one across devices.
+                    DayItem(id: it.id.isEmpty ? "h-\(t.date)-\(i)" : it.id,
+                            text: it.text, done: it.state == .done, ord: i)
+                }
         )
     }
 
