@@ -1648,6 +1648,7 @@ async function syncOnce(store, key){
   if(remote && remote.blob && typeof remote.blob.unlinkedAt==='number' && remote.blob.unlinkedAt>0){
     return { ok:true, unlinked:true, unlinkedAt:remote.blob.unlinkedAt };
   }
+  if(remote && remote.writer) notePeerWriter(remote.writer);   // peer-join doorbell (pairing view)
   const localBlob = JSON.parse(serialize());
 
   // Empty-over-full guard / scanner-pulls-first: a fresh empty device must never
@@ -1880,6 +1881,18 @@ function scheduleSync(){                             // debounced push after a l
    for scanning, cleared when Settings closes (by then you've paired) or on Unlink. So the
    QR is present only while pairing; once linked, the area offers Unlink / Resync. */
 let syncShowQR = false;
+// Peer-join doorbell. The wire-2 envelope names its writer's platform ('mac' / 'ios' /
+// 'web'). The first pass that reads a blob written by ANOTHER platform proves the phone
+// has joined the bucket — so end the pairing view (hide the QR, pill → "Synced") right
+// then, instead of only when Settings closes. Field report 2026-09-02: the phone showed
+// "sync" after scanning but the Mac sat on "Waiting for iPhone…" with no response.
+let syncPeerPlat = null;
+function notePeerWriter(w){
+  const plat = w && typeof w.plat==='string' ? w.plat : null;
+  if(!plat || plat===wirePlatform()) return;          // our own echo — not a peer
+  if(syncPeerPlat!==plat){ syncPeerPlat = plat; diag('sync-peer-seen', {plat}); }
+  if(syncShowQR){ syncShowQR=false; renderSyncUI(); }
+}
 function renderSyncUI(){
   const st=$('#syncStatus'); if(!st) return;
   let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
@@ -1945,7 +1958,7 @@ async function syncConnectFromUI(){
   if(!url || !anon){ if(err){ err.textContent='Enter the backend URL and anon key.'; err.classList.remove('hidden'); } return; }
   const ok=await setSync({ enabled:true, cloud:!!cloud, url, key:anon, syncKey });
   if(!ok){ if(err){ err.textContent=cloud?'Could not connect — try again in a moment.':'Could not connect — check the URL and anon key.'; err.classList.remove('hidden'); } return; }
-  syncShowQR=true; renderSyncUI();
+  syncPeerPlat=null; syncShowQR=true; renderSyncUI();
 }
 /* Stamp the shared bucket so the OTHER device self-unlinks on its next pass. One CAS push
    of the current remote blob + an `unlinkedAt` marker (a plain top-level field the peer reads
@@ -1978,7 +1991,7 @@ function clearSyncLink(){
   let raw={}; try{ raw=JSON.parse(lsGet(SYNC_CFG_KEY)||'{}'); }catch{}
   delete raw.syncKey; raw.enabled=false;
   lsSet(SYNC_CFG_KEY, JSON.stringify(raw));
-  syncStore=null; syncOwnerId=null; syncDisplayId=null; syncShowQR=false;
+  syncStore=null; syncOwnerId=null; syncDisplayId=null; syncShowQR=false; syncPeerPlat=null;
   clearTimeout(syncDebounce); syncPending=false;
 }
 /* MUTUAL unlink (whale 2026-07-19): unlinking one device breaks the link for BOTH. We stamp the
@@ -2016,7 +2029,7 @@ async function syncResyncFromUI(){
   // Both devices re-pair from the new QR; each pushes its current list into the clean bucket.
   const ok=await setSync({ enabled:true, cloud:!!raw.cloud, url, key:anon, syncKey:generateSyncKey() });
   if(!ok){ if(err){ err.textContent='Could not resync — check the connection.'; err.classList.remove('hidden'); } return; }
-  syncShowQR=true; renderSyncUI();
+  syncPeerPlat=null; syncShowQR=true; renderSyncUI();
 }
 /* Erase cloud data — two-tap confirm (a browser confirm() would wedge the webview).
    Deletes the server row via buddy_delete, then unlinks. Local tasks stay untouched. */
@@ -2153,7 +2166,8 @@ const CRYPTO_SUITE = 'aes256gcm.hkdf.v1';
 function envelopeAAD(wire, suite, minReader){
   return new TextEncoder().encode('buddy|'+wire+'|'+suite+'|'+minReader);
 }
-function wirePlatform(){ try{ return NATIVE ? 'mac' : 'web'; }catch(_){ return 'web'; } }
+let wirePlatformOverride = null;   // harness only: lets a browser "device" write as 'ios'
+function wirePlatform(){ if(wirePlatformOverride) return wirePlatformOverride; try{ return NATIVE ? 'mac' : 'web'; }catch(_){ return 'web'; } }
 async function encryptEnvelope(blobKey, blob, opts){
   opts = opts || {};
   const wire = WIRE_WRITE, minReader = WIRE_WRITE, suite = CRYPTO_SUITE;
@@ -2199,7 +2213,7 @@ function makeEncryptedStore(store, blobKey){
           diag('sync-peer-newer', { wire:b.wire, minReader:b.minReader });
           return { blob:null, version:r.version, unreadable:true, wire:b.wire, minReader:b.minReader };
         }
-        try{ return { blob: await decryptEnvelope(blobKey, b), version:r.version }; }
+        try{ return { blob: await decryptEnvelope(blobKey, b), version:r.version, writer:b.writer }; }
         catch(e){ throw new Error('blob decrypt failed'); }   // never echo content into errors
       }
       // Legacy wire-1 pure envelope {enc:1} (no AAD). plain:true → re-push once to UPGRADE to wire-2.
@@ -4190,6 +4204,8 @@ window.__buddy = {
   setSync, syncNow, syncConfigured, isValidSyncKey,   // auto-sync engine (opt-in)
   syncUnlink: syncUnlinkFromUI,                        // mutual unlink (harness + two-device test)
   get syncPeerUnlinked(){ return syncPeerUnlinked; },  // did the peer dissolve our link?
+  get syncPeerPlat(){ return syncPeerPlat; }, get syncShowQR(){ return syncShowQR; }, set syncShowQR(v){ syncShowQR=!!v; },   // pairing doorbell
+  setWirePlatform(p){ wirePlatformOverride=p||null; }, renderSyncUI, openSettings, closeSettings,   // harness: fake an iPhone writer + drive the Settings sheet
   generateSyncKey, deriveOwnerId, pairingPayload, parsePairingPayload,   // QR pairing core
   deriveBlobKey, encryptBlob, decryptBlob, isEncryptedBlob, makeEncryptedStore, blobStats,  // E2E crypto
 
@@ -5193,6 +5209,23 @@ window.__buddy = {
       ok('concurrent pass reads a mid-CAS unlink marker as unlinked (no fold+repush)', rres && rres.unlinked===true, JSON.stringify(rres));
       ok('the marker is preserved on the server, not clobbered', rstore._rows()['k'].blob.unlinkedAt===1750000000000);
       ok('the marker never leaks into our own local state', JSON.parse(serialize()).unlinkedAt===undefined);
+
+      // 36. Peer-join doorbell: a blob written by another platform ends the pairing view;
+      // our own echo does not. (Field report 2026-09-02 — Mac never reacted to the scan.)
+      {
+        const dinner=makeFakeCASStore(); const dstore=makeEncryptedStore(dinner, bk);
+        const peerBlob={version:1,savedAt:Date.now(),today:{date:'2026-06-19',items:[{id:'q',text:'from phone',state:'neutral',v:1}]},history:[],deferred:[],settings:state.settings,pinned:false,tombstones:{},erasedAt:null};
+        setLocal([{id:'q',text:'from phone',state:'neutral',v:1}]);
+        syncPeerPlat=null; syncShowQR=true;
+        await dinner.push('k', await encryptEnvelope(bk, peerBlob, { plat:wirePlatform() }), 0);
+        await syncOnce(dstore,'k');
+        ok('our own echo does not end the pairing view', syncShowQR===true && syncPeerPlat===null, 'plat='+syncPeerPlat);
+        const row=dinner._rows()['k'];
+        await dinner.push('k', await encryptEnvelope(bk, peerBlob, { plat:'ios' }), row.version);
+        await syncOnce(dstore,'k');
+        ok('a blob written by the phone ends the pairing view', syncShowQR===false && syncPeerPlat==='ios', 'plat='+syncPeerPlat+' showQR='+syncShowQR);
+        syncShowQR=false; syncPeerPlat=null;
+      }
     }catch(e){ ok('syncTest ran without throwing', false, e&&(e.message+' @ '+(e.stack||'').split('\n')[1])); }
     state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
     state.tombstones=snap.tombstones||{}; state.doneTombs=snap.doneTombs||{}; state.erasedAt=(typeof snap.erasedAt==='number')?snap.erasedAt:null;
