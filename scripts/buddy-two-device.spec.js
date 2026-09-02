@@ -222,3 +222,42 @@ test('a task completed on one device stays gone after the other rolls over', asy
       .items.filter(i => i.text === 'Ghost pricing pages').map(i => i.done), day1);
   expect(archived).toContain(true);
 });
+
+// Field report 2026-09-02: the phone scanned the QR and said "sync", but the Mac sat on
+// "Waiting for iPhone…" and never responded. The pairing view now ends on its own the
+// first time a pass reads a blob written by another platform (the peer-join doorbell).
+test('pairing view ends on its own once the phone writes the bucket', async ({ browser }) => {
+  test.setTimeout(120000);
+  const cfg = readSecret();
+  test.skip(!cfg || !cfg.url, 'no .supabase-buddy.secret — live harness needs the backend');
+  const syncKey = require('crypto').randomBytes(32).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const shots = process.env.BUDDY_SHOTS || null;
+
+  const mac = await bootDevice(browser, cfg, syncKey);
+  // Mac is showing the QR (what Connect does), Settings open so the pill is visible.
+  await mac.evaluate(() => { const B = window.__buddy; B.syncShowQR = true; B.openDrawer(); B.openSettings(); B.renderSyncUI(); });
+  const pill = () => mac.evaluate(() => document.getElementById('syncStatus').textContent);
+  const qrHidden = () => mac.evaluate(() => document.getElementById('syncPairing').classList.contains('hidden'));
+  expect(await pill()).toBe('Waiting for iPhone…');
+  expect(await qrHidden()).toBe(false);
+  if (shots) { await mac.waitForTimeout(800); await mac.evaluate(() => document.getElementById('syncStatus').scrollIntoView({ block: 'center' })); await mac.waitForTimeout(400); await mac.screenshot({ path: `${shots}/pair-before.png` }); }
+
+  // The Mac's own echo must NOT ring the doorbell.
+  await sync(mac);
+  expect(await pill()).toBe('Waiting for iPhone…');
+
+  // The phone scans, joins the same bucket, and writes as 'ios'.
+  const phone = await bootDevice(browser, cfg, syncKey);
+  await phone.evaluate(() => window.__buddy.setWirePlatform('ios'));
+  await phone.evaluate(() => { const B = window.__buddy; B.state.items.push({ id: 'PHONE1', text: 'From the phone', state: 'neutral', v: 1 }); B.render(); });
+  await sync(phone);
+
+  // The Mac's next pass sees an ios-written blob → QR gone, pill says Synced.
+  await sync(mac);
+  expect(await mac.evaluate(() => window.__buddy.syncPeerPlat)).toBe('ios');
+  expect(await mac.evaluate(() => window.__buddy.syncShowQR)).toBe(false);
+  expect(await qrHidden()).toBe(true);
+  expect(await pill()).toMatch(/^Synced \d\d:\d\d · /);
+  expect((await texts(mac)).some(t => t.text === 'From the phone')).toBe(true);
+  if (shots) { await mac.waitForTimeout(800); await mac.evaluate(() => document.getElementById('syncStatus').scrollIntoView({ block: 'center' })); await mac.waitForTimeout(400); await mac.screenshot({ path: `${shots}/pair-after.png` }); }
+});
