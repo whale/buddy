@@ -1,6 +1,47 @@
 # Buddy — Status & Handoff
 
-_Last updated: 2026-08-12. Branch `main`. Latest **Mac**: **`v0.4.34`** (auto-released, assets confirmed at source). Latest **iOS**: **TestFlight `0.4.34 (build 44)`** — Apple-confirmed VALID. Versions match deliberately: this batch touched SHARED plumbing (sync/merge/rollover + the edit guard), so both rails had to ship (RULE 5). Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
+_Last updated: 2026-09-02. Branch `main`. Latest **Mac**: **`v0.4.36`** (PR #160 merged; the auto-release run was still in progress at wrap — confirm with `gh release view v0.4.36`). Latest **iOS**: **TestFlight `0.4.34 (build 44)`** — unchanged; this session was Mac-only by design (no shared plumbing touched). Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
+
+## Session summary — 2026-09-02 — "I scanned the QR and the Mac didn't respond" (Mac v0.4.36)
+
+Field report: phone scanned the pairing QR and showed sync; the Mac's Settings pill sat on
+"Waiting for iPhone…" with no response. Diag + `pnpm sync:doctor` showed the phone HAD joined
+(bucket v1→v3, v2 written by the phone). The gap was UI, not sync: `syncShowQR` only cleared
+when Settings closed — nothing watched for the peer arriving. The wire-2 envelope already names
+its writer's platform (`writer.plat`: mac / ios / web), so the fix is a **peer-join doorbell**:
+`makeEncryptedStore.pull` surfaces `writer`, `syncOnce` calls `notePeerWriter()` right after
+the unlink-marker check, and the first pass that reads a blob written by ANOTHER platform hides
+the QR, flips the pill to "Synced HH:MM · bucket", and logs `sync-peer-seen`. Own echo never
+trips it; `syncPeerPlat` resets on connect / resync / unlink.
+
+Also learned while reading the log:
+- `sync-skipped-editing reason:poll` in a burst is NORMAL while the user is typing a task —
+  the post-blur `change` pass catches up (it did: pushed v3 twelve seconds later).
+- The event log shows TWO tick writers in one process (one `vis:visible showing:false`, one
+  `vis:hidden showing:true sync:false`) — a second webview (morning/celebration window) loads
+  `index.html` and has no `syncStore`. Looks harmless (it never syncs) but it is unexplained.
+  Parked; see "still owed".
+- `sync:doctor` still flags the stale DEV container (bucket `0dc16090`) as split-brain. No dev
+  process was running; it is noise until the DEV container is re-paired or wiped.
+
+### Verified (2026-09-02)
+- `pnpm test:merge` — mergeTest / syncTest (new #36) / skewTest pass; `smokeTest` 51/51.
+- New live two-device test in `scripts/buddy-two-device.spec.js` ("pairing view ends on its own
+  once the phone writes the bucket"): a browser "phone" writes as `ios` (harness hook
+  `__buddy.setWirePlatform`) against the REAL backend; the Mac's pill flips with no Settings
+  close. Screenshots reviewed (RULE 4). Full spec 3/3 live.
+- Adversarial review (RULE 6) on stale-bucket reuse, re-entrancy/QR redraw, web-vs-mac,
+  writer-less wire-1/hybrid blobs, unlink ordering, test hygiene — no findings.
+- Red-state sweep n/a — no colour/border/token changes (status text + visibility only).
+
+### NOT verified / still owed (2026-09-02)
+- **Native (real Buddy.app) observation of the flip** — Playwright only. The user's own phone
+  was paired BEFORE this shipped, so the next real scan (Resync or a friend's pairing) is the
+  first native proof. Diag line to look for: `sync-peer-seen {plat:"ios"}`.
+- v0.4.36 release assets not yet confirmed at source (run was in progress at wrap).
+- The second tick-writing webview (above) — identify it and decide whether it should log at all.
+- New harness hooks (`setWirePlatform`, `renderSyncUI`, `openSettings`, `closeSettings`) are
+  test-only and live on `window.__buddy`; nothing in-app calls them.
 
 ## Session summary — 2026-08-08/12 — Two field reports: resurrecting tasks, and a cap that lied
 
@@ -73,8 +114,9 @@ sticking").
 - `ECOSYSTEM.md` + `PAYMENT-PLAN.md` STILL uncommitted drafts (public-vs-private decision pending).
 
 ## Next milestone
-Native verification pass of 0.4.34 on a real build, then decide whether to fix the
-"typing after a re-render" root cause properly (don't tear the edited row out of the DOM).
+Confirm v0.4.36 at source and watch for the first native `sync-peer-seen` on a real pairing.
+Then the carried-over item: native verification pass of the 0.4.34 edit fix, and decide whether
+to fix the "typing after a re-render" root cause properly (don't tear the edited row out of the DOM).
 
 ## Session summary — 2026-07-28 — Mac v0.4.29: Morning actually summons on wake/unlock
 
