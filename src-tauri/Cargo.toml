@@ -28,9 +28,6 @@ tauri-plugin-global-shortcut = "2"
 # Single-instance guard: a menu-bar app must never run twice (two webviews would
 # fight over the same state file). Desktop-only.
 tauri-plugin-single-instance = "2"
-# Reads the OS cursor position so the whole right screen-edge can be the reveal
-# trigger (a webview can only see the mouse inside its own window).
-mouse_position = "0.1"
 
 # "Reserve space when pinned": Accessibility-API window nudging (macOS only).
 [target."cfg(target_os = \"macos\")".dependencies]

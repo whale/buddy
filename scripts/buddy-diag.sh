@@ -29,7 +29,7 @@ cat_all(){ [ -f "$OLD" ] && cat "$OLD"; [ -f "$LOG" ] && cat "$LOG"; return 0; }
 
 if [ "${1:-}" = "errors" ]; then
   # grep exits 1 when there are simply NO errors — a good outcome, not a failure.
-  cat_all | grep -E '"evt":"(sync-error|sync-conflict|sync-degraded|sync-watchdog-reset|edit-guard-healed|adopt-deferred-editing)"' \
+  cat_all | grep -E '"evt":"(sync-error|sync-conflict|sync-degraded|sync-watchdog-reset|edit-guard-healed|adopt-deferred-editing|morning-guard-healed|morning-guard-raised|show-morning-failed|edge-cursor-unavailable)"' \
     | tail -60 | python3 -c "$FMT"
 else
   cat_all | tail -"${1:-40}" | python3 -c "$FMT"

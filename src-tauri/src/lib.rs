@@ -39,9 +39,11 @@ fn toggle_drawer(app: &AppHandle) {
 fn toggle_morning(app: &AppHandle) {
     let app_handle = app.clone();
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.run_on_main_thread(move || open_morning_window(app_handle));
+        let _ = win.run_on_main_thread(move || {
+            let _ = open_morning_window(app_handle);
+        });
     } else {
-        open_morning_window(app.clone());
+        let _ = open_morning_window(app.clone());
     }
 }
 
@@ -139,14 +141,16 @@ fn set_morning_mode(app: AppHandle, on: bool) {
 /// resizable document window. Mutating one native window between those roles
 /// makes resize/display behavior brittle.
 #[tauri::command]
-fn open_morning_window(app: AppHandle) {
+fn open_morning_window(app: AppHandle) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
     if let Some(win) = app.get_webview_window("morning") {
         #[cfg(target_os = "macos")]
         {
             let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
             make_standard_morning_window(&win);
         }
-        let _ = win.show();
+        win.show().map_err(|e| e.to_string())?;
+        MORNING_OPEN.store(true, Ordering::SeqCst);
         let _ = win.set_focus();
         #[cfg(target_os = "macos")]
         activate_and_raise_window(&win);
@@ -154,7 +158,7 @@ fn open_morning_window(app: AppHandle) {
         // window is BLANK (the planner overlay hid itself when the day was done).
         // Opening the window is an explicit "show me the planner" intent.
         let _ = app.emit_to("morning", "buddy://morning-open", ());
-        return;
+        return Ok(());
     }
 
     let win = match WebviewWindowBuilder::new(
@@ -175,14 +179,17 @@ fn open_morning_window(app: AppHandle) {
     .build() {
         Ok(win) => win,
         Err(e) => {
+            // Surface it: the caller (showMorning) must drop its "Morning is up"
+            // guard, or the screen-edge stays muted with no window behind it.
             eprintln!("[buddy] open_morning_window failed: {e}");
-            return;
+            return Err(e.to_string());
         }
     };
 
     #[cfg(target_os = "macos")]
     make_standard_morning_window(&win);
-    let _ = win.show();
+    win.show().map_err(|e| e.to_string())?;
+    MORNING_OPEN.store(true, Ordering::SeqCst);
     let _ = win.set_focus();
 
     #[cfg(target_os = "macos")]
@@ -190,6 +197,7 @@ fn open_morning_window(app: AppHandle) {
         let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
         activate_and_raise_window(&win);
     }
+    Ok(())
 }
 
 #[tauri::command]
@@ -197,6 +205,7 @@ fn hide_morning_window(app: AppHandle) {
     if let Some(win) = app.get_webview_window("morning") {
         let _ = win.hide();
     }
+    MORNING_OPEN.store(false, std::sync::atomic::Ordering::SeqCst);
     let _ = app.emit("buddy://morning-closed", ());
     #[cfg(target_os = "macos")]
     {
@@ -215,6 +224,13 @@ static PENDING_CELEBRATE: std::sync::Mutex<Option<(i32, u64)>> = std::sync::Mute
 // gen so burst A's end-of-life hide can never orderOut a live burst B.
 static CELEB_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Whether Morning is OPEN — shown by Buddy and not yet closed by one of Buddy's
+/// own paths (`hide_morning_window`, the window's close button). Minimized or
+/// ⌘H-hidden still counts as open (NSWindow.isVisible says no for both — trusting
+/// it would let the drawer pop up beside a minimized Morning). The edge watcher
+/// stamps every reveal with this so the webview can heal a stale guard.
+static MORNING_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 // Rust-side breadcrumb into the same diagnostics log the web layer uses — records
 // the overlay lifecycle even if the overlay webview is broken/deaf (RULE 3; this
 // class of bug shipped invisible for six days). Privacy rules apply: no content.
@@ -225,6 +241,50 @@ fn diag_native(app: &AppHandle, evt: &str, extra: &str) {
         .unwrap_or(0);
     let comma = if extra.is_empty() { "" } else { "," };
     let _ = append_event(app.clone(), format!("{{\"t\":\"{t}\",\"evt\":\"{evt}\"{comma}{extra}}}"));
+}
+
+/// The OS cursor in logical points (global display coordinates, origin at the
+/// top-left of the main display — the same frame as `main_display_right_edge`).
+/// Every step is null-checked and returns None when the window server declines
+/// (seen around lock/unlock and wake): the `mouse_position` crate this replaces
+/// called `.unwrap()` on CGEventSourceCreate, and with `panic = "abort"` one NULL
+/// there would have taken the whole app down. Pure CoreGraphics — safe from any
+/// thread, never a round trip to the main thread.
+#[cfg(target_os = "macos")]
+fn cursor_position() -> Option<(f64, f64)> {
+    use core_graphics::event::CGEvent;
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    let src = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).ok()?;
+    let p = CGEvent::new(src).ok()?.location();
+    Some((p.x, p.y))
+}
+
+/// Right edge of the main display (the one with the menu bar) in logical points,
+/// in the cursor's own frame. Pure CoreGraphics, thread-safe — the watcher used to
+/// ask Tauri's `primary_monitor()` 60×/s, a blocking round trip to the main thread
+/// that a stalled main thread could wedge forever (thread alive, edge dead).
+#[cfg(target_os = "macos")]
+fn main_display_right_edge() -> f64 {
+    let b = core_graphics::display::CGDisplay::main().bounds();
+    b.origin.x + b.size.width
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod cursor_tests {
+    #[test]
+    fn cursor_position_is_null_safe_and_finite() {
+        // A headless runner may get None (the window server refused) — the point is
+        // that this never panics. With a real session the point must be finite.
+        if let Some((x, y)) = super::cursor_position() {
+            assert!(x.is_finite() && y.is_finite(), "got {x},{y}");
+        }
+    }
+
+    #[test]
+    fn main_display_right_edge_is_finite() {
+        let r = super::main_display_right_edge();
+        assert!(r.is_finite() && r >= 0.0, "got {r}");
+    }
 }
 
 #[tauri::command]
@@ -913,7 +973,11 @@ fn append_event(app: AppHandle, lines: String) -> Result<(), String> {
         .append(true)
         .open(&path)
         .map_err(|e| e.to_string())?;
-    writeln!(f, "{lines}").map_err(|e| e.to_string())
+    // One write(2) per append: `writeln!` issues two (payload, then "\n"), and the
+    // edge watcher now appends from its own thread while the webview's diagFlush
+    // appends from another — two O_APPEND writers × two syscalls can interleave
+    // into `{…}{…}` and break `pnpm diag` parsing.
+    f.write_all(format!("{lines}\n").as_bytes()).map_err(|e| e.to_string())
 }
 
 fn state_has_array_items(v: &serde_json::Value, path: &[&str]) -> bool {
@@ -1210,67 +1274,140 @@ pub fn run() {
             //   zone 1 = over the open drawer            → stay
             //   zone 0 = left of the drawer              → hide
             // Same poll, both directions → rock-solid, no web mouse-leave needed.
+            //
+            // This loop makes no blocking channel round trip to the main thread: cursor
+            // and display bounds come straight from CoreGraphics, "is Morning open" is
+            // an atomic, and set_focus is a fire-and-forget message. (emit/get_window
+            // still take Tauri's short webview mutex, and a breadcrumb is one bounded
+            // file append.) A stalled main thread must not be able to wedge this
+            // thread (thread alive, edge dead — the 2026-09-07 symptom).
+            // The CGEventSource is deliberately rebuilt per tick, as the old crate did:
+            // a cached source could go stale across lock/unlock without ever failing.
             #[cfg(target_os = "macos")]
             {
                 let h = handle.clone();
                 std::thread::spawn(move || {
-                    use mouse_position::mouse_position::Mouse;
+                    use std::sync::atomic::Ordering;
+                    use std::time::{Duration, Instant};
                     const DRAWER_W: f64 = 416.0; // the visible drawer's left edge (the window is wider for the shadow); hide when the cursor passes it
                     const TICK_MS: u64 = 16;
+                    const OUTAGE_TICK_MS: u64 = 250; // back off while the OS refuses cursor reads
                     // Dwell times: the cursor must REST at the edge before revealing
                     // (so a quick brush-past doesn't pop it), and rest off the drawer
                     // a moment before hiding (so a small drift doesn't snap it shut).
                     const REVEAL_DWELL: u32 = 500 / TICK_MS as u32; // ~31 ticks ≈ 500ms
                     const HIDE_GRACE: u32 = 160 / TICK_MS as u32; //  ~10 ticks ≈ 160ms
+                    // Breadcrumbs (RULE 3), all privacy-safe counts/flags: a heartbeat every
+                    // 5 min (so silence is evidence the thread is gone), reveals at most once
+                    // per minute with a count, and one line per cursor-read outage. The
+                    // 2026-09-07 report was untraceable without them.
+                    const HEARTBEAT_EVERY: Duration = Duration::from_secs(300);
+                    const REVEAL_LOG_EVERY: Duration = Duration::from_secs(60);
+                    const OUTAGE_LOG_AFTER: u32 = 500 / TICK_MS as u32; // ~0.5s of refusals
                     let mut edge_ticks = 0u32; // consecutive ticks at the edge
                     let mut away_ticks = 0u32; // consecutive ticks off the drawer
                     let mut edge_fired = false; // revealed during this edge visit
                     let mut away_fired = false; // hidden during this away visit
+                    let mut last_beat = Instant::now();
+                    let (mut beat_ticks, mut beat_reveals, mut beat_hides, mut beat_unavailable) = (0u64, 0u32, 0u32, 0u32);
+                    let mut last_reveal_log: Option<Instant> = None;
+                    let mut reveals_since_log = 0u32;
+                    let mut unavailable_ticks = 0u32; // consecutive ticks the OS refused a cursor read
+                    let mut unavailable_since: Option<Instant> = None;
+                    let mut outage_logged = false;
                     loop {
-                        std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
-                        // Right edge of the primary monitor, in logical points
-                        // (CGEvent reports the cursor in points too, so units match).
-                        let Some(mon) = h
-                            .get_webview_window("main")
-                            .and_then(|w| w.primary_monitor().ok().flatten())
-                        else {
+                        let tick = if unavailable_ticks >= OUTAGE_LOG_AFTER { OUTAGE_TICK_MS } else { TICK_MS };
+                        std::thread::sleep(Duration::from_millis(tick));
+                        beat_ticks += 1;
+                        if last_beat.elapsed() >= HEARTBEAT_EVERY {
+                            last_beat = Instant::now();
+                            diag_native(
+                                &h,
+                                "edge-alive",
+                                &format!("\"ticks\":{beat_ticks},\"reveals\":{beat_reveals},\"hides\":{beat_hides},\"unavailable\":{beat_unavailable}"),
+                            );
+                            beat_ticks = 0;
+                            beat_reveals = 0;
+                            beat_hides = 0;
+                            beat_unavailable = 0;
+                        }
+
+                        let Some((x, _)) = cursor_position() else {
+                            unavailable_ticks += 1;
+                            beat_unavailable += 1;
+                            if unavailable_ticks == 1 {
+                                unavailable_since = Some(Instant::now());
+                            }
+                            if unavailable_ticks == OUTAGE_LOG_AFTER {
+                                outage_logged = true;
+                                diag_native(&h, "edge-cursor-unavailable", "");
+                            }
                             continue;
                         };
-                        let scale = mon.scale_factor();
-                        let right = (mon.position().x as f64 + mon.size().width as f64) / scale;
+                        if outage_logged {
+                            let ms = unavailable_since.map(|t| t.elapsed().as_millis()).unwrap_or(0);
+                            diag_native(&h, "edge-cursor-recovered", &format!("\"ms\":{ms}"));
+                        }
+                        unavailable_ticks = 0;
+                        unavailable_since = None;
+                        outage_logged = false;
 
-                        if let Mouse::Position { x, .. } = Mouse::get_mouse_position() {
-                            let x = x as f64;
-                            if x >= right - 2.0 {
-                                // At the edge → count toward reveal.
-                                away_ticks = 0;
-                                away_fired = false;
-                                edge_ticks += 1;
-                                if edge_ticks >= REVEAL_DWELL && !edge_fired {
-                                    edge_fired = true;
-                                    let _ = h.emit("buddy://reveal", ());
-                                    // Bring Buddy to the front so its icons get hover/clicks
-                                    // even when it reveals over another app.
-                                    if let Some(w) = h.get_webview_window("main") {
-                                        let _ = w.set_focus();
-                                    }
+                        // Right edge of the main display, in the cursor's own frame.
+                        let right = main_display_right_edge();
+
+                        if x >= right - 2.0 {
+                            // At the edge → count toward reveal.
+                            away_ticks = 0;
+                            away_fired = false;
+                            edge_ticks += 1;
+                            if edge_ticks >= REVEAL_DWELL && !edge_fired {
+                                edge_fired = true;
+                                beat_reveals += 1;
+                                reveals_since_log += 1;
+                                // Stamp the reveal with whether Morning is OPEN (Buddy's own
+                                // open/close paths maintain MORNING_OPEN). The webview ignores
+                                // the edge while it believes Morning is up, and that belief is
+                                // only cleared by a broadcast it can miss — this lets it heal a
+                                // stale flag from the source of truth.
+                                let morning_open = MORNING_OPEN.load(Ordering::SeqCst);
+                                let _ = h.emit(
+                                    "buddy://reveal",
+                                    serde_json::json!({ "morningOpen": morning_open }),
+                                );
+                                // Bring Buddy to the front so its icons get hover/clicks
+                                // even when it reveals over another app. `set_focus` from
+                                // this thread only QUEUES the request (fire-and-forget), so
+                                // the breadcrumb says "sent", not "focused".
+                                let focus_sent = h
+                                    .get_webview_window("main")
+                                    .map(|w| w.set_focus().is_ok())
+                                    .unwrap_or(false);
+                                if last_reveal_log.map_or(true, |t| t.elapsed() >= REVEAL_LOG_EVERY) {
+                                    last_reveal_log = Some(Instant::now());
+                                    diag_native(
+                                        &h,
+                                        "edge-reveal",
+                                        &format!("\"morningOpen\":{morning_open},\"focus_sent\":{focus_sent},\"n\":{reveals_since_log}"),
+                                    );
+                                    reveals_since_log = 0;
                                 }
-                            } else if x < right - DRAWER_W {
-                                // Off the drawer entirely → count toward hide.
-                                edge_ticks = 0;
-                                edge_fired = false;
-                                away_ticks += 1;
-                                if away_ticks >= HIDE_GRACE && !away_fired {
-                                    away_fired = true;
-                                    let _ = h.emit("buddy://hide", ());
-                                }
-                            } else {
-                                // Over the open drawer → neutral; reset both dwells.
-                                edge_ticks = 0;
-                                away_ticks = 0;
-                                edge_fired = false;
-                                away_fired = false;
                             }
+                        } else if x < right - DRAWER_W {
+                            // Off the drawer entirely → count toward hide.
+                            edge_ticks = 0;
+                            edge_fired = false;
+                            away_ticks += 1;
+                            if away_ticks >= HIDE_GRACE && !away_fired {
+                                away_fired = true;
+                                beat_hides += 1;
+                                let _ = h.emit("buddy://hide", ());
+                            }
+                        } else {
+                            // Over the open drawer → neutral; reset both dwells.
+                            edge_ticks = 0;
+                            away_ticks = 0;
+                            edge_fired = false;
+                            away_fired = false;
                         }
                     }
                 });
@@ -1288,6 +1425,8 @@ pub fn run() {
                     api.prevent_close();
                     let _ = window.hide();
                     if window.label() == "morning" {
+                        // (the hide above already ran — the flag follows the window)
+                        MORNING_OPEN.store(false, std::sync::atomic::Ordering::SeqCst);
                         let _ = window.app_handle().emit("buddy://morning-closed", ());
                     }
                 }

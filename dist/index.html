@@ -2435,6 +2435,7 @@ let updateBannerHold=false;   // while an "update ready" banner is up, keep the 
 // — without it, the update banner revealed the drawer ALONGSIDE the morning planner on a
 // cold launch (field report 2026-07-19).
 let nativeMorningOpen=false;
+let nativeMorningOpenAt=0;        // when the flag was last raised — the heal below waits out the open
 // Both guard against the morning: while the full-screen planner is up, nothing
 // may resize the window back to a drawer/sliver (that was the "Restart" bug —
 // the morning would flash then get clipped to a sliver by a stray mouse-leave).
@@ -2468,6 +2469,34 @@ drawer.addEventListener('mouseleave', ()=>{ clearTimeout(openTimer); closeTimer=
    window). `edgeArmed` debounces so one touch = one reveal. ---- */
 let edgeArmed=true;
 function morningUp(){ const m=$('#morning'); return (m && !m.classList.contains('hidden')) || nativeMorningOpen; }
+// The main window ignores the screen-edge while it believes the native Morning
+// window is up (nativeMorningOpen). That flag is only cleared by the
+// buddy://morning-closed broadcast — if this webview ever misses it, the edge
+// stays dead until relaunch (field report 2026-09-07). Rust now stamps every
+// reveal with whether Morning is OPEN per its own open/close paths (minimized or
+// ⌘H-hidden still counts as open); trust that over the flag.
+// Both directions: Rust says OPEN and we didn't know → raise (the tray "Morning…"
+// item and ⌘⌥⌃M open the window in Rust without ever telling this webview, which is
+// how the drawer once slid out on top of the planner). Rust says CLOSED and we
+// still think it's up → clear, after a ~3s grace: right after showMorning raises the
+// flag the window is legitimately not open yet (writeNowAsync → nativeFit → open).
+// `quiet` keeps the smoke test from writing fake heals into the real field log.
+const MORNING_GUARD_GRACE_MS=3000;
+function healMorningGuard(p, quiet){
+  if(!p || typeof p.morningOpen!=='boolean') return false;
+  if(p.morningOpen){
+    if(nativeMorningOpen) return false;
+    nativeMorningOpen=true; nativeMorningOpenAt=Date.now();
+    if(!quiet) diag('morning-guard-raised');
+    return true;
+  }
+  if(nativeMorningOpen && Date.now()-nativeMorningOpenAt>MORNING_GUARD_GRACE_MS){
+    nativeMorningOpen=false;
+    if(!quiet) diag('morning-guard-healed');
+    return true;
+  }
+  return false;
+}
 addEventListener('mousemove', e=>{
   if(morningUp() || state.pinned) return;
   if(e.clientX >= innerWidth-2){
@@ -3479,8 +3508,10 @@ function morningMode(on){
 }
 function openNativeMorningWindow(){
   if(!NATIVE) return Promise.resolve();
-  try{ return window.__TAURI__.core.invoke('open_morning_window').catch(()=>{}); }
-  catch(_){ return Promise.resolve(); }
+  // Rejects when Rust could not build/show the window — showMorning drops its
+  // "Morning is up" guard on that, or the screen-edge stays muted for nothing.
+  try{ return window.__TAURI__.core.invoke('open_morning_window'); }
+  catch(err){ return Promise.reject(err); }
 }
 function hideNativeMorningWindow(){
   if(!NATIVE) return Promise.resolve();
@@ -3531,9 +3562,17 @@ async function showMorning(){
   if(NATIVE && !IS_MORNING_WINDOW){
     closeDrawer();                 // tuck first — the guard still sees morning as "down" here
     nativeMorningOpen=true;        // NOW the main window's guards know the planner window is up
-    await writeNowAsync();         // second webview reads the durable file; flush the side-view list first
-    await nativeFit('sliver');
-    await openNativeMorningWindow();
+    nativeMorningOpenAt=Date.now();
+    try{
+      await writeNowAsync();       // second webview reads the durable file; flush the side-view list first
+      await nativeFit('sliver');
+      await openNativeMorningWindow();
+    }catch(err){
+      // Never leave the guard up with no window behind it — that mutes the screen-edge.
+      nativeMorningOpen=false;
+      // err is a Tauri/io error string (never task text) — keep it that way; the log is privacy-safe.
+      diag('show-morning-failed',{err:String((err&&err.message)||err).slice(0,120)});
+    }
     return;
   }
   if(NATIVE && IS_MORNING_WINDOW) await refreshFromDurableState('show-morning');
@@ -4235,6 +4274,7 @@ window.__buddy = {
     const snap=JSON.parse(JSON.stringify({today:state.today,history:state.history,deferred:state.deferred,settings:state.settings,pinned:state.pinned,tombstones:state.tombstones,doneTombs:state.doneTombs,erasedAt:state.erasedAt}));
     const wasSup=saveSuppressed; saveSuppressed=true;
     const stashSnap=restartStash; restartStash=null;   // hermetic: a prior Restart must not skew the restore-row test
+    const nmoBefore=nativeMorningOpen, nmoAtBefore=nativeMorningOpenAt;   // edge-guard flags, restored below
     try{
       state.tombstones={}; state.doneTombs={};
       const staleMorning=hydrate(migrate({version:1,savedAt:2000,today:{date:localDate(),morningDone:false,items:[{id:'s1',text:'alpha',state:'neutral',v:1}]},history:[],deferred:[],settings:{celebrate:100,reserveSpace:false},pinned:false,tombstones:{},erasedAt:null}));
@@ -4290,6 +4330,19 @@ window.__buddy = {
          'tombstones='+Object.keys(state.tombstones||{}).join(','));
       ok('rows do NOT reuse data-tid (FLIP collision guard)',
          ![...todayWrap.querySelectorAll('.buddy-row')].some(r=>r.dataset&&r.dataset.tid));
+      // Screen-edge guard: a stale "Morning is up" flag must heal when Rust says
+      // Morning is NOT on screen — otherwise the edge stays dead until relaunch.
+      nativeMorningOpen=true; nativeMorningOpenAt=0; healMorningGuard({morningOpen:true}, true);
+      ok('edge guard: keeps the morning flag while Morning is open', nativeMorningOpen===true);
+      healMorningGuard({morningOpen:false}, true);
+      ok('edge guard: clears a stale morning flag when Morning is NOT open', nativeMorningOpen===false);
+      healMorningGuard({morningOpen:true}, true);
+      ok('edge guard: raises the flag when Rust says Morning is open (tray-opened Morning)', nativeMorningOpen===true && Date.now()-nativeMorningOpenAt<1000);
+      nativeMorningOpen=true; nativeMorningOpenAt=Date.now(); healMorningGuard({morningOpen:false}, true);
+      ok('edge guard: does NOT clear the flag while Morning is still opening (grace)', nativeMorningOpen===true);
+      nativeMorningOpenAt=0; healMorningGuard(undefined, true);
+      ok('edge guard: a reveal without a payload leaves the flag alone', nativeMorningOpen===true);
+      nativeMorningOpen=nmoBefore; nativeMorningOpenAt=nmoAtBefore;   // a raised flag mutes morningUp()-gated steps below; the end restore is the safety net
       // Recovery: an empty MORNING should offer and perform "restore last list".
       // (The restore row is morning-only — the side drawer never shows it.)
       const yday=yesterdayDate();
@@ -4538,7 +4591,7 @@ window.__buddy = {
     }catch(e){ ok('ran without throwing', false, e&&e.message); }
     state.today=snap.today; state.history=snap.history; state.deferred=snap.deferred; state.settings=snap.settings; state.pinned=snap.pinned;
     state.tombstones=snap.tombstones||{}; state.doneTombs=snap.doneTombs||{}; state.erasedAt=(typeof snap.erasedAt==='number')?snap.erasedAt:null;
-    restartStash=stashSnap;
+    restartStash=stashSnap; nativeMorningOpen=nmoBefore; nativeMorningOpenAt=nmoAtBefore;
     editingId=null; render(); saveSuppressed=wasSup;
     const failed=R.filter(r=>!r.pass);
     return { ok:failed.length===0, total:R.length, failed:failed.length, results:R };
@@ -5361,6 +5414,16 @@ function diag(evt, data){
     diagFlushTimer = setTimeout(diagFlush, 2000);
   }catch(_){}
 }
+const diagOnceAt = new Map();
+// Throttled breadcrumb: at most one `evt` per `ms` (default 30s). For events that
+// can fire on every edge touch — a pinned user brushes the edge constantly — where
+// the first occurrence is the evidence and the rest would be noise.
+function diagOnce(evt, data, ms){
+  const key=evt+'|'+((data&&data.why)||'');      // a changed reason is its own event
+  const now=Date.now(), last=diagOnceAt.get(key)||0;
+  if(now-last < (ms||30000)) return;
+  diagOnceAt.set(key, now); diag(evt, data);
+}
 function diagFlush(){
   if(!NATIVE || !diagPending.length) return;
   const lines = diagPending.join('\n'); diagPending = [];
@@ -5398,7 +5461,12 @@ if(NATIVE){
     .then(()=>{ diag('confetti-listen-armed'); return window.__TAURI__.core.invoke('confetti_ready'); })
     .catch(err=>diag('confetti-listen-error', {err:String((err&&err.message)||err).slice(0,120)}));
   } else if(!IS_MORNING_WINDOW){
-    ev.listen('buddy://reveal', ()=>{ if(morningUp()||state.pinned) return; clearTimeout(closeTimer); openDrawer(); });
+    ev.listen('buddy://reveal', e=>{
+      healMorningGuard(e&&e.payload);
+      if(morningUp()||state.pinned){ diagOnce('reveal-ignored',{why: morningUp()?'morning':'pinned'}); return; }
+      diagOnce('reveal', null, 10000);
+      clearTimeout(closeTimer); openDrawer();
+    });
     ev.listen('buddy://hide',   ()=>{ if(morningUp()||state.pinned) return; clearTimeout(openTimer); closeDrawer(); });
     // ⌘⌥⌃M: raise, then show/hide morning. Hiding uses leaveMorningToDrawer (NOT skip)
     // so a peek-and-close does NOT mark the day planned — the auto-morning can still fire.
@@ -5406,6 +5474,7 @@ if(NATIVE){
     ev.listen('buddy://system-resumed', ()=> resumeMorningCheck());
     ev.listen('buddy://morning-closed', async ()=>{
       nativeMorningOpen=false;     // planner window closed → main-window guards back to normal
+      diag('morning-closed');
       await bootReconcileFile();
       settleNative();
     });
