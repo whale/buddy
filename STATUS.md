@@ -1,5 +1,32 @@
 # Buddy — Status & Handoff
 
+## Release checkpoint — 2026-09-16 — 0.4.39
+
+User explicitly authorized shipping to all users. Feature PR #163 merged.
+- **Mac 0.4.39 published**: signed/notarized universal release workflow
+  `35031597706` succeeded. The live `/releases/latest/download/latest.json`
+  serves 0.4.39 with Intel and Apple Silicon entries. Release:
+  https://github.com/whale/buddy/releases/tag/v0.4.39
+- **iOS 0.4.39 (45)** uploaded and VALID. Apple reports internal IN_BETA_TESTING,
+  external WAITING_FOR_BETA_REVIEW. Verified build assignment to both existing
+  internal “Buddy To Do App Testing” and external “Friends” groups. Each currently
+  has one tester. Do NOT claim external testers can update until Apple approves.
+- Final release run: Mac smoke/merge/crossbuild/settings + sync validation pass;
+  Rust check passes. Full iOS: 138 unit tests (5 local-backend skips), all 10 UI
+  tests pass. Prior hosted live sync 4/4 and mutual unlink 1/1 pass.
+- Native lifecycle/physical-device gaps in FEATURE-PLAN section 9 remain explicitly
+  unobserved; release authorization is not a claim that those checks were run.
+- Read-only sync doctor still flags the previously documented stale DEV bucket
+  versus installed container. No personal pairing/data changed to “fix” diagnostics.
+- Release logs: `/private/tmp/buddy-039-testflight.log`,
+  `/private/tmp/buddy-039-apple-status.log`, `/private/tmp/buddy-039-mac-release.log`.
+- Hosted cloud source injection restored cleanly after archive. No credentials
+  committed. No automatic overnight implementation run is active.
+
+The earlier work-in-progress checkpoints below are historical, superseded by this
+release record. Apple external beta approval remains the only distribution gate.
+
+
 ## Current local work — 2026-09-16
 
 Branch: `codex/buddy-settings-and-quiet-opening`. **Unreleased.** User clarified:

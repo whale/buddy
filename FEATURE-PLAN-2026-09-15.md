@@ -472,3 +472,18 @@ it must not be silently terminated merely to make the QA build's test pass.
 
 The implementation and expanded automated checks are complete locally. The full
 native lifecycle/physical-pair release gate is explicitly still open, not waived.
+
+
+## 10. User-authorized release — September 16, 2026
+
+User then explicitly requested shipping all finished work to all users. PR #163
+merged; signed/notarized Mac 0.4.39 release is live and its actual updater endpoint
+was checked for both CPU architectures. iOS 0.4.39 build 45 was archived, signed,
+uploaded and processed VALID. Apple reports internal IN_BETA_TESTING and external
+WAITING_FOR_BETA_REVIEW. Build assignment verified via each beta group's builds:
+internal and Friends both include build 45. External availability is pending Apple,
+not an unfinished upload. Do not describe external iOS distribution as complete yet.
+
+All 10 iOS interaction tests and 138 unit tests (5 local-backend skips) pass in the
+full release run. Mac gates rerun successfully against published 0.4.38 baseline.
+Previously documented hands-on gaps were not retroactively marked verified.
