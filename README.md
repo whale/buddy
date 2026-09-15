@@ -44,7 +44,9 @@ Use **Report a bug…** in the menu-bar icon's menu — it captures a screenshot
 
 - **Morning** — a calm screen asks for up to **3** things. Press Enter between them.
 - **A task's life** — hover a task and click the **✓** to complete it; click the task's **text** to edit it (Enter saves, Tab hops to the next task). Done tasks celebrate with confetti, then slide up to the top as **"Donezo."** rows (and also file themselves under **Calendar → Done → Today**). Hover any done row for the **↩ undo** to bring it back.
-- **The gentle nudge** — 4 tasks is fine. **5** turns the text red; **6** turns the whole drawer red — Buddy's quiet way of saying *that's a lot*. Finishing things eases the red back down.
+- **List size** — choose **3–6 active tasks** in Settings, synced between updated Mac and iPhone apps. Completed tasks do not count. Reducing a full list asks before moving the extra tasks to Future.
+- **The gentle nudge** — text turns red one task below your limit; the drawer turns red at the limit. The default remains six.
+- **Automatic Morning (Mac only)** — turn it off in Settings without disabling manual Morning from the menu bar. This preference stays on that Mac.
 - **Pin it** — the pin icon keeps the drawer open so it doesn't tuck away.
 - **History** — the calendar icon shows what you've finished and what's coming up.
 
@@ -54,7 +56,7 @@ Buddy is fully driveable from the keyboard:
 
 | Key | Does |
 |-----|------|
-| `` ` `` (backtick) | Toggle the drawer open/closed |
+| ⌘⌥B (optional, off by default) | Toggle the drawer; enable in Mac Settings. Plain backtick no longer opens Buddy. |
 | ↑ / ↓ / Tab | Move between today's tasks and the Add row (in the Future panel, Tab walks the parked rows) |
 | Enter | On a task: cycle it (→ done throws confetti). On Add: add + edit. On a cursored Future row: send it to today |
 | E | Edit · ⌫ / Delete | Remove · A or + | Add a task |

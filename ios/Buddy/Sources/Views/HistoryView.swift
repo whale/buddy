@@ -16,7 +16,7 @@ struct HistoryView: View {
     @State private var pastDaysShown = 7   // Mac PAST_PAGE — "Load more" pages a week at a time
     @State private var openFutureRowID: String? = nil
 
-    private var theme: EscalationTheme { EscalationTheme.from(activeCount: store.activeCount) }
+    private var theme: EscalationTheme { EscalationTheme.from(activeCount: store.escalationCount, limit: store.taskLimit) }
 
     var body: some View {
         VStack(spacing: 0) {

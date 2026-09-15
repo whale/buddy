@@ -40,10 +40,10 @@ fn toggle_morning(app: &AppHandle) {
     let app_handle = app.clone();
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.run_on_main_thread(move || {
-            let _ = open_morning_window(app_handle);
+            let _ = open_morning_window(app_handle, None);
         });
     } else {
-        let _ = open_morning_window(app.clone());
+        let _ = open_morning_window(app.clone(), None);
     }
 }
 
@@ -141,7 +141,12 @@ fn set_morning_mode(app: AppHandle, on: bool) {
 /// resizable document window. Mutating one native window between those roles
 /// makes resize/display behavior brittle.
 #[tauri::command]
-fn open_morning_window(app: AppHandle) -> Result<(), String> {
+fn open_morning_window(app: AppHandle, automatic: Option<bool>) -> Result<(), String> {
+    // Recheck after the webview's async flush: an off switch must beat a queued open.
+    let _guard = PREFERENCES_LOCK.lock().map_err(|_| "Preferences are busy.".to_string())?;
+    if automatic == Some(true) && !load_preferences(app.clone())?.auto_morning {
+        return Err("Automatic morning is disabled.".to_string());
+    }
     use std::sync::atomic::Ordering;
     if let Some(win) = app.get_webview_window("morning") {
         #[cfg(target_os = "macos")]
@@ -937,6 +942,90 @@ fn state_file(app: &AppHandle) -> Option<std::path::PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join("buddy-state.json"))
 }
 
+// Presentation preferences are local to this Mac, never part of task sync/recovery.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct LocalPreferences {
+    auto_morning: bool,
+    shortcut_enabled: bool,
+}
+impl Default for LocalPreferences {
+    fn default() -> Self { Self { auto_morning: true, shortcut_enabled: false } }
+}
+const INVALID_PREFERENCES: &str = "Buddy preferences contain invalid data.";
+static PREFERENCES_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[tauri::command]
+fn load_preferences(app: AppHandle) -> Result<LocalPreferences, String> {
+    let path = app.path().app_data_dir().map_err(|e| e.to_string())?.join("buddy-preferences.json");
+    match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| INVALID_PREFERENCES.to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(LocalPreferences::default()),
+        Err(_) => Err("Could not read Buddy's local preferences.".to_string()),
+    }
+}
+
+fn apply_drawer_shortcut(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    #[cfg(desktop)] {
+        use tauri_plugin_global_shortcut::GlobalShortcutExt;
+        let shortcut = app.global_shortcut();
+        let registered = shortcut.is_registered("Super+Alt+KeyB");
+        if enabled && !registered {
+            shortcut.register("Super+Alt+KeyB").map_err(|_| "Could not enable ⌘⌥B. Another app may be using it.".to_string())?;
+        } else if !enabled && registered {
+            shortcut.unregister("Super+Alt+KeyB").map_err(|_| "Could not disable the shortcut. Please restart Buddy.".to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn drawer_shortcut_registered(app: AppHandle) -> bool {
+    #[cfg(desktop)] {
+        use tauri_plugin_global_shortcut::GlobalShortcutExt;
+        return app.global_shortcut().is_registered("Super+Alt+KeyB");
+    }
+    #[cfg(not(desktop))] { false }
+}
+
+#[tauri::command]
+fn set_preference(app: AppHandle, key: String, enabled: bool) -> Result<LocalPreferences, String> {
+    let _guard = PREFERENCES_LOCK.lock().map_err(|_| "Preferences are busy.".to_string())?;
+    let old = match load_preferences(app.clone()) {
+        Ok(p) => p,
+        Err(e) if e == INVALID_PREFERENCES => {
+            let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+            std::fs::copy(dir.join("buddy-preferences.json"), dir.join(format!("buddy-preferences.invalid-{stamp}.json")))
+                .map_err(|_| "Could not preserve invalid preferences. No changes were made.".to_string())?;
+            LocalPreferences { auto_morning: false, shortcut_enabled: false }
+        }
+        Err(e) => return Err(e),
+    };
+    let mut next = old.clone();
+    match key.as_str() {
+        "autoMorning" => next.auto_morning = enabled,
+        "shortcutEnabled" => next.shortcut_enabled = enabled,
+        _ => return Err("Unknown preference.".to_string()),
+    }
+    if key == "shortcutEnabled" { apply_drawer_shortcut(&app, next.shortcut_enabled)?; }
+    let result = (|| -> Result<(), String> {
+        let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&dir).map_err(|_| "Could not save preferences.".to_string())?;
+        let tmp = dir.join("buddy-preferences.tmp");
+        std::fs::write(&tmp, serde_json::to_vec(&next).map_err(|e| e.to_string())?)
+            .map_err(|_| "Could not save preferences.".to_string())?;
+        std::fs::rename(tmp, dir.join("buddy-preferences.json"))
+            .map_err(|_| "Could not save preferences.".to_string())
+    })();
+    if let Err(error) = result {
+        if key == "shortcutEnabled" { let _ = apply_drawer_shortcut(&app, old.shortcut_enabled); }
+        return Err(error);
+    }
+    let _ = app.emit("buddy://preferences", &next);
+    Ok(next)
+}
+
 // Last state that looked recoverable. This is deliberately separate from the
 // primary file: if a bad launch writes an empty same-day state, the recovery file
 // keeps the last real task list instead of being overwritten by that empty save.
@@ -1129,7 +1218,7 @@ pub fn run() {
         }));
     }
 
-    // Global shortcut plugin — desktop only. Backtick summons Buddy.
+    // Global shortcut plugin — desktop only, explicit modified chords only.
     #[cfg(desktop)]
     {
         use tauri_plugin_global_shortcut::{Builder as GsBuilder, ShortcutState};
@@ -1137,19 +1226,19 @@ pub fn run() {
         builder = builder.plugin(
             GsBuilder::new()
                 .with_handler(|app, shortcut, event| {
-                    // Fire once, on key-down only (ignore the release event).
-                    if event.state == ShortcutState::Pressed {
-                        use tauri_plugin_global_shortcut::{Code, Modifiers};
-                        // ⌘⌥⌃M toggles the morning planner; ` toggles the drawer.
-                        if shortcut.matches(
-                            Modifiers::SUPER | Modifiers::ALT | Modifiers::CONTROL,
-                            Code::KeyM,
-                        ) {
-                            toggle_morning(app);
-                        } else {
-                            toggle_drawer(app);
-                        }
-                    }
+                    use tauri_plugin_global_shortcut::{Code, Modifiers};
+                    use std::sync::atomic::{AtomicBool, Ordering};
+                    static DRAWER_DOWN: AtomicBool = AtomicBool::new(false);
+                    static MORNING_DOWN: AtomicBool = AtomicBool::new(false);
+                    let morning = shortcut.matches(Modifiers::SUPER | Modifiers::ALT | Modifiers::CONTROL, Code::KeyM);
+                    let drawer = shortcut.matches(Modifiers::SUPER | Modifiers::ALT, Code::KeyB);
+                    if !morning && !drawer { return; }
+                    let held = if morning { &MORNING_DOWN } else { &DRAWER_DOWN };
+                    if event.state == ShortcutState::Released { held.store(false, Ordering::SeqCst); return; }
+                    if held.swap(true, Ordering::SeqCst) { return; }
+                    diag_native(app, "shortcut-summon", if morning { "\"target\":\"morning\"" } else { "\"target\":\"drawer\"" });
+                    if morning { toggle_morning(app); } else { toggle_drawer(app); }
+
                 })
                 .build(),
         );
@@ -1159,7 +1248,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         // "Open at login" — LaunchAgent (modern macOS login item, no deprecated APIs).
         .plugin(tauri_plugin_autostart::Builder::new().app_name("Buddy").build())
-        .invoke_handler(tauri::generate_handler![trace, quit, app_version, is_dev, report_bug, export_done_tasks, set_reserve, reserve_trusted, set_morning_mode, open_morning_window, hide_morning_window, fit_morning_window, morning_translucent, celebrate_fullscreen, confetti_ready, hide_confetti_window, check_for_update, install_update, load_state, load_recovery_state, save_state, append_event])
+        .invoke_handler(tauri::generate_handler![trace, quit, load_preferences, set_preference, drawer_shortcut_registered, app_version, is_dev, report_bug, export_done_tasks, set_reserve, reserve_trusted, set_morning_mode, open_morning_window, hide_morning_window, fit_morning_window, morning_translucent, celebrate_fullscreen, confetti_ready, hide_confetti_window, check_for_update, install_update, load_state, load_recovery_state, save_state, append_event])
         .setup(|app| {
             // Own the handle (clone) so it doesn't hold an immutable borrow of `app`
             // across the later `set_activation_policy` call (which needs `&mut app`).
@@ -1227,15 +1316,14 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // --- Register the backtick global shortcut ---
+            // --- Optional modified shortcut; ordinary typing keys are never global ---
             #[cfg(desktop)]
             {
                 use tauri_plugin_global_shortcut::GlobalShortcutExt;
-                // "Backquote" is the physical ` / ~ key. If this errors on your
-                // layout, try the literal "`" or a chord like "CmdOrCtrl+`".
-                if let Err(e) = handle.global_shortcut().register("Backquote") {
-                    eprintln!("[buddy] could not register `\\`` global shortcut: {e}");
-                    eprintln!("[buddy] (try a chord such as CmdOrCtrl+` instead — see README-MAC.md)");
+                if let Ok(prefs) = load_preferences(handle.clone()) {
+                    if let Err(e) = apply_drawer_shortcut(&handle, prefs.shortcut_enabled) {
+                        eprintln!("[buddy] {e}");
+                    }
                 }
                 // Show-off shortcut: ⌘⌥⌃M toggles the morning planner from anywhere
                 // (raises the window first — see `toggle_morning`).
@@ -1254,7 +1342,6 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 allow_over_fullscreen(&win);
                 let _ = win.show();
-                let _ = win.set_focus();
             }
 
             // No Dock icon: behave like a menu-bar utility (macOS "Accessory").
@@ -1374,14 +1461,9 @@ pub fn run() {
                                     "buddy://reveal",
                                     serde_json::json!({ "morningOpen": morning_open }),
                                 );
-                                // Bring Buddy to the front so its icons get hover/clicks
-                                // even when it reveals over another app. `set_focus` from
-                                // this thread only QUEUES the request (fire-and-forget), so
-                                // the breadcrumb says "sent", not "focused".
-                                let focus_sent = h
-                                    .get_webview_window("main")
-                                    .map(|w| w.set_focus().is_ok())
-                                    .unwrap_or(false);
+                                // Passive reveal must not interrupt typing in another app.
+                                // An explicit click/tray/shortcut owns keyboard activation.
+                                let focus_sent = false;
                                 if last_reveal_log.map_or(true, |t| t.elapsed() >= REVEAL_LOG_EVERY) {
                                     last_reveal_log = Some(Instant::now());
                                     diag_native(

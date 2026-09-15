@@ -20,7 +20,8 @@
     "sync:validate": "NODE_PATH=$(npm root -g) node scripts/buddy-sync-validate.mjs",
     "diag": "scripts/buddy-diag.sh",
     "sync:doctor": "node scripts/buddy-sync-doctor.mjs",
-    "ios:beta": "bash scripts/ios-testflight.sh"
+    "ios:beta": "bash scripts/ios-testflight.sh",
+    "test:settings": "NODE_PATH=$(npm root -g) npx playwright test scripts/buddy-settings.spec.js --reporter=line"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

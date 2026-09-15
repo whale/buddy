@@ -3,10 +3,18 @@ import XCTest
 
 // Active-task interaction logic (parity item 2 "focused/now" + item 5 caps).
 final class CycleStoreTests: XCTestCase {
+    // These legacy scenarios exercise the default six-item policy, regardless of
+    // settings persisted by UI tests on the same disposable simulator.
+    private func defaultStore() -> BuddyStore {
+        let store = BuddyStore()
+        store.extras.removeValue(forKey: "taskLimit")
+        return store
+    }
+
     private func neutral(_ id: String) -> BuddyTask { BuddyTask(id: id, text: id, state: .neutral) }
 
     func testCycleNeutralToFocusedBumpsVersion() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: BuddyStore.localDate(), items: [neutral("a")], morningDone: true)
         let vBefore = s.today.items[0].v
         let completed = s.cycle(s.today.items[0])
@@ -16,7 +24,7 @@ final class CycleStoreTests: XCTestCase {
     }
 
     func testOnlyOneFocusedAtATime() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: BuddyStore.localDate(), items: [neutral("a"), neutral("b")], morningDone: true)
         _ = s.cycle(s.today.items[0])    // a → focused
         _ = s.cycle(s.today.items[1])    // b → focused, a must clear
@@ -25,7 +33,7 @@ final class CycleStoreTests: XCTestCase {
     }
 
     func testCycleFocusedToDoneCompletes() {
-        let s = BuddyStore()
+        let s = defaultStore()
         var t = neutral("a"); t.state = .focused
         s.today = TodayState(date: BuddyStore.localDate(), items: [t], morningDone: true)
         let completed = s.cycle(s.today.items[0])
@@ -35,7 +43,7 @@ final class CycleStoreTests: XCTestCase {
     }
 
     func testAddBlockedAtHardCap() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: BuddyStore.localDate(),
                              items: (0..<6).map { neutral("t\($0)") }, morningDone: true)
         XCTAssertTrue(s.atHardCap)
@@ -44,7 +52,7 @@ final class CycleStoreTests: XCTestCase {
 
 
     func testWakeDeferredBlockedAtHardCap() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: BuddyStore.localDate(),
                              items: (0..<6).map { neutral("t\($0)") }, morningDone: true)
         s.deferred = [DeferredTask(id: "f1", text: "Future task", wake: "2026-07-09")]
@@ -55,7 +63,7 @@ final class CycleStoreTests: XCTestCase {
 
     // Check-off circle (parity item A): complete() marks done from any state.
     func testCompleteDirectlyMarksDone() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: BuddyStore.localDate(), items: [neutral("a")], morningDone: true)
         XCTAssertTrue(s.complete(s.today.items[0]))           // transition into done → celebrate
         XCTAssertEqual(s.today.items[0].state, .done)
@@ -65,7 +73,7 @@ final class CycleStoreTests: XCTestCase {
 
     // Erase all data (parity item 4) — clears everything and stamps the sync barrier.
     func testEraseAllClearsAndStampsBarrier() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: BuddyStore.localDate(), items: [neutral("a")], morningDone: true)
         s.history = [Day(date: "2020-01-01", weekday: "Wednesday",
                          items: [DayItem(id: "h-2020-01-01-0", text: "x", done: true)])]
@@ -79,7 +87,7 @@ final class CycleStoreTests: XCTestCase {
     private func doneTask(_ id: String) -> BuddyTask { BuddyTask(id: id, text: id, state: .done, doneAt: Date()) }
 
     func testBossReadyThresholdIsFive() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: BuddyStore.localDate(), items: (0..<4).map { doneTask("d\($0)") }, morningDone: true)
         XCTAssertFalse(s.bossReady)                         // 4 done → no sweep offer
         s.today.items.append(doneTask("d4"))
@@ -87,7 +95,7 @@ final class CycleStoreTests: XCTestCase {
     }
 
     func testBossMoveSweepsOffListButKeepsInDoneTab() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: BuddyStore.localDate(), items: (0..<5).map { doneTask("d\($0)") }, morningDone: true)
         let vBefore = s.today.items[0].v
         s.bossMove()
@@ -99,7 +107,7 @@ final class CycleStoreTests: XCTestCase {
     }
 
     func testUncompleteClearsClearedAt() {
-        let s = BuddyStore()
+        let s = defaultStore()
         var t = doneTask("a"); t.clearedAt = Date()
         s.today = TodayState(date: BuddyStore.localDate(), items: [t], morningDone: true)
         s.restoreTask(id: "a")
@@ -125,7 +133,7 @@ final class CycleStoreTests: XCTestCase {
     // Invariant guard: clearedAt is excluded from contentKey, so the sweep only syncs because it
     // v-bumps. If a future change sets clearedAt WITHOUT bumping v, this fails (it'd never push).
     func testBossMoveChangesContentKeySoItSyncs() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: BuddyStore.localDate(), items: (0..<5).map { doneTask("d\($0)") }, morningDone: true)
         let before = BuddySync.contentKey(s.snapshot())
         s.bossMove()
@@ -150,7 +158,7 @@ final class CycleStoreTests: XCTestCase {
     /// DIFFERENT ids for the same task each morning and a union-merge could not tell a carry-over
     /// from a task you just typed. Unfinished rows must now carry forward AS THEMSELVES.
     func testRolloverCarriesUnfinishedForwardWithSameIdAndVersion() {
-        let s = BuddyStore()
+        let s = defaultStore()
         var carried = BuddyTask(id: "keep-me", text: "carry me", state: .neutral)
         carried.v = 4
         s.today = TodayState(date: "2020-01-01", items: [carried], morningDone: true)
@@ -163,7 +171,7 @@ final class CycleStoreTests: XCTestCase {
     /// A completed row leaves Today for good — and must say so on the wire, or the peer that
     /// never saw the completion re-adds its own active copy on the next merge.
     func testRolloverLeavesADoneMarkForCompletedTasks() {
-        let s = BuddyStore()
+        let s = defaultStore()
         var done = BuddyTask(id: "gp", text: "Ghost pricing pages", state: .done,
                              doneAt: Date(timeIntervalSince1970: 100))
         done.v = 3
@@ -176,7 +184,7 @@ final class CycleStoreTests: XCTestCase {
 
     /// The archived record keeps the REAL item id, not a positional one.
     func testRolloverArchivesWithRealItemIds() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: "2020-01-01", items: [neutral("aaa"), neutral("bbb")], morningDone: true)
         s.history = []
         XCTAssertTrue(s.performRolloverIfNeeded())
@@ -186,7 +194,7 @@ final class CycleStoreTests: XCTestCase {
     /// The restore paths mint a fresh item from the TEXT alone, so a done-marked row must never
     /// be offered back — the second resurrection route.
     func testRestoreSkipsDoneMarkedRows() {
-        let s = BuddyStore()
+        let s = defaultStore()
         var done = BuddyTask(id: "gp", text: "Ghost pricing pages", state: .done,
                              doneAt: Date(timeIntervalSince1970: 100))
         done.v = 2
@@ -207,7 +215,7 @@ final class CycleStoreTests: XCTestCase {
     /// A blank row counts toward the hard cap on purpose — it is a slot you are using. But one
     /// that gets STRANDED silently costs a task slot: five visible tasks and no way to add a sixth.
     func testStrandedBlankRowIsSweptAndFreesItsCapSlot() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: BuddyStore.localDate(), items:
             (0..<5).map { neutral("t\($0)") } + [BuddyTask(id: "ghost", text: "", state: .neutral)],
             morningDone: true)
@@ -221,7 +229,7 @@ final class CycleStoreTests: XCTestCase {
 
     /// …but the row you are TYPING into is blank for a moment too, and must never be swept.
     func testRowBeingEditedIsNeverSwept() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: BuddyStore.localDate(),
                              items: [neutral("a"), BuddyTask(id: "fresh", text: "", state: .neutral)],
                              morningDone: true)

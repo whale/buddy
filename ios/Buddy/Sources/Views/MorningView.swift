@@ -18,7 +18,7 @@ struct MorningView: View {
     // like the Mac, instead of scrolling. Morning's comfortable ceiling is 22pt.
     @State private var fit = RowFit.Result(font: 22, vpad: 16, scroll: false)
 
-    private var theme: EscalationTheme { EscalationTheme.from(activeCount: store.activeCount) }
+    private var theme: EscalationTheme { EscalationTheme.from(activeCount: store.escalationCount, limit: store.taskLimit) }
 
     var body: some View {
         ZStack {

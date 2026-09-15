@@ -1,5 +1,27 @@
 # Buddy — Status & Handoff
 
+## Current local work — 2026-09-16
+
+Branch: `codex/buddy-settings-and-quiet-opening`. **Unreleased.** User clarified:
+start immediately; morning switch on Mac only. Scheduled heartbeat is PAUSED.
+
+Implemented Mac-only local automatic-Morning switch, optional ⌘⌥B (off by default),
+removed global bare-backtick trigger and passive focus calls, and synced 3–6 active
+task limits on Mac/iPhone. Reduction confirms overflow to Future; warning colors,
+slot gates, restore/rollover and Boss threshold follow the limit. No task deletion.
+
+Detailed review, math, scope, evidence and still-owed checks:
+`FEATURE-PLAN-2026-09-15.md` sections 6–9. Native QA used a separate bundle identifier
+and disposable simulators; no production app replacement or release. Do not merge
+main until remaining native wake/typing and real paired-device checks are completed.
+
+Follow-through: hosted live sync 4/4 + unlink 1/1 pass; settings 16/16; iOS 138
+unit tests (5 local-backend skips) + 1 UI test pass. Native shortcut off observed.
+Physical phone QA install and disruptive sleep/wake checks await user permission.
+
+The historical release information below has NOT been refreshed by this feature work.
+
+
 _Last updated: 2026-09-02. Branch `main`. Latest **Mac**: **`v0.4.36`** (PR #160 merged; the auto-release run was still in progress at wrap — confirm with `gh release view v0.4.36`). Latest **iOS**: **TestFlight `0.4.34 (build 44)`** — unchanged; this session was Mac-only by design (no shared plumbing touched). Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
 
 ## Session summary — 2026-09-02 — "I scanned the QR and the Mac didn't respond" (Mac v0.4.36)

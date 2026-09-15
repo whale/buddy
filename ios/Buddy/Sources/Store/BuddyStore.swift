@@ -51,9 +51,49 @@ final class BuddyStore {
     var listDoneTasks: [BuddyTask] { today.items.filter { $0.isDone && !$0.isCleared } }
     // Boss Mode offers to sweep finished rows once the visible done pile reaches BOSS_MIN.
     static let bossMin = 5
-    var bossReady: Bool { listDoneTasks.count >= Self.bossMin }
+    var bossReady: Bool { listDoneTasks.count >= taskLimit - 1 }
+    var taskLimit: Int { TaskLimit.normalized(extras["taskLimit"]).value }
+    var freeSlots: Int { max(0, taskLimit - activeCount) }
+    var activeSignature: String {
+        CanonicalJSON.canonical(.array(activeTasks.map {
+            .object(["id": .string($0.id), "text": .string($0.text), "state": .string($0.state.rawValue), "v": .int(Int64($0.v))])
+        }))
+    }
+    func limitOverflow(_ limit: Int) -> [BuddyTask] {
+        let active = activeTasks
+        let priority = active.filter { $0.state == .focused } + active.filter { $0.state != .focused }
+        let keep = Set(priority.prefix(limit).map { $0.id })
+        return active.filter { !keep.contains($0.id) }
+    }
+    private func parkLimitOverflow(_ items: [BuddyTask]) {
+        let ids = Set(items.map { $0.id })
+        var have = Set(deferred.map { $0.id }), moved = 0
+        for it in items where !have.contains(it.id) {
+            var metadata = it.extras
+            metadata["state"] = .string(it.state.rawValue)
+            deferred.append(DeferredTask(id: it.id, text: it.text, wake: "", v: it.v, extras: metadata))
+            have.insert(it.id); moved += 1
+        }
+        today.items.removeAll { ids.contains($0.id) }
+        if moved > 0 { syncNotice = SyncNotice(combined: activeCount + moved, moved: moved, dismissed: false) }
+    }
+    @discardableResult
+    func changeTaskLimit(_ value: Int, expectedSignature: String) -> Bool {
+        guard (3...6).contains(value), !isEditing, activeSignature == expectedSignature else { return false }
+        let current = TaskLimit.normalized(extras["taskLimit"])
+        guard current.v < TaskLimit.maxRevision else { return false }
+        let key = "buddy.preferenceWriter"
+        var writer = UserDefaults.standard.string(forKey: key) ?? ""
+        if writer.range(of: "^[a-z0-9-]{1,64}$", options: .regularExpression) == nil {
+            writer = UUID().uuidString.lowercased(); UserDefaults.standard.set(writer, forKey: key)
+        }
+        extras["taskLimit"] = TaskLimit(value: value, v: current.v + 1, writer: writer).json
+        parkLimitOverflow(limitOverflow(value))
+        scheduleSave(immediate: true)
+        return true
+    }
     var activeCount: Int         { activeTasks.count }
-    var atHardCap: Bool          { activeCount >= Self.hardCap }
+    var atHardCap: Bool          { activeCount >= taskLimit }
 
     /// Drop untitled rows that nobody is editing.
     /// A blank row still counts toward the hard cap (deliberately — it is a slot you are using),
@@ -94,6 +134,7 @@ final class BuddyStore {
     init() {
         loadFromDisk()
         performRolloverIfNeeded()
+        parkLimitOverflow(limitOverflow(taskLimit))
         // NO auto-wake: Future is a MANUAL holding pen on the Mac (no auto-return). The old
         // wakeDeferred() moved parked items into today on every launch (new id, no tombstone),
         // which the Mac never does — injecting a sync divergence that ping-ponged forever.
@@ -140,7 +181,7 @@ final class BuddyStore {
             t.doneAt = Date()
             t.clearedAt = nil          // a fresh completion is visible on the list, not swept
         case .done:
-            guard activeCount < Self.hardCap else { return false }
+            guard activeCount < taskLimit else { return false }
             t.state = .neutral
             t.doneAt = nil
             t.clearedAt = nil          // un-done → no longer swept off the list (Mac parity)
@@ -168,7 +209,7 @@ final class BuddyStore {
 
     /// Add a new blank task. Returns the new task's id so the caller can auto-focus the text field.
     func addTask() -> String? {
-        guard activeCount < Self.hardCap else { return nil }
+        guard activeCount < taskLimit else { return nil }
         let newTask = BuddyTask(id: newId(), text: "", state: .neutral)
         today.items.append(newTask)
         scheduleSave()
@@ -200,7 +241,7 @@ final class BuddyStore {
     /// Mirrors Mac's `restoreItem(id)`.
     func restoreTask(id: String) {
         guard let idx = today.items.firstIndex(where: { $0.id == id }) else { return }
-        guard activeCount < Self.hardCap else { return }
+        guard activeCount < taskLimit else { return }
         today.items[idx].state = .neutral
         today.items[idx].doneAt = nil
         today.items[idx].clearedAt = nil          // un-done → no longer swept off the list
@@ -229,7 +270,7 @@ final class BuddyStore {
     /// Mirrors Mac's `restoreHistoryTask(text)`.
     func restoreHistoryTask(text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty, activeCount < Self.hardCap else { return }
+        guard !t.isEmpty, activeCount < taskLimit else { return }
         guard !today.items.contains(where: { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == t }) else { return }
         today.items.append(BuddyTask(id: newId(), text: t, state: .neutral))
         scheduleSave()
@@ -241,7 +282,7 @@ final class BuddyStore {
     func wakeDeferredTask(id: String) {
         guard let idx = deferred.firstIndex(where: { $0.id == id }) else { return }
         guard !(deferred[idx].sent ?? false) else { return }
-        guard activeCount < Self.hardCap else { return }
+        guard activeCount < taskLimit else { return }
         let newTid = newId()
         today.items.append(BuddyTask(id: newTid, text: deferred[idx].text, state: .neutral))
         deferred[idx].sent = true
@@ -270,7 +311,7 @@ final class BuddyStore {
     func lastListForRestore() -> [String] {
         for d in history.sorted(by: { $0.date > $1.date }) {
             let texts = d.items.filter { restorableRow($0) }.map { $0.text }
-            if !texts.isEmpty { return Array(texts.prefix(Self.hardCap)) }
+            if !texts.isEmpty { return Array(texts.prefix(taskLimit)) }
         }
         return []
     }
@@ -290,7 +331,7 @@ final class BuddyStore {
 
     /// Pull that list into today (capped, no dupes). Mirrors the Mac's restoreLastList().
     func restoreLastList() {
-        for t in lastListForRestore() where activeCount < Self.hardCap {
+        for t in lastListForRestore() where activeCount < taskLimit {
             if !today.items.contains(where: { $0.text == t }) {
                 today.items.append(BuddyTask(id: newId(), text: t, state: .neutral))
             }
@@ -491,8 +532,7 @@ final class BuddyStore {
         // therefore carry the SAME ids into the new day, so the union is idempotent instead of
         // doubling up. (state rides through untouched rather than being reset: it is non-done by
         // construction, and normalising it here would fight the Mac.)
-        for it in prevItems.filter({ !$0.isDone && !$0.id.isEmpty }).prefix(Self.hardCap) {
-            if activeCount >= Self.hardCap { break }
+        for it in prevItems.filter({ !$0.isDone && !$0.id.isEmpty }) {
             if today.items.contains(where: { $0.id == it.id }) { continue }
             var carried = it
             carried.doneAt = nil
@@ -503,6 +543,7 @@ final class BuddyStore {
             today.items.append(carried)
         }
 
+        parkLimitOverflow(limitOverflow(taskLimit))
         scheduleSave(immediate: true)
         return true                                        // → caller shows morning
     }

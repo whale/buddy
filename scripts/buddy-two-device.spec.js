@@ -58,7 +58,13 @@ async function bootDevice(browser, cfg, syncKey, seedToday) {
 }
 
 const settle = async (page, ms = 4500) => page.waitForTimeout(ms); // > debounce(3s) + poll(1.5s)
-const sync = page => page.evaluate(() => window.__buddy.syncNow('harness'));
+// A scheduled poll may already own the sync pass. Wait for an actual result,
+// rather than mistaking the intentional coalesced null for a failed merge.
+const sync = async page => {
+  let result;
+  await expect.poll(async()=>{ result=await page.evaluate(()=>window.__buddy.syncNow('harness')); return result!==null; },{timeout:15000}).toBe(true);
+  return result;
+};
 const texts = (page, sel) => page.evaluate(() =>
   window.__buddy.state.items.map(i => ({ text: i.text, state: i.state })));
 const deferred = page => page.evaluate(() =>
@@ -260,4 +266,39 @@ test('pairing view ends on its own once the phone writes the bucket', async ({ b
   expect(await pill()).toMatch(/^Synced \d\d:\d\d · /);
   expect((await texts(mac)).some(t => t.text === 'From the phone')).toBe(true);
   if (shots) { await mac.waitForTimeout(800); await mac.evaluate(() => document.getElementById('syncStatus').scrollIntoView({ block: 'center' })); await mac.waitForTimeout(400); await mac.screenshot({ path: `${shots}/pair-after.png` }); }
+});
+
+test('live task limit sync and offline edit survive reduction without losing tasks', async ({ browser }) => {
+  test.setTimeout(120000);
+  const cfg = readSecret();
+  test.skip(!cfg || !cfg.url, 'no backend configuration');
+  const key = require('crypto').randomBytes(32).toString('base64url');
+  const mac = await bootDevice(browser, cfg, key);
+  const phone = await bootDevice(browser, cfg, key);
+  try {
+    await mac.evaluate(() => {
+      const b=window.__buddy;
+      b.state.items=Array.from({length:6},(_,i)=>({id:'limit-live-'+i,text:'Test item '+i,state:'neutral',v:1}));
+      b.state.savedAt=Date.now();b.flush();return b.syncNow('capacity-seed');
+    });
+    await expect.poll(async()=>{await sync(phone);return (await texts(phone)).length;},{timeout:20000}).toBe(6);
+    await phone.context().setOffline(true);
+    await phone.evaluate(()=>{const b=window.__buddy;const i=b.state.items.find(i=>i.id==='limit-live-5');i.text='Edited while offline';i.v++;b.state.savedAt=Date.now();b.flush();});
+    await mac.evaluate(()=>{const b=window.__buddy;b.commitTaskLimit(3,b.activeSignature());return b.syncNow('capacity-reduce');});
+    await settle(mac, 3500);
+    await phone.context().setOffline(false);
+    await expect.poll(async()=>{
+      await sync(phone);await sync(mac);
+      return mac.evaluate(()=>{const b=window.__buddy;return {limit:b.taskLimit(),active:b.activeCount(),future:b.state.deferred.filter(d=>!d.sent).length,edited:b.state.deferred.some(d=>d.text==='Edited while offline')};});
+    },{timeout:30000}).toEqual({limit:3,active:3,future:3,edited:true});
+    for(const limit of [4,5,6]) {
+      await phone.evaluate(L=>{const b=window.__buddy;b.commitTaskLimit(L,b.activeSignature());return b.syncNow('capacity-raise');},limit);
+      await expect.poll(async()=>{await sync(mac);return mac.evaluate(()=>window.__buddy.taskLimit());},{timeout:20000}).toBe(limit);
+      expect((await texts(mac)).length).toBe(3); // increasing never silently restores Future
+    }
+    await sync(phone);await sync(mac);await settle(mac,3500);
+    const snapshot=p=>p.evaluate(()=>{const b=window.__buddy;return {limit:b.taskLimit(),all:[...b.state.items,...b.state.deferred.filter(d=>!d.sent)].map(i=>i.id+':'+i.text).sort()};});
+    expect(await snapshot(mac)).toEqual(await snapshot(phone));
+    expect((await snapshot(mac)).all).toHaveLength(6);
+  } finally {await mac.context().close();await phone.context().close();}
 });
