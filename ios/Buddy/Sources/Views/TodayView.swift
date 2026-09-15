@@ -81,7 +81,7 @@ struct TodayView: View {
     // Escalation follows COMMITTED actives (empties excluded) so a blank row never
     // trips the red alarm. debugActiveOverride still forces a level for screenshots.
     private var escalationCount: Int { debugActiveOverride ?? store.escalationCount }
-    private var theme: EscalationTheme { EscalationTheme.from(activeCount: escalationCount) }
+    private var theme: EscalationTheme { EscalationTheme.from(activeCount: escalationCount, limit: store.taskLimit) }
 
     // MARK: Body
 

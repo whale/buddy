@@ -100,3 +100,19 @@ test('an old peer does not strip the new build\'s history ordering into oblivion
   const rec = back.history.find(h => h.date === '2026-06-19');
   expect(rec.items.map(i => i.id), 'planner order survived the old peer').toEqual(['zzz', 'aaa']);
 });
+
+test('an actual old Mac preserves the limit register and parked overflow', async ({ browser }) => {
+  const newContext = await browser.newContext(), oldContext = await browser.newContext();
+  const fresh = await newContext.newPage(), old = await oldContext.newPage();
+  await open(fresh, path.join(REPO, 'dist/index.html'));
+  await open(old, oldBuildPath);
+  const base = {...ROLLED, today:{date:'2026-09-16',morningDone:true,items:Array.from({length:6},(_,i)=>({id:'x'+i,text:'Task '+i,state:'neutral',v:1}))},history:[]};
+  const reduced = await fresh.evaluate(b=>window.mergeWire({...b,taskLimit:{value:3,v:2,writer:'mac'}},b),base);
+  const legacy = await old.evaluate(([a,b])=>window.mergeWire(a,b),[base,reduced]);
+  expect(legacy.taskLimit).toEqual({value:3,v:2,writer:'mac'});
+  expect(activeIds(legacy)).toEqual(activeIds(reduced));
+  const returned = await fresh.evaluate(([a,b])=>window.mergeWire(a,b),[legacy,reduced]);
+  expect(activeIds(returned)).toEqual(activeIds(reduced));
+  expect(returned.deferred.map(i=>i.id).sort()).toEqual(reduced.deferred.map(i=>i.id).sort());
+  await newContext.close(); await oldContext.close();
+});

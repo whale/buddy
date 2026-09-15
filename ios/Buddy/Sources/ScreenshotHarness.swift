@@ -18,6 +18,16 @@ enum ScreenshotHarness {
     /// Build a seeded store + the surface to show for the requested fixture.
     static func makeStore(for fixture: String) -> (store: BuddyStore, sheet: InitialSheetKind, forceMorning: Bool, celebrate: Bool) {
         let store = BuddyStore()
+        // Deterministic capacity/theme fixtures; no morning control is added on iOS.
+        let parts = fixture.split(separator: "-").map(String.init)
+        if parts.count == 5, parts[0] == "settings", parts[1] == "limit", parts[3] == "level",
+           let limit = Int(parts[2]), (3...6).contains(limit), let level = Int(parts[4]), (0...2).contains(level) {
+            let count = limit - 2 + level
+            store.seedForScreenshot(tasks: (0..<count).map { BuddyTask(id: "capacity\($0)", text: "Task \($0 + 1)", state: .neutral) })
+            store.extras["taskLimit"] = TaskLimit(value: limit, v: 1, writer: "fixture").json
+            store.syncNotice = nil
+            return (store, .settings, false, false)
+        }
         switch fixture {
         case "lvl0":
             store.seedForScreenshot(tasks: MockData.normalTasks)

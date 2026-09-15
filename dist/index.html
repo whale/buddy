@@ -363,6 +363,11 @@
     #morning.morning-leaving{ transition: opacity .2s ease; transform:none; }   /* fade only, no shrink */
     @keyframes rm-fade{ from{opacity:0;} to{opacity:1;} }
   }
+  .limit-choice,.limit-action { min-height:44px; border:1px solid var(--line); border-radius:12px; color:var(--ink); background:transparent; padding:8px 12px; }
+  .limit-choice { flex:1; font-size:16px; }
+  .limit-choice[aria-pressed="true"] { background:var(--sel-bg); color:var(--sel-ink); border-color:transparent; }
+  .limit-choice:hover,.limit-action:hover { box-shadow:inset 0 0 0 999px rgba(0,0,0,.08); }
+  .limit-choice:focus-visible,.limit-action:focus-visible { outline:2px solid var(--ink); outline-offset:3px; }
 </style>
 </head>
 <body class="antialiased select-none text-black">
@@ -489,6 +494,26 @@
           <!-- ============ BEHAVIOR ============ -->
           <div class="set-glabel text-black/30">Behavior</div>
           <div class="set-card">
+            <div class="set-item">
+              <div class="text-[18px] tracking-[-0.36px]" style="color:var(--ink)">Tasks on your list</div>
+              <div id="taskLimitChoices" role="group" aria-label="Active task limit" style="display:flex;gap:8px;margin-top:14px">
+                <button type="button" data-limit="3" aria-label="3 active tasks" aria-pressed="false" class="limit-choice">3</button>
+                <button type="button" data-limit="4" aria-label="4 active tasks" aria-pressed="false" class="limit-choice">4</button>
+                <button type="button" data-limit="5" aria-label="5 active tasks" aria-pressed="false" class="limit-choice">5</button>
+                <button type="button" data-limit="6" aria-label="6 active tasks" aria-pressed="false" class="limit-choice">6</button>
+              </div>
+              <p class="mt-2 text-[14px] leading-snug" style="color:var(--ink-dim)">Completed tasks don't count. Syncs with your iPhone.</p>
+              <div id="taskLimitConfirm" class="hidden" style="margin-top:16px;color:var(--ink)" role="group" aria-labelledby="taskLimitQuestion">
+                <p id="taskLimitQuestion" class="font-medium"></p>
+                <p id="taskLimitExplanation" class="mt-2 text-[14px]"></p>
+                <ul id="taskLimitPreview" style="padding-left:20px;margin:12px 0;font-size:14px;overflow-wrap:anywhere;list-style:disc"></ul>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <button id="taskLimitCancel" class="limit-action">Cancel</button>
+                  <button id="taskLimitAccept" class="limit-action">Move to Future</button>
+                </div>
+              </div>
+              <p id="taskLimitStatus" role="status" class="mt-2 text-[14px]" style="color:var(--ink)"></p>
+            </div>
             <!-- Celebrate -->
             <div class="set-item">
               <div class="text-[18px] text-black/60 tracking-[-0.36px] mb-3">Celebrate completed tasks</div>
@@ -499,6 +524,25 @@
               </div>
               <p id="confettiOverride" class="mt-3 text-[14px] text-black/40 leading-snug hidden">Off while your system is set to reduce motion.</p>
             </div>
+            <div class="set-item">
+              <button id="autoMorningBtn" role="switch" aria-checked="false" class="pressable w-full flex items-center justify-between gap-3" style="min-height:44px">
+                <span class="text-[18px] tracking-[-0.36px] text-left" style="color:var(--ink)">Show the morning planner automatically</span>
+                <span id="autoMorningTrack" class="relative shrink-0 w-[44px] h-[26px] rounded-full transition-colors">
+                  <span id="autoMorningKnob" class="absolute top-[3px] left-[3px] size-[20px] rounded-full bg-white shadow transition-transform"></span>
+                </span>
+              </button>
+              <p class="mt-2 text-[14px] tracking-[-0.26px] leading-snug" style="color:var(--ink-dim)">On this Mac. You can still open Morning from the menu bar.</p>
+            </div>
+            <div class="set-item">
+              <button id="shortcutEnabledBtn" role="switch" aria-checked="false" class="pressable w-full flex items-center justify-between gap-3" style="min-height:44px">
+                <span class="text-[18px] tracking-[-0.36px] text-left" style="color:var(--ink)">Open Buddy with ⌘⌥B</span>
+                <span id="shortcutEnabledTrack" class="relative shrink-0 w-[44px] h-[26px] rounded-full transition-colors">
+                  <span id="shortcutEnabledKnob" class="absolute top-[3px] left-[3px] size-[20px] rounded-full bg-white shadow transition-transform"></span>
+                </span>
+              </button>
+              <p class="mt-2 text-[14px] tracking-[-0.26px] leading-snug" style="color:var(--ink-dim)">Off by default. Ordinary typing will never open Buddy.</p>
+            </div>
+            <p id="localPreferencesError" role="status" class="hidden set-item text-[14px]" style="color:var(--ink)"></p>
             <!-- Give Buddy room -->
             <div class="set-item">
               <button id="reserveBtn" role="switch" aria-checked="false" class="pressable w-full flex items-center justify-between">
@@ -762,7 +806,80 @@ let futureCursor = -1;   // Tab-cursor over the Future panel's rows (−1 = none
 let donezoCatchupTimer = null;   // re-render when a SYNC-adopted done item finishes its savor beat
 let cursor = 0;                  // keyboard cursor index (0..items.length, last = Add row)
 let kbActive = false;           // true once a key has been used → cursor ring shows
-const SOFT_CAP = 5, HARD_CAP = 6;   // escalation colours all live in the CSS tokens (--ink/--red)
+const HARD_CAP = 6;   // legacy default, retained for the embedded compatibility tests
+// A per-setting revision survives unrelated saves from older apps. The register lives
+// in top-level extras, which already round-trip through legacy Mac and iPhone builds.
+function normalizeTaskLimit(r){
+  const empty={value:6,v:0,writer:''};
+  if(!r || !Number.isSafeInteger(r.v) || r.v<1 || r.v>=Number.MAX_SAFE_INTEGER || typeof r.writer!=='string' || !/^[a-z0-9-]{1,64}$/.test(r.writer)) return empty;
+  return {value:Number.isInteger(r.value)?Math.max(3,Math.min(6,r.value)):6,v:r.v,writer:r.writer};
+}
+function pickTaskLimit(a,b){
+  a=normalizeTaskLimit(a); b=normalizeTaskLimit(b);
+  return a.v!==b.v?(a.v>b.v?a:b):a.writer!==b.writer?(a.writer>b.writer?a:b):(a.value>=b.value?a:b);
+}
+function taskLimit(){ return normalizeTaskLimit(state.extras.taskLimit).value; }
+function freeSlots(){ return Math.max(0,taskLimit()-activeCount()); }
+function bossThreshold(){ return taskLimit()-1; }
+function taskLimitValue(blob){ return normalizeTaskLimit(blob?.taskLimit??blob?.extras?.taskLimit); }
+function taskLimitExtras(a,b){
+  const extras={...(a||{}),...(b||{})}, limit=pickTaskLimit(a?.taskLimit,b?.taskLimit);
+  if(limit.v) extras.taskLimit=limit; else delete extras.taskLimit;
+  return extras;
+}
+function limitOverflow(limit){
+  const active=state.items.filter(i=>i.state!=='done');
+  const priority=[...active.filter(i=>i.state==='focused'),...active.filter(i=>i.state!=='focused')];
+  const keep=new Set(priority.slice(0,limit).map(i=>i.id));
+  return active.filter(i=>!keep.has(i.id));
+}
+function parkLimitOverflow(items){
+  const have=new Set(state.deferred.map(d=>d.id)), ids=new Set(items.map(i=>i.id));
+  let moved=0;
+  for(const it of items) if(!have.has(it.id)){
+    state.deferred.push({...it,wake:'',v:it.v||1}); have.add(it.id); moved++;
+  }
+  state.items=state.items.filter(it=>!ids.has(it.id));
+  if(moved) state.syncNotice={combined:activeCount()+moved,moved,dismissed:false};
+  return moved;
+}
+function enforceTaskLimit(){ parkLimitOverflow(limitOverflow(taskLimit())); }
+function activeSignature(){ return canonicalJSON(state.items.filter(i=>i.state!=='done').map(i=>({id:i.id,text:i.text,state:i.state,v:i.v||1}))); }
+let pendingTaskLimit=null;
+function requestTaskLimit(value){
+  if(![3,4,5,6].includes(value)||editingActive()) return;
+  const overflow=limitOverflow(value);
+  if(!overflow.length){ commitTaskLimit(value,activeSignature()); return; }
+  pendingTaskLimit={value,signature:activeSignature(),overflow}; renderTaskLimit();
+}
+function commitTaskLimit(value,signature){
+  if(editingActive()||signature!==activeSignature()){
+    pendingTaskLimit=null; renderTaskLimit();
+    $('#taskLimitStatus').textContent='Your list changed. Choose the limit again to review the tasks.'; return false;
+  }
+  const current=normalizeTaskLimit(state.extras.taskLimit);
+  if(current.v>=Number.MAX_SAFE_INTEGER-1) return false;
+  let writer=lsGet('buddy.preferenceWriter');
+  if(!writer || !/^[a-z0-9-]{1,64}$/.test(writer)){ writer=nid().toLowerCase(); localStorage.setItem('buddy.preferenceWriter',writer); }
+  const overflow=limitOverflow(value);
+  state.extras.taskLimit={value,v:current.v+1,writer};
+  parkLimitOverflow(overflow); pendingTaskLimit=null;
+  save(); render(); renderTaskLimit(); return true;
+}
+function renderTaskLimit(){
+  const wrap=$('#taskLimitChoices'); if(!wrap) return;
+  wrap.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.limit===taskLimit())));
+  const box=$('#taskLimitConfirm'); box.classList.toggle('hidden',!pendingTaskLimit);
+  $('#taskLimitStatus').textContent='';
+  if(pendingTaskLimit){
+    const {value,overflow}=pendingTaskLimit;
+    $('#taskLimitQuestion').textContent='Move '+overflow.length+' task'+(overflow.length===1?'':'s')+' to Future?';
+    $('#taskLimitExplanation').textContent='Your list will hold up to '+value+' active tasks. Nothing will be deleted.';
+    const list=$('#taskLimitPreview'); list.replaceChildren();
+    overflow.forEach(it=>{ const li=document.createElement('li'); li.textContent=it.text; list.appendChild(li); });
+  }
+}
+
 const ICON_RIGHT = '1.25rem';   // universal right padding: row action icons align to the sheet ✕
 const HIST_ICON_RIGHT  = '-0.75rem'; // same gutter from inside a px-8 history group (1.25rem − the group's 2rem side padding)
 const HIST_ICON_RIGHT2 = '1.5rem';   // second icon slot: 36px left of the first (32px icon + 4px gap)
@@ -1247,7 +1364,7 @@ function mergeItems(primary, secondary, tombstones, doneTombs){
 // their slots; iPhone-minted (uppercase id) tasks overflow first — and within a device,
 // the LAST ones overflow (stable, order-preserving). Deterministic on the SAME merged
 // input (merge is symmetric), so both devices relocate the identical set and converge.
-function clampActive(items){
+function clampActive(items, limit=6){
   if(!Array.isArray(items)) return { kept:items||[], overflow:[] };
   const seenTitles = new Set();
   const activeIdx = [];                                  // indices of surviving active items, in order
@@ -1261,8 +1378,8 @@ function clampActive(items){
     activeIdx.push(i);
   }
   const overflowSet = new Set();
-  if(activeIdx.length > HARD_CAP){
-    let excess = activeIdx.length - HARD_CAP;
+  if(activeIdx.length > limit){
+    let excess = activeIdx.length - limit;
     // iPhone-origin last-first, then (defensively, if Mac alone somehow exceeds the cap)
     // Mac-origin last-first. reverse() gives last-first; both devices see the same order.
     const ios = activeIdx.filter(i=>idIsIos(items[i].id)).reverse();
@@ -1369,18 +1486,18 @@ function merge(a, b){
   const sa=(va.savedAt||0), sb=(vb.savedAt||0);
   const newer = sa!==sb ? (sa>sb?va:vb) : (blobContentKey(va)>=blobContentKey(vb)?va:vb);
   const older = newer===va ? vb : va;
+  const resolvedLimit=pickTaskLimit(va.extras?.taskLimit,vb.extras?.taskLimit);
   const tombstones = mergeTombstones(va.tombstones, vb.tombstones);
   let doneTombs = mergeDoneTombs(va.doneTombs, vb.doneTombs);
 
-  let today, carryHistory=[], overflowItems=[];
+  let today, carryHistory=[], overflowItems=[], pastItems=[];
   if(va.today && vb.today && va.today.date === vb.today.date){
-    const clamped = clampActive(mergeItems(newer.today.items, older.today.items, tombstones, doneTombs));
-    overflowItems = clamped.overflow;
+    const combined = mergeItems(newer.today.items, older.today.items, tombstones, doneTombs);
     today = {
       ...older.today, ...newer.today,               // unknown today-level fields ride through (newer wins per key)
       date: va.today.date,
       morningDone: !!(va.today.morningDone || vb.today.morningDone),
-      items: clamped.kept,
+      items: combined,
     };
   } else {
     // Different/missing days: the CALENDAR-LATER day is live (not the newer save's —
@@ -1391,6 +1508,7 @@ function merge(a, b){
     const liveDate = today && today.date;
     const oldLive = (ta&&tb) ? (today===ta?tb:ta) : null;
     if(oldLive && oldLive.items && oldLive.items.length && oldLive.date && oldLive.date < liveDate){
+      pastItems=oldLive.items;
       const rec = todayToHistoryRecord(oldLive);
       if(rec) carryHistory.push(rec);
       // ARCHIVING IS A ROLLOVER. The device that rolled first dropped its completed rows and
@@ -1417,12 +1535,39 @@ function merge(a, b){
     // was silently undone (skeptic, 2026-08-08). Apply the same gates the same-date branch does.
     if(today && Array.isArray(today.items)){
       const filtered = today.items.filter(it => it && it.id && !(it.id in tombstones) && !doneMarked(it, doneTombs));
-      if(filtered.length !== today.items.length) today = { ...today, items: filtered };
+      today={...today,items:filtered};
     }
   }
 
-  // Deferred: union keyed by id, conflicts resolved by per-row v (send/unsend bump it).
+  // Reconcile cross-list versions before capacity. A reduction must not discard
+  // text typed (or a completion made) on an offline peer after the task was parked.
   let deferred = mergeDeferred(newer.deferred, older.deferred, tombstones);
+  const parked=new Map(deferred.map(d=>[d.id,d]));
+  for(const it of pastItems){
+    const d=parked.get(it.id);
+    if(d && it.state!=='done' && ((it.v||1)>(d.v||1)||((it.v||1)===(d.v||1)&&String(it.text)<String(d.text)))) parked.set(it.id,{...d,text:it.text,v:it.v||1});
+  }
+  if(today){
+    const survivors=[];
+    for(const it of today.items){
+      const d=parked.get(it.id);
+      if(!d){ survivors.push(it); continue; }
+      if(it.state==='done' && (it.v||1)>=(d.v||1)){
+        // Archive the completion and retire the shared id. Plain tombstones make
+        // older apps agree too; merely omitting the parked copy would resurrect it.
+        const rec=todayToHistoryRecord({...today,items:[it]}); if(rec) carryHistory.push(rec);
+        const stamp=dayStamp(today.date); tombstones[it.id]=stamp;
+        doneTombs=mergeDoneTombs(doneTombs,{[it.id]:{v:it.v||1,t:stamp}});
+        parked.delete(it.id);
+      }else if((it.v||1)>(d.v||1)||((it.v||1)===(d.v||1)&&String(it.text)<String(d.text))){
+        parked.set(it.id,{...d,text:it.text,v:it.v||1});
+      }
+    }
+    deferred=deferred.filter(d=>parked.has(d.id)).map(d=>parked.get(d.id));
+    const clamped=clampActive(survivors,resolvedLimit.value);
+    today={...today,items:clamped.kept}; overflowItems=clamped.overflow;
+  }
+
   // Overflow relocation: active tasks that lost their slot in the cap fight get PARKED in
   // Future (wake:'' = undated) instead of deleted — so a sync can never silently drop a
   // task (whale 2026-07-19). Reuse the item's own id so BOTH devices relocate the identical
@@ -1433,7 +1578,7 @@ function merge(a, b){
     const have = new Set(deferred.map(d=>d&&d.id));
     for(const it of overflowItems){
       if(!it || !it.id || (it.id in tombstones) || have.has(it.id)) continue;
-      deferred.push({ id:it.id, text:it.text||'', wake:'', v:(it.v|0)||1 });
+      deferred.push({ ...it, id:it.id, text:it.text||'', wake:'', v:(it.v|0)||1 });
       have.add(it.id);
       movedCount++;
     }
@@ -1491,7 +1636,7 @@ function merge(a, b){
     savedAt: Math.max(a.savedAt||0, b.savedAt||0),
     restartStash: newer.restartStash || older.restartStash || null,
     syncNotice: syncNotice || null,
-    extras: { ...(older.extras||{}), ...(newer.extras||{}) },   // union; newer wins per key
+    extras: taskLimitExtras(older.extras,newer.extras),   // union; newer wins per key
   };
 }
 // Merge two sync notices → one. Deterministic + symmetric: the higher (combined, then
@@ -1577,7 +1722,7 @@ function blobContentKey(b){
   // syncNotice is IN the key so a dismiss (or a fresh overflow) is a real change → it syncs
   // to the other device instead of being a silent no-op. Sanitised so null==absent matches.
   const n=sanitizeNotice(b.syncNotice);
-  return canonicalJSON({ td:b.today&&b.today.date, m:!!(b.today&&b.today.morningDone),
+  return canonicalJSON({ ...(taskLimitValue(b).v?{limit:taskLimitValue(b)}:{}), td:b.today&&b.today.date, m:!!(b.today&&b.today.morningDone),
     t:items, h:hist, d:def, tomb:b.tombstones||{}, dtomb:sanitizeDoneTombs(b.doneTombs), e:b.erasedAt??null,
     n:n?{c:n.combined,mv:n.moved,x:n.dismissed}:null,
     s:{ celebrate:s.celebrate, reserveSpace:!!s.reserveSpace } });
@@ -2358,11 +2503,11 @@ function rolloverAndCarry(){
     // therefore carry the SAME ids into the new day, so the union is idempotent instead of
     // doubling up. (state is passed through untouched rather than reset to 'neutral': it is
     // non-done by construction, and normalising it here would fight iOS's 'focused'.)
-    prevItems.filter(it=>it && it.id && it.state!=='done').slice(0,HARD_CAP).forEach(it=>{
-      if(activeCount()>=HARD_CAP) return;
+    prevItems.filter(it=>it && it.id && it.state!=='done').forEach(it=>{
       if(state.items.some(x=>x.id===it.id)) return;
       state.items.push({ ...it, doneAt:null, doneWord:null });
     });
+    enforceTaskLimit();
   }
   return rolled;
 }
@@ -2406,10 +2551,10 @@ function sleepItem(id){
   save(); render();
 }
 /* Pull ONE parked (Future) task into today's list, then drop it from Future.
-   Capped — the + is hidden at HARD_CAP, so this only fires when there's room. */
+   Capped — the + is hidden at taskLimit(), so this only fires when there's room. */
 function addDeferredToToday(id){
   const d=(state.deferred||[]).find(x=>x.id===id); if(!d||d.sent) return;
-  if(activeCount()>=HARD_CAP) return;              // today is full — no 7th
+  if(activeCount()>=taskLimit()) return;              // today is full — no 7th
   const it=newItem(d.text); state.items.push(it);
   // The parked row STAYS in Future, flipped to a "Sent to today!" confirmation (mirrors a
   // Today task going Donezo). `sentTid` links the Today copy so undo can pull it back. It
@@ -2439,9 +2584,9 @@ let nativeMorningOpenAt=0;        // when the flag was last raised — the heal 
 // Both guard against the morning: while the full-screen planner is up, nothing
 // may resize the window back to a drawer/sliver (that was the "Restart" bug —
 // the morning would flash then get clipped to a sliver by a stray mouse-leave).
-function openDrawer(){ if(morningUp()) return;
+function openDrawer(takeFocus=true){ if(morningUp()) return;
   if(NATIVE){
-    clearTimeout(shrinkTimer); nativeFocus();
+    clearTimeout(shrinkTimer); if(takeFocus) nativeFocus();
     // Resize the window to full drawer width FIRST, then slide — so the drawer
     // never slides into a half-resized, repainting transparent window (the white
     // seam). The drawer stays off-screen during the resize, so nothing shows.
@@ -2500,7 +2645,7 @@ function healMorningGuard(p, quiet){
 addEventListener('mousemove', e=>{
   if(morningUp() || state.pinned) return;
   if(e.clientX >= innerWidth-2){
-    if(edgeArmed){ edgeArmed=false; clearTimeout(closeTimer); openDrawer(); }
+    if(edgeArmed){ edgeArmed=false; clearTimeout(closeTimer); openDrawer(false); }
   } else if(e.clientX < innerWidth-40){ edgeArmed=true; }
 });
 
@@ -2508,14 +2653,14 @@ const pinBtn=$('#pinBtn'), histBtn=$('#histBtn');
 pinBtn.addEventListener('click', e=>{
   e.stopPropagation();
   state.pinned=!state.pinned;
-  if(state.pinned){ openDrawer(); desktop.style.width='calc(100vw - 416px)'; }
+  if(state.pinned){ openDrawer(false); desktop.style.width='calc(100vw - 416px)'; }
   else { desktop.style.width='100vw'; closeDrawer(); }
   syncChrome(); applyReserve(); save();
 });
 
 /* Reflect pinned state in the UI (used at boot to restore a pinned session). */
 function applyPinnedUI(){
-  if(state.pinned){ desktop.style.width='calc(100vw - 416px)'; openDrawer(); }
+  if(state.pinned){ desktop.style.width='calc(100vw - 416px)'; openDrawer(false); }
   else { desktop.style.width='100vw'; }
   syncChrome(); applyReserve();
 }
@@ -2531,7 +2676,7 @@ function cycle(it){
   // clearedAt is one completion's Boss-Mode flag — any state change resets it, or a
   // re-completed task would skip Today and land straight in the cleared pile.
   if(it.state!=='done'){ it.state='done'; it.doneAt=Date.now(); delete it.clearedAt; if(!it.doneWord) it.doneWord=pickDoneWord(); }
-  else { if(activeCount()>=HARD_CAP) return; it.state='neutral'; delete it.doneAt; delete it.clearedAt; }   // done → restore (capped)
+  else { if(activeCount()>=taskLimit()) return; it.state='neutral'; delete it.doneAt; delete it.clearedAt; }   // done → restore (capped)
   touch(it);
   if(was!=='done' && it.state==='done'){
     // Anchor the celebration (quiet pop) to the row's ✓ button — "floats up
@@ -2591,7 +2736,7 @@ const isDonezo = it => it.state==='done' && it.doneAt && (Date.now()-it.doneAt) 
    and sync see the items unchanged; iOS carries the field via its extras bag).
    Any state change deletes clearedAt (see cycle/restoreItem). The freshly-checked
    task keeps its 2s savor beat — only post-beat Donezos are ever swept. ---- */
-const BOSS_MIN=5;
+// The completion prompt follows bossThreshold() (one below the chosen limit).
 function buildBossRow(n){
   const row=document.createElement('div');
   row.className='bossrow bd border-t border-[#d9d9d9] flex items-center justify-between gap-3';
@@ -2704,7 +2849,7 @@ function morphToDonezo(id){
 function restoreItem(id){
   const it=state.items.find(x=>x.id===id);
   if(!it || it.state!=='done') return;
-  if(activeCount()>=HARD_CAP) return;                       // already full of active work
+  if(activeCount()>=taskLimit()) return;                       // already full of active work
   it.state='neutral'; delete it.doneAt; delete it.clearedAt; touch(it);
   render();
 }
@@ -2837,7 +2982,7 @@ function render(){
   edgeBar.classList.toggle('edge-alert', lvl>=1);   // escalation shows on the hidden tab too
   syncChrome();                                     // pin / calendar / settings selected states
   renderSyncNotice();                               // overflow-moved-to-Future banner (synced, dismissible)
-  if(settingsOpen) syncReserve();                  // reserve switch color follows red/normal theme live
+  if(settingsOpen){ syncReserve(); syncLocalPreferences(); renderTaskLimit(); }                  // reserve switch color follows red/normal theme live
   if(morningUp()){ renderToday(morningList, true); renderMorningUndone(); }
 
   // FLIP: remember where each row was, so after the rebuild every row that moved
@@ -2894,7 +3039,7 @@ function render(){
    cleans up a blank row is the contenteditable's `blur` handler — which WebKit does NOT fire when
    the focused node is REMOVED rather than left. So a render triggered by something else (ticking ✓
    on another row, the Donezo morph ~1.2s after a completion, a sync adopt) strands the row in
-   state with text:''. That corpse still counts toward HARD_CAP, so the drawer showed FIVE tasks
+   state with text:''. That corpse still counts toward taskLimit(), so the drawer showed FIVE tasks
    and silently refused a sixth (field report 2026-08-09).
 
    The guard is DOM liveness, deliberately NOT `editingId`. In exactly the case this exists for,
@@ -2934,10 +3079,10 @@ function pruneStrandedBlanks(){
 // Escalation counts only COMMITTED actives — a blank, untitled row (the just-added
 // row you haven't typed into, or a stray empty that slipped through) must never drive
 // the red alarm. Counting it once flipped the whole drawer to lvl2 on a phantom 6th
-// task (2026-07-28). activeCount() stays as-is for the HARD_CAP gate; only the level
+// task (2026-07-28). activeCount() stays as-is for the taskLimit() gate; only the level
 // ignores empties.
 function escalationCount(){ return state.items.filter(i => i.state!=='done' && String(i.text||'').trim()).length; }
-function warnLevel(){ const n=escalationCount(); return n>=HARD_CAP?2 : n===SOFT_CAP?1 : 0; }
+function warnLevel(){ const n=escalationCount(); return n>=taskLimit()?2 : n===taskLimit()-1?1 : 0; }
 
 // The sync-overflow notice: a task never silently disappears on sync — if the union of
 // two devices exceeds the cap, the losers are parked in Future and THIS tells the user.
@@ -3000,11 +3145,11 @@ function restorableTexts(rec=mostRecentRestorableRecord()){
 function restoreLastList(){
   const rec=mostRecentRestorableRecord();
   const texts=restorableTexts(rec);
-  if(!texts.length || activeCount()>=HARD_CAP) return false;
+  if(!texts.length || activeCount()>=taskLimit()) return false;
   const existing=new Set(state.items.map(i=>String(i.text||'').trim()).filter(Boolean));
   let added=0;
   texts.forEach(text=>{
-    if(activeCount()<HARD_CAP && !existing.has(text)){ state.items.push(newItem(text)); existing.add(text); added++; }
+    if(activeCount()<taskLimit() && !existing.has(text)){ state.items.push(newItem(text)); existing.add(text); added++; }
   });
   if(!added) return false;
   T('restoreLastList '+(rec&&rec.date)+' added='+added);
@@ -3052,9 +3197,9 @@ function restartFresh(){
   save(); closeSettings(); showMorning();
 }
 function fillFromRestartStash(){
-  if(!restartStash || !restartStash.texts.length || activeCount()>=HARD_CAP) return;
+  if(!restartStash || !restartStash.texts.length || activeCount()>=taskLimit()) return;
   const existing=new Set(state.items.map(i=>String(i.text||'').trim()).filter(Boolean));
-  restartStash.texts.forEach(t=>{ if(activeCount()<HARD_CAP && !existing.has(t)){ state.items.push(newItem(t)); existing.add(t); } });
+  restartStash.texts.forEach(t=>{ if(!existing.has(t)){ const it=newItem(t); if(activeCount()<taskLimit()) state.items.push(it); else state.deferred.push({...it,wake:''}); existing.add(t); } });
   restartStash=null;            // consumed — don't keep offering it
   render(); save();
 }
@@ -3076,7 +3221,7 @@ function renderToday(wrap=todayWrap, morning=false){
   let rowH=120, fsScale=1;
   if(morning){
     const avail=Math.floor(window.innerHeight*0.7)-36;   // 70vh box minus borders/row dividers slack
-    const rows=shown.length + (activeCount()<HARD_CAP ? 1 : 0);   // + trailing Add
+    const rows=shown.length + (activeCount()<taskLimit() ? 1 : 0);   // + trailing Add
     rowH=Math.max(64, Math.min(120, Math.floor(avail/Math.max(rows,1))));
     fsScale=Math.max(.72, rowH/120);
   }
@@ -3166,7 +3311,7 @@ function renderToday(wrap=todayWrap, morning=false){
 
   // Boss Mode row: after the Donezo pile, before live tasks. Drawer only — the
   // morning planner stays a compact preview the pile can't crowd.
-  if(!morning && donez.length>=BOSS_MIN){
+  if(!morning && donez.length>=bossThreshold()){
     // Every `order` entry appended exactly one row, so children[donez.length] is
     // the first live row (or null → the row lands after the pile at the end).
     wrap.insertBefore(buildBossRow(donez.length), wrap.children[donez.length]||null);
@@ -3178,7 +3323,7 @@ function renderToday(wrap=todayWrap, morning=false){
   // restore arrows). Prefer the just-restarted plan (stash); else the most recent
   // archived day's unfinished work.
   let showRestore=false, restoreRow=null;
-  if(morning && state.items.length===0 && activeCount()<HARD_CAP){
+  if(morning && state.items.length===0 && activeCount()<taskLimit()){
     if(restartStash && restartStash.texts.length && (!restartStash.date || restartStash.date===localDate())){
       restoreRow=buildRestoreRowEl('Restore your last list', restartStash.texts.length, ()=>fillFromRestartStash(), rowStyle, morning, true);
       showRestore=true;
@@ -3192,7 +3337,7 @@ function renderToday(wrap=todayWrap, morning=false){
 
   // Empty "Add" row — always exactly one, everywhere. None at the hard cap
   // (full red — there is no 7th).
-  const addRows = activeCount()<HARD_CAP ? 1 : 0;
+  const addRows = activeCount()<taskLimit() ? 1 : 0;
   for(let k=0;k<addRows;k++){
     const first = order.length===0 && !showRestore && k===0;
     const add=document.createElement('div');
@@ -3258,7 +3403,7 @@ function histEmpty(msg){
 // Skipped tab's + button to resurrect an undone task on purpose.
 function restoreHistoryTask(text){
   const t=String(text||'').trim(); if(!t) return;
-  if(activeCount()>=HARD_CAP) return;                                  // already full — no 7th
+  if(activeCount()>=taskLimit()) return;                                  // already full — no 7th
   if(state.items.some(i=>String(i.text||'').trim()===t)) return;       // already on today
   state.items.push(newItem(t));
   save(); render();
@@ -3302,7 +3447,7 @@ function renderPast(){
   histLoadMore();
 }
 // SKIPPED tab = PAST tasks left undone. Plain (no strike, no done-word), each
-// restorable into today via + — hidden when today is full (HARD_CAP), so a skipped
+// restorable into today via + — hidden when today is full (taskLimit()), so a skipped
 // task can be pulled back UNLESS the day is already maxed (full red).
 function renderSkipped(){
   const past = lastNDays(pastDaysShown)
@@ -3317,7 +3462,7 @@ function renderSkipped(){
     h.textContent=day.name; grp.appendChild(h);
     day.items.forEach(it=>{
       const tx=String(it.text||'').trim();
-      const canAdd = !activeTexts.has(tx) && activeCount()<HARD_CAP;
+      const canAdd = !activeTexts.has(tx) && activeCount()<taskLimit();
       const r=document.createElement('div'); r.className='hrow group/h relative flex items-center py-1.5'+(canAdd?' pr-[44px]':'');
       const lab=document.createElement('div'); lab.className='flex items-baseline gap-2 min-w-0 flex-1';
       const t=document.createElement('span'); t.className='tracking-[-0.36px] truncate'; t.style.cssText='font-size:18px;color:var(--ink)'; t.textContent=it.text;
@@ -3382,7 +3527,7 @@ function makeFutureHoverRow(contentEl, actions){
 // after pulling it into today). Newest-parked on top; no date grouping.
 function renderFuture(){
   if(!state.deferred || !state.deferred.length){ histBody.appendChild(histEmpty('Nothing in Future yet.')); return; }
-  const full = activeCount()>=HARD_CAP;            // today maxed → hide every +
+  const full = activeCount()>=taskLimit();            // today maxed → hide every +
   const wrap=document.createElement('div');
   wrap.className='bd';
   if(futureCursor>=state.deferred.length) futureCursor=-1;   // clamp after removals
@@ -3463,6 +3608,62 @@ function renderDots(){
   });
 }
 
+// Mac presentation choices intentionally live outside the shared task blob.
+const LOCAL_PREFERENCES_KEY='buddy.preferences.v1';
+let localPreferences={autoMorning:true, shortcutEnabled:false};
+let preferencesReady=false, preferenceBusy=false;
+function normalizeLocalPreferences(p){ return {autoMorning:p?.autoMorning!==false, shortcutEnabled:p?.shortcutEnabled===true}; }
+function localPreferenceError(message){
+  const el=$('#localPreferencesError');
+  el.textContent=message||''; el.classList.toggle('hidden',!message);
+}
+async function loadLocalPreferences(){
+  try{
+    const p=NATIVE ? await window.__TAURI__.core.invoke('load_preferences') : JSON.parse(localStorage.getItem(LOCAL_PREFERENCES_KEY)||'{}');
+    localPreferences=normalizeLocalPreferences(p);
+    if(NATIVE && localPreferences.shortcutEnabled && !await window.__TAURI__.core.invoke('drawer_shortcut_registered')){
+      localPreferenceError('The shortcut could not start. Turn it off, then try again; another app may be using it.');
+    }
+  }catch(_){
+    // A failed read must not surprise someone who had disabled automatic opening.
+    localPreferences={autoMorning:false,shortcutEnabled:false};
+    localPreferenceError('Could not read your Mac preferences. Try changing the switch again.');
+  }
+  preferencesReady=true; syncLocalPreferences();
+}
+function syncLocalPreferences(){
+  const level=warnLevel();
+  for(const key of ['autoMorning','shortcutEnabled']){
+    const on=localPreferences[key], b=$('#'+key+'Btn');
+    b.setAttribute('aria-checked',String(on)); b.disabled=preferenceBusy||!preferencesReady;
+    $('#'+key+'Track').style.backgroundColor=on?(level===2?'#b92f34':level===1?'var(--red)':'var(--ink)'):(level===2?'rgba(255,255,255,.30)':level===1?'rgba(229,72,77,.25)':'rgba(0,0,0,.15)');
+    $('#'+key+'Knob').style.transform=on?'translateX(18px)':'translateX(0)';
+  }
+}
+async function setLocalPreference(key, enabled){
+  if(!['autoMorning','shortcutEnabled'].includes(key)||preferenceBusy) return false;
+  preferenceBusy=true; syncLocalPreferences();
+  try{
+    if(NATIVE) localPreferences=normalizeLocalPreferences(await window.__TAURI__.core.invoke('set_preference',{key,enabled:!!enabled}));
+    else {
+      let previous;
+      const raw=localStorage.getItem(LOCAL_PREFERENCES_KEY);
+      try{ previous=JSON.parse(raw||'{}'); }
+      catch(_){ localStorage.setItem(LOCAL_PREFERENCES_KEY+'.invalid.'+Date.now(),raw); previous={autoMorning:false,shortcutEnabled:false}; }
+      const next={...normalizeLocalPreferences(previous),[key]:!!enabled};
+      localStorage.setItem(LOCAL_PREFERENCES_KEY,JSON.stringify(next)); localPreferences=next;
+    }
+    localPreferenceError(''); return true;
+  }catch(_){ localPreferenceError('Could not save this preference. The shortcut may be in use by another app. Please try again.'); return false; }
+  finally{ preferenceBusy=false; syncLocalPreferences(); }
+}
+for(const key of ['autoMorning','shortcutEnabled']) $('#'+key+'Btn').addEventListener('click',()=>setLocalPreference(key,!localPreferences[key]));
+window.addEventListener('storage',e=>{ if(e.key===LOCAL_PREFERENCES_KEY) loadLocalPreferences(); });
+function maybeShowMorning(reason){
+  if(!preferencesReady||!localPreferences.autoMorning||IS_CONFETTI_WINDOW||IS_MORNING_WINDOW) return Promise.resolve();
+  diag('morning-auto',{reason}); return showMorning(true);
+}
+
 /* --------------------------- morning ----------------------------- */
 // Count of yesterday's unfinished tasks (drives the "Add undone" card).
 function yesterdayUnfinished(){
@@ -3488,7 +3689,7 @@ function toggleUndone(){
     const rec=state.history[0];
     undoneIds=[];
     (rec?rec.items.filter(it=>!it.done):[]).forEach(it=>{
-      if(activeCount()<HARD_CAP){ const nit=newItem(it.text); state.items.push(nit); undoneIds.push(nit.id); }
+      if(activeCount()<taskLimit()){ const nit=newItem(it.text); state.items.push(nit); undoneIds.push(nit.id); }
     });
     undoneAdded=true;
   } else {
@@ -3506,11 +3707,11 @@ function morningMode(on){
   try{ return window.__TAURI__.core.invoke('set_morning_mode',{on}).catch(()=>{}); }
   catch(_){ return Promise.resolve(); }
 }
-function openNativeMorningWindow(){
+function openNativeMorningWindow(automatic=false){
   if(!NATIVE) return Promise.resolve();
   // Rejects when Rust could not build/show the window — showMorning drops its
   // "Morning is up" guard on that, or the screen-edge stays muted for nothing.
-  try{ return window.__TAURI__.core.invoke('open_morning_window'); }
+  try{ return window.__TAURI__.core.invoke('open_morning_window',{automatic}); }
   catch(err){ return Promise.reject(err); }
 }
 function hideNativeMorningWindow(){
@@ -3555,7 +3756,9 @@ function stopMorningFitWatcher(){
 // Called at the START of the morning→drawer leave: drop the opaque white backing so the
 // planner fade reveals the desktop (the rest of the window revert happens on morningMode(false)).
 function morningTranslucent(){ if(!NATIVE) return; try{ window.__TAURI__.core.invoke('morning_translucent'); }catch(_){} }
-async function showMorning(){
+async function showMorning(automatic=false){
+  automatic=automatic===true;
+  if(automatic && !localPreferences.autoMorning) return;
   T('showMorning');
   clearTimeout(shrinkTimer); clearTimeout(closeTimer); clearTimeout(openTimer);
   undoneAdded=false; undoneIds=[];
@@ -3566,7 +3769,7 @@ async function showMorning(){
     try{
       await writeNowAsync();       // second webview reads the durable file; flush the side-view list first
       await nativeFit('sliver');
-      await openNativeMorningWindow();
+      await openNativeMorningWindow(automatic);
     }catch(err){
       // Never leave the guard up with no window behind it — that mutes the screen-edge.
       nativeMorningOpen=false;
@@ -3628,7 +3831,7 @@ let justAddedId=null;            // the one row that should play the enter anima
 function addAndEdit(){
   // Refusing SILENTLY is what made this unreportable: no row, no message, no log line — the
   // user just presses Return and nothing happens. Say so in the diagnostics at least.
-  if(activeCount()>=HARD_CAP){ diag('add-blocked-cap', {n:activeCount()}); return; }
+  if(activeCount()>=taskLimit()){ diag('add-blocked-cap', {n:activeCount()}); return; }
   const it=newItem('');
   state.items.push(it);
   justAddedId=it.id;
@@ -3639,7 +3842,7 @@ function addAndEdit(){
   // find the row (`if(!el) return`), and it picks morningList-vs-todayWrap at rAF time — one frame
   // after render() populated the other one. Either path used to leave pendingAddId pinned to a
   // live blank row FOREVER, making it immune to the sweeper: the reported bug, now permanent, and
-  // active climbing past HARD_CAP to 7 (skeptic 2026-08-12).
+  // active climbing past taskLimit() to 7 (skeptic 2026-08-12).
   requestAnimationFrame(()=>{ startEdit(it.id); pendingAddId=null; });
 }
 
@@ -3893,11 +4096,11 @@ function openSettings(){
   settingsSheet.classList.remove('closing');
   settingsSheet.setAttribute('data-open','true');
   settingsSheet.setAttribute('aria-hidden','false');
-  syncCelebrate(); syncReserve(); syncReserveTrust(); syncLogin(); refreshLogin(); syncExportCount(); syncChrome();
+  renderTaskLimit(); syncLocalPreferences(); syncCelebrate(); syncReserve(); syncReserveTrust(); syncLogin(); refreshLogin(); syncExportCount(); syncChrome();
   renderSyncUI();   // reflect the current pairing state (setup / pairing / linked)
 }
 function closeSettings(){
-  settingsOpen=false;
+  settingsOpen=false; pendingTaskLimit=null;
   settingsSheet.classList.add('closing');
   settingsSheet.setAttribute('data-open','false');
   settingsSheet.setAttribute('aria-hidden','true');
@@ -3905,6 +4108,9 @@ function closeSettings(){
   eraseArmed=false;   // an armed erase must not survive the sheet closing (review finding 6)
   syncChrome();
 }
+$('#taskLimitChoices').addEventListener('click',e=>{ const b=e.target.closest('button[data-limit]'); if(b) requestTaskLimit(+b.dataset.limit); });
+$('#taskLimitCancel').addEventListener('click',()=>{ pendingTaskLimit=null; renderTaskLimit(); });
+$('#taskLimitAccept').addEventListener('click',()=>{ if(pendingTaskLimit) commitTaskLimit(pendingTaskLimit.value,pendingTaskLimit.signature); });
 gearBtn.addEventListener('click', e=>{ e.stopPropagation();
   if(settingsOpen){ closeSettings(); return; }
   if(state.histOpen){ state.histOpen=false; render(); }   // calendar & settings are mutually exclusive
@@ -3998,7 +4204,7 @@ $('#quitBtn')?.addEventListener('click', e=>{ e.stopPropagation();
     // the drawer and HOLD it open, or the "update ready" banner is never actually seen.
     updateBannerHold=true;
     clearTimeout(closeTimer); clearTimeout(shrinkTimer);
-    if(NATIVE && !morningUp()) openDrawer();   // if morning is up, it reveals when morning leaves (hold keeps it open)
+    if(NATIVE && !morningUp()) openDrawer(false);   // if morning is up, it reveals when morning leaves (hold keeps it open)
   }
   install.addEventListener('click', async ()=>{
     if(installing) return; installing=true;
@@ -4036,7 +4242,7 @@ $('#skipToday')?.addEventListener('click', e=>{ e.stopPropagation(); skip(); });
    While editingId!==null the global layer is INERT (Enter commits the
    edit; no double-fire).
    ==================================================================== */
-function maxCursor(){ return state.items.length; }   // last index = Add row
+function maxCursor(){ return Math.max(0,state.items.length-(freeSlots()===0?1:0)); }   // last index = Add row
 function moveCursor(delta){
   kbActive=true;
   cursor=clamp(0, cursor+delta, maxCursor());
@@ -4048,22 +4254,19 @@ document.addEventListener('keydown', e=>{
   // Show-off hotkey ⌘⌥⌃M — ALWAYS bring the morning planner forward. In the native app
   // this is a GLOBAL shortcut that raises the window first (see the buddy://morning-toggle
   // listener); this keydown is the browser-preview fallback only.
-  if(!NATIVE && e.metaKey && e.altKey && e.ctrlKey && e.code==='KeyM'){
+  if(!NATIVE && !e.repeat && !e.isComposing && e.metaKey && e.altKey && e.ctrlKey && e.code==='KeyM'){
     e.preventDefault(); showMorning(); return;
   }
 
   // Morning overlay owns its own keys (Enter/Esc) — don't double-handle.
   if(!morning.classList.contains('hidden')) return;
 
-  // Backtick toggles the drawer INSTANTLY (stand-in for the global hotkey).
-  if(e.key==='`'){
-    e.preventDefault();
-    drawer.classList.add('no-anim');            // kill the transition for this toggle
-    const closed=drawer.classList.contains('translate-x-full');
-    if(closed) openDrawer(); else closeDrawer();
-    requestAnimationFrame(()=>requestAnimationFrame(()=>drawer.classList.remove('no-anim')));
-    return;
+  const typing=e.target?.closest?.('input,textarea,select,[contenteditable="true"],[role="textbox"]');
+  if(e.isComposing || e.repeat) return;
+  if(!NATIVE && localPreferences.shortcutEnabled && e.metaKey && e.altKey && !e.ctrlKey && !e.shiftKey && e.code==='KeyB' && !typing){
+    e.preventDefault(); drawer.classList.contains('translate-x-full')?openDrawer():closeDrawer(); return;
   }
+  if(typing && e.key!=='Escape') return;
 
   // Global layer is inert while editing — let contenteditable handle keys.
   if(editingId!==null){
@@ -4145,7 +4348,7 @@ function liveRolloverCheck(){
     setDate();
     writeNow();                              // persist the rollover + carry-over immediately
     render();
-    showMorning();                           // a real day-change → morning
+    maybeShowMorning('rollover');              // rollover still runs when presentation is off
   }
 }
 let resumeCheckBusy=false, resumeCheckAt=0;
@@ -4167,7 +4370,7 @@ async function resumeMorningCheckInner(){
   // Wake is the moment Buddy must be first. If today is still unplanned — either
   // because rollover just happened, or because an earlier wake/focus event missed
   // its chance — bring Morning forward now.
-  if(!state.today.morningDone) showMorning();
+  if(!state.today.morningDone) await maybeShowMorning('resume');
   else render();
   if(syncStore) syncNow('system-resume');
 }
@@ -4233,6 +4436,7 @@ window.__buddy = {
   // Mirrors a page reload but in-process (used to assert load/rollover).
   boot,
   rollover: maybeRollover,
+  taskLimit, freeSlots, bossThreshold, warnLevel, normalizeTaskLimit, pickTaskLimit, requestTaskLimit, commitTaskLimit, activeSignature, blobContentKey,
   activeCount, escalationCount, pruneStrandedBlanks, liveEditId, todayToHistoryRecord,   // cap gate + alarm gate + the blank-row sweeper
   get todayWrap(){ return todayWrap; }, get morningList(){ return morningList; },   // the row containers have no id — tests MUST reach them through here, not `#todayWrap` (which silently matches nothing)
   get editingId(){ return editingId; },
@@ -4249,6 +4453,7 @@ window.__buddy = {
   deriveBlobKey, encryptBlob, decryptBlob, isEncryptedBlob, makeEncryptedStore, blobStats,  // E2E crypto
 
   openDrawer, closeDrawer,
+  setLocalPreference, maybeShowMorning, localPreferencesReady:()=>preferencesReady,
   showMorning, render, refreshFromDurableState, mergeDurableCandidates,
   renderWeather, wxKey, updateWeather,
   restartFresh, fillFromRestartStash,
@@ -5436,6 +5641,7 @@ window.addEventListener('beforeunload', diagFlush);
 try{ localStorage.removeItem('buddy.morningWin'); }catch(_){}
 if(NATIVE){
   const ev=window.__TAURI__.event;
+  ev.listen('buddy://preferences', e=>{ localPreferences=normalizeLocalPreferences(e.payload); syncLocalPreferences(); });
   // DRAWER intents are for the MAIN window only. Tauri broadcasts reach every
   // window, and the morning window once obeyed buddy://hide → nativeFit('sliver')
   // → clamped to min-width 432 → a blank ghost window parked behind the drawer
@@ -5465,7 +5671,7 @@ if(NATIVE){
       healMorningGuard(e&&e.payload);
       if(morningUp()||state.pinned){ diagOnce('reveal-ignored',{why: morningUp()?'morning':'pinned'}); return; }
       diagOnce('reveal', null, 10000);
-      clearTimeout(closeTimer); openDrawer();
+      clearTimeout(closeTimer); openDrawer(false);
     });
     ev.listen('buddy://hide',   ()=>{ if(morningUp()||state.pinned) return; clearTimeout(openTimer); closeDrawer(); });
     // ⌘⌥⌃M: raise, then show/hide morning. Hiding uses leaveMorningToDrawer (NOT skip)
@@ -5589,7 +5795,7 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
 // Buddy is unmistakably visible, then — unless pinned — tuck it to the edge tab.
 function settleNative(){
   if(!NATIVE) return;
-  openDrawer();
+  openDrawer(false);
   if(state.pinned) return;
   setTimeout(()=>{ if(!state.pinned) closeDrawer(); }, 1600);
 }
@@ -5602,6 +5808,7 @@ function bootFinish(recovered){
   } else {
     maybeAutoRestoreLastList();              // heals an empty new-day save using yesterday's archived list
   }
+  enforceTaskLimit();
   pruneHistory();                         // drop archived days older than ~1 year
   setDate();
   updateWeather();                        // paint cached weather, refresh if stale (silent on failure)
@@ -5624,7 +5831,7 @@ function bootFinish(recovered){
     writeNow();
     return;
   }
-  if(!state.today.morningDone) showMorning(); else settleNative();
+  if(!state.today.morningDone && localPreferences.autoMorning) maybeShowMorning('boot'); else settleNative();
   writeNow();                                // converge localStorage + file mirror to the chosen state
 }
 function boot(){
@@ -5705,7 +5912,7 @@ async function bootReconcileFile(){
   }
   bootFinish(recovered);
 }
-boot();
+loadLocalPreferences().then(boot);
 
 // ---- Sync triggers (opt-in; all inert until the user pairs) ----
 // Pull once after boot, and on every window focus / tab-visible so the other device's

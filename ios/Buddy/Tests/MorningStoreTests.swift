@@ -6,6 +6,14 @@ import XCTest
 // that breaks "yesterday's unfinished tasks load into the morning" fails loudly.
 final class MorningStoreTests: XCTestCase {
 
+    // These legacy scenarios exercise the default six-item policy, regardless of
+    // settings persisted by UI tests on the same disposable simulator.
+    private func defaultStore() -> BuddyStore {
+        let store = BuddyStore()
+        store.extras.removeValue(forKey: "taskLimit")
+        return store
+    }
+
     private func task(_ id: String, _ text: String, _ st: TaskState = .neutral) -> BuddyTask {
         BuddyTask(id: id, text: text, state: st)
     }
@@ -13,7 +21,7 @@ final class MorningStoreTests: XCTestCase {
     // MARK: morning flag
 
     func testCompleteMorningMarksPlanned() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: BuddyStore.localDate(), items: [], morningDone: false)
         XCTAssertTrue(s.needsMorning)
         s.completeMorning()
@@ -22,7 +30,7 @@ final class MorningStoreTests: XCTestCase {
     }
 
     func testSkipMorningMarksPlanned() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: BuddyStore.localDate(), items: [], morningDone: false)
         s.skipMorning()
         XCTAssertTrue(s.today.morningDone)
@@ -32,7 +40,7 @@ final class MorningStoreTests: XCTestCase {
     // MARK: rollover carry-over (the behavior the user explicitly wants)
 
     func testRolloverCarriesUnfinishedAndShowsMorning() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.history = []
         s.today = TodayState(date: "2020-01-01", items: [
             task("a", "done one", .done), task("b", "undone one"), task("c", "undone two")
@@ -55,7 +63,7 @@ final class MorningStoreTests: XCTestCase {
     }
 
     func testRolloverCarriesAllUnfinishedUpToHardCap() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.history = []
         s.today = TodayState(date: "2020-01-01",
                              items: (0..<7).map { task("t\($0)", "task \($0)") },  // 7 unfinished
@@ -68,7 +76,7 @@ final class MorningStoreTests: XCTestCase {
     // data loss when the other device rolled the day first) — it merges them into the
     // existing record and still carries the unfinished ones forward, like the Mac.
     func testRolloverIsIdempotentAcrossDuplicateDates() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: "2020-01-01", items: [task("a", "x")], morningDone: true)
         s.history = [Day(date: "2020-01-01", weekday: "Wednesday",
                          items: [DayItem(id: "h-2020-01-01-0", text: "x", done: false)])]  // already archived
@@ -82,7 +90,7 @@ final class MorningStoreTests: XCTestCase {
     // Slice 2: already-archived + live items that DIFFER from the record → the live list
     // merges into the record (done-wins, union by id) instead of vanishing.
     func testRolloverMergesLiveItemsIntoExistingRecord() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: "2020-01-01", items: [
             task("a", "x", .done),          // live copy finished x → done-wins over the record
             task("b", "y")                  // live-only second task → appended to the record
@@ -104,7 +112,7 @@ final class MorningStoreTests: XCTestCase {
     /// byte-for-byte on Unicode normalization across JS and Swift to avoid a permanent
     /// push ping-pong. Pinned so the duplication is a KNOWN cost, not a surprise.
     func testLegacyPositionalRecordDoesNotMergeWithRealIdRows() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.today = TodayState(date: "2020-01-01", items: [task("a", "x", .done)], morningDone: true)
         s.history = [Day(date: "2020-01-01", weekday: "Wednesday",
                          items: [DayItem(id: "h-2020-01-01-0", text: "x", done: false)])]
@@ -115,7 +123,7 @@ final class MorningStoreTests: XCTestCase {
     }
 
     func testEmptyYesterdayArchivesNothingButStillShowsMorning() {
-        let s = BuddyStore()
+        let s = defaultStore()
         s.history = []
         s.today = TodayState(date: "2020-01-01", items: [], morningDone: true)
         let rolled = s.performRolloverIfNeeded()

@@ -8,12 +8,9 @@ enum EscalationLevel: Int {
     case lvl1 = 1   // exactly 5 active — warning (white cards, RED text)
     case lvl2 = 2   // ≥6 active — alarm (RED cards, white text)
 
-    static func from(activeCount: Int) -> EscalationLevel {
-        switch activeCount {
-        case ..<5: return .lvl0
-        case 5:    return .lvl1
-        default:   return .lvl2
-        }
+    static func from(activeCount: Int, limit: Int = 6) -> EscalationLevel {
+        if activeCount >= limit { return .lvl2 }
+        return activeCount == limit - 1 ? .lvl1 : .lvl0
     }
 }
 
@@ -215,8 +212,8 @@ struct EscalationTheme {
     }
 
     // Convenience factory
-    static func from(activeCount: Int) -> EscalationTheme {
-        EscalationTheme(level: .from(activeCount: activeCount))
+    static func from(activeCount: Int, limit: Int = 6) -> EscalationTheme {
+        EscalationTheme(level: .from(activeCount: activeCount, limit: limit))
     }
 }
 

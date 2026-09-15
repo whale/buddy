@@ -229,3 +229,18 @@ write rejection + the QR re-pair / force-update path.
 - The fixes are this doc's rules. Highest-severity first: the **cleartext
   header** and the **CAS write-gating**. See the checklist in
   `RELEASE-CHECKLIST.md § Sync change gate`.
+
+## Unreleased: task-limit preference (2026-09-16)
+
+`taskLimit` is a top-level extras register `{value:3...6,v,writer}`; missing/invalid
+register means legacy six. Resolve by revision, writer, then value independently
+of whole-blob savedAt. Only explicit user changes bump revision. Canonical content
+keys omit untouched default registers. Do not move it inside typed settings: old
+iPhone settings encoders discard unknown fields there. Old apps preserve this
+register but keep their own six-item UI until updated.
+
+Reduction parks overflow with stable IDs/versions. Cross-list merge preserves a
+newer offline edit; a newer completion moves to history with tombstones so legacy
+peers cannot resurrect the parked copy. Tests cover reversed merge and remerging
+both original peers, earlier-day completion, actual old Mac, and frozen old iOS
+encoding. Real paired-device reconnect verification remains a release gate.

@@ -133,19 +133,20 @@ enum BuddyMerge {
         }
         let newer = newerIsA ? va : vb
         let older = newerIsA ? vb : va
+        let resolvedLimit = TaskLimit.pick(va.extras["taskLimit"], vb.extras["taskLimit"])
         var tombstones = mergeTombstones(va.tombstones, vb.tombstones)
         var doneTombs = mergeDoneTombs(va.doneTombs, vb.doneTombs)
 
         var today: TodayState?
         var carryHistory: [Day] = []
         var overflowItems: [BuddyTask] = []
+        var pastItems: [BuddyTask] = []
         if let ta = va.today, let tb = vb.today, ta.date == tb.date {
             let newerT = newer.today!, olderT = older.today!
-            let clamped = clampActive(mergeItems(newerT.items, olderT.items, tombstones, doneTombs))
-            overflowItems = clamped.overflow
+            let combined = mergeItems(newerT.items, olderT.items, tombstones, doneTombs)
             today = TodayState(
                 date: ta.date,
-                items: clamped.kept,
+                items: combined,
                 morningDone: ta.morningDone || tb.morningDone,     // OR-wins, mirrors the Mac
                 extras: olderT.extras.merging(newerT.extras) { _, n in n }   // unknown today-level fields ride through
             )
@@ -161,6 +162,7 @@ enum BuddyMerge {
                 let oldLive = taWins ? tb : ta
                 if !oldLive.items.isEmpty, !oldLive.date.isEmpty,
                    CanonicalJSON.compare(oldLive.date, today!.date) < 0 {
+                    pastItems = oldLive.items
                     if let rec = todayToHistoryRecord(oldLive) { carryHistory.append(rec) }
                     // ARCHIVING IS A ROLLOVER. The device that rolled first dropped its completed
                     // rows and marked them; this side is doing the same archive here, so it must
@@ -194,8 +196,37 @@ enum BuddyMerge {
             }
         }
 
-        // Deferred: union keyed by id, conflicts resolved by per-row v (send/unsend bump it).
+        // Reconcile cross-list versions BEFORE capacity: an offline edit must
+        // survive a reduction that moved its earlier version to Future.
         var deferred = mergeDeferred(newer.deferred, older.deferred, tombstones)
+        var parked = Dictionary(deferred.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for it in pastItems where !it.isDone {
+            if var d = parked[it.id], it.v > d.v || (it.v == d.v && CanonicalJSON.compare(it.text, d.text) < 0) {
+                d.text = it.text; d.v = it.v; parked[it.id] = d
+            }
+        }
+        if let current = today {
+            var survivors = [BuddyTask]()
+            for it in current.items {
+                guard var d = parked[it.id] else { survivors.append(it); continue }
+                if it.isDone && it.v >= d.v {
+                    // History + a plain tombstone also converges with old clients,
+                    // which would resurrect a parked row removed by absence alone.
+                    var completed = current; completed.items = [it]
+                    if let rec = todayToHistoryRecord(completed) { carryHistory.append(rec) }
+                    let stamp = dayStamp(current.date)
+                    tombstones[it.id] = stamp
+                    doneTombs = mergeDoneTombs(doneTombs, [it.id: DoneMark(v: it.v, t: stamp)])
+                    parked[it.id] = nil
+                } else if it.v > d.v || (it.v == d.v && CanonicalJSON.compare(it.text, d.text) < 0) {
+                    d.text = it.text; d.v = it.v; parked[it.id] = d
+                }
+            }
+            deferred = deferred.compactMap { parked[$0.id] }
+            let clamped = clampActive(survivors, limit: resolvedLimit.value)
+            today?.items = clamped.kept; overflowItems = clamped.overflow
+        }
+
         // Overflow relocation: active tasks that lost their slot in the cap fight get PARKED in
         // Future (wake:"" = undated) instead of deleted (whale 2026-07-19). Reuse the item's own
         // id so BOTH devices relocate the identical row; the invariant below keeps it out of
@@ -205,7 +236,9 @@ enum BuddyMerge {
         if !overflowItems.isEmpty {
             var have = Set(deferred.map { $0.id })
             for it in overflowItems where !it.id.isEmpty && tombstones[it.id] == nil && !have.contains(it.id) {
-                deferred.append(DeferredTask(id: it.id, text: it.text, wake: "", v: it.v < 1 ? 1 : it.v))
+                var metadata = it.extras
+                metadata["state"] = .string(it.state.rawValue)
+                deferred.append(DeferredTask(id: it.id, text: it.text, wake: "", v: it.v < 1 ? 1 : it.v, extras: metadata))
                 have.insert(it.id)
                 movedCount += 1
             }
@@ -268,7 +301,7 @@ enum BuddyMerge {
             erasedAt: erasedAt,
             savedAt: max(a.savedAt, b.savedAt),
             syncNotice: SyncNotice.sanitized(syncNotice),
-            extras: older.extras.merging(newer.extras) { _, n in n }   // union; newer wins per key
+            extras: TaskLimit.mergeExtras(older.extras, newer.extras)
         )
     }
 
@@ -402,7 +435,7 @@ enum BuddyMerge {
     /// (lowercase id) keeps its slot, iPhone-minted (uppercase id) overflows first, last-first
     /// within a device. Deterministic on the SAME merged input → both devices converge.
     /// Byte-parallel to the Mac's `clampActive`.
-    static func clampActive(_ items: [BuddyTask]) -> (kept: [BuddyTask], overflow: [BuddyTask]) {
+    static func clampActive(_ items: [BuddyTask], limit: Int = 6) -> (kept: [BuddyTask], overflow: [BuddyTask]) {
         var seenTitles = Set<String>()
         var activeIdx = [Int]()
         var dropDup = Set<Int>()
@@ -414,8 +447,8 @@ enum BuddyMerge {
             activeIdx.append(i)
         }
         var overflowSet = Set<Int>()
-        if activeIdx.count > BuddyStore.hardCap {
-            var excess = activeIdx.count - BuddyStore.hardCap
+        if activeIdx.count > limit {
+            var excess = activeIdx.count - limit
             // iPhone-origin last-first, then (defensively) Mac-origin last-first.
             let ios = activeIdx.filter { idIsIos(items[$0].id) }.reversed()
             let mac = activeIdx.filter { !idIsIos(items[$0].id) }.reversed()
