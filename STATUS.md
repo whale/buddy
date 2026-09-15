@@ -1,5 +1,21 @@
 # Buddy — Status & Handoff
 
+## Local follow-up — unavailable lower limits (not released)
+
+User replaced 0.4.39's automatic overflow-confirmation design: lower choices must
+be dimmed until the active list fits. Implemented on `codex/task-limit-availability`.
+With five active tasks, 3/4 are unavailable; hover/focus/tap explains exact removal
+count. User completes or manually moves tasks first. Mutation guards on both
+platforms reject over-cap selection; changing this preference never relocates tasks.
+Existing concurrent-sync overflow preservation stays intact for lossless merging.
+
+Checks: Mac settings 16/16, merge 3/3, cross-build 3/3, live sync 4/4 and smoke 4/4
+pass. iOS 138 unit tests (5 local-backend skips) + new interaction test pass; small
+phone three-theme interaction pass also succeeds (retry after simulator boot busy). Skeptical source review found no blocking issue.
+Mac controls inspected at 452×900 in all themes and 452×650; iPhone native test
+screenshots inspected with the explanation visible on iPhone 17 Pro and SE. No new release uploaded yet.
+
+
 ## Release checkpoint — 2026-09-16 — 0.4.39
 
 User explicitly authorized shipping to all users. Feature PR #163 merged.

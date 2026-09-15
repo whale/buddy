@@ -44,7 +44,7 @@ Use **Report a bug…** in the menu-bar icon's menu — it captures a screenshot
 
 - **Morning** — a calm screen asks for up to **3** things. Press Enter between them.
 - **A task's life** — hover a task and click the **✓** to complete it; click the task's **text** to edit it (Enter saves, Tab hops to the next task). Done tasks celebrate with confetti, then slide up to the top as **"Donezo."** rows (and also file themselves under **Calendar → Done → Today**). Hover any done row for the **↩ undo** to bring it back.
-- **List size** — choose **3–6 active tasks** in Settings, synced between updated Mac and iPhone apps. Completed tasks do not count. Reducing a full list asks before moving the extra tasks to Future.
+- **List size** — choose **3–6 active tasks** in Settings, synced between updated Mac and iPhone apps. Completed tasks do not count. Limits below your current active-task count are unavailable. Hover, focus, or tap one to see how many tasks to complete or move out of Today first. Changing the limit never moves tasks for you.
 - **The gentle nudge** — text turns red one task below your limit; the drawer turns red at the limit. The default remains six.
 - **Automatic Morning (Mac only)** — turn it off in Settings without disabling manual Morning from the menu bar. This preference stays on that Mac.
 - **Pin it** — the pin icon keeps the drawer open so it doesn't tuck away.

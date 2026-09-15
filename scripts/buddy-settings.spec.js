@@ -85,23 +85,26 @@ for (const previousDay of [false, true]) for (const done of [false, true]) {
   });
 }
 
-test('reducing requires confirmation, preserves focused work and survives a stale peer', async ({ page }) => {
+test('lower limits stay unavailable until the active list fits, without moving tasks', async ({ page }) => {
   await open(page);
   await page.evaluate(()=>{
-    const b=window.__buddy; b.suppressSave(); b.state.pinned=true;
-    b.state.items=Array.from({length:6},(_,i)=>({id:'x'+i,text:'Task '+i,state:i===5?'focused':'neutral',v:1}));
-    document.querySelector('#morning').classList.add('hidden');
-    b.openDrawer();b.openSettings();
+    const b=window.__buddy;b.suppressSave();b.state.pinned=true;
+    b.state.items=Array.from({length:5},(_,i)=>({id:'x'+i,text:'Task '+i,state:'neutral',v:1}));
+    document.querySelector('#morning').classList.add('hidden');b.render();b.openDrawer();b.openSettings();
   });
-  await page.getByRole('button',{name:'3 active tasks',exact:true}).click();
-  await expect(page.locator('#taskLimitConfirm')).toBeVisible();
-  expect(await page.evaluate(()=>window.__buddy.activeCount())).toBe(6);
-  await page.getByRole('button',{name:'Cancel',exact:true}).click();
-  expect(await page.evaluate(()=>window.__buddy.taskLimit())).toBe(6);
-  await page.getByRole('button',{name:'3 active tasks',exact:true}).click();
-  await page.getByRole('button',{name:'Move to Future',exact:true}).click();
-  const r=await page.evaluate(()=>({limit:window.__buddy.taskLimit(),ids:window.__buddy.state.items.map(i=>i.id),future:window.__buddy.state.deferred.length}));
-  expect(r).toEqual({limit:3,ids:['x0','x1','x5'],future:3});
+  const three=page.getByRole('button',{name:'3 active tasks',exact:true});
+  const four=page.getByRole('button',{name:'4 active tasks',exact:true});
+  await expect(three).toHaveAttribute('aria-disabled','true');
+  await expect(four).toHaveAttribute('aria-disabled','true');
+  await three.hover();
+  await expect(page.locator('#taskLimitStatus')).toHaveText('Complete or move 2 tasks out of Today to choose 3.');
+  await three.click({force:true});
+  expect(await page.evaluate(()=>({limit:__buddy.taskLimit(),active:__buddy.activeCount(),future:__buddy.state.deferred.length}))).toEqual({limit:6,active:5,future:0});
+  expect(await page.evaluate(()=>__buddy.commitTaskLimit(3,__buddy.activeSignature()))).toBe(false);
+  await page.evaluate(()=>{const b=__buddy;b.state.items[3].state='done';b.state.items[4].state='done';b.render();});
+  await expect(three).toHaveAttribute('aria-disabled','false');
+  await three.click();
+  expect(await page.evaluate(()=>({limit:__buddy.taskLimit(),items:__buddy.state.items.length,future:__buddy.state.deferred.length}))).toEqual({limit:3,items:5,future:0});
 });
 
 test('malformed browser preferences can be repaired by an explicit switch change', async ({ page }) => {

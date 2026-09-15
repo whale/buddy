@@ -14,10 +14,7 @@ struct SettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var reducedMotion
 
     @State private var celebrate: Double = 100
-    @State private var pendingLimit = 6
-    @State private var pendingSignature = ""
-    @State private var pendingTasks: [String] = []
-    @State private var showLimitConfirmation = false
+    @State private var explainedLimit: Int?
     @State private var limitStatus = ""
 
     // Sync section state
@@ -50,21 +47,27 @@ struct SettingsView: View {
                                 ForEach(3...6, id: \.self) { value in
                                     Button { selectLimit(value) } label: {
                                         Text("\(value)").font(.geist(16, .medium))
-                                            .foregroundStyle(store.taskLimit == value ? theme.selInk : theme.ink)
+                                            .foregroundStyle(store.activeCount > value ? theme.sheetFaint : (store.taskLimit == value ? theme.selInk : theme.ink))
                                             .frame(maxWidth: .infinity, minHeight: 44)
                                             .background(store.taskLimit == value ? theme.selBg : Color.clear,
                                                         in: RoundedRectangle(cornerRadius: 12))
                                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.line, lineWidth: 1))
                                     }
                                     .buttonStyle(.plain)
+                                    .opacity(store.activeCount > value ? 0.5 : 1)
+                                    .help(limitReason(value))
+                                    .accessibilityValue(store.activeCount > value ? "Unavailable" : "")
+                                    .accessibilityHint(limitReason(value))
                                     .accessibilityLabel("\(value) active tasks")
                                     .accessibilityAddTraits(store.taskLimit == value ? .isSelected : [])
                                 }
                             }.padding(.top, 14)
                             Text("Completed tasks don't count. Syncs with your Mac.")
                                 .font(.geist(14, .regular)).foregroundStyle(theme.sheetFaint).padding(.top, 10)
-                            if !limitStatus.isEmpty {
-                                Text(limitStatus).font(.geist(14, .regular)).foregroundStyle(theme.ink).padding(.top, 10)
+                            if !displayedLimitStatus.isEmpty {
+                                Text(displayedLimitStatus).font(.geist(14, .regular)).foregroundStyle(theme.ink).padding(10)
+                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.line, lineWidth: 1))
+                                    .padding(.top, 10)
                             }
                         }
                         Rectangle().fill(theme.setHair).frame(height: 1)
@@ -157,26 +160,24 @@ struct SettingsView: View {
             celebrate = Double(store.settings.celebrate)
             if let c = sync?.currentConfig { fURL = c.backendUrl; fAnon = c.anonKey; fKey = c.syncKey }
         }
-        .alert("Move \(pendingTasks.count) tasks to Future?", isPresented: $showLimitConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Move to Future") { applyLimit() }
-        } message: {
-            Text("Your list will hold up to \(pendingLimit) active tasks. Nothing will be deleted.\n\n" + pendingTasks.joined(separator: "\n"))
-        }
         .fullScreenCover(isPresented: $showScanner) {
             QRScannerView(onScan: { applyScanned($0) }, onCancel: { showScanner = false })
         }
     }
 
+    private func limitReason(_ value: Int) -> String {
+        let count = max(0, store.activeCount - value)
+        return count > 0 ? "Complete or move \(count) task\(count == 1 ? "" : "s") out of Today to choose \(value)." : ""
+    }
+    private var displayedLimitStatus: String {
+        if let value = explainedLimit { return limitReason(value) }
+        return limitStatus
+    }
     private func selectLimit(_ value: Int) {
         limitStatus = ""
-        pendingLimit = value
-        pendingSignature = store.activeSignature
-        pendingTasks = store.limitOverflow(value).map { $0.text }
-        if pendingTasks.isEmpty { applyLimit() } else { showLimitConfirmation = true }
-    }
-    private func applyLimit() {
-        if !store.changeTaskLimit(pendingLimit, expectedSignature: pendingSignature) {
+        if store.activeCount > value { explainedLimit = value; return }
+        explainedLimit = nil
+        if !store.changeTaskLimit(value, expectedSignature: store.activeSignature) {
             limitStatus = "Your list changed or a task is still being edited. Choose the limit again."
         }
     }

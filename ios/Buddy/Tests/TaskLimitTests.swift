@@ -109,22 +109,23 @@ final class TaskLimitTests: XCTestCase {
         }
     }
 
-    func testLimitConfirmationRejectsStaleListAndRaisingDoesNotRestoreFuture() {
+    func testLimitCannotChangeUntilTasksFitAndNeverMovesThem() {
         let s = BuddyStore()
         s.extras.removeValue(forKey:"taskLimit")
-        s.today = TodayState(date:BuddyStore.localDate(),items:(0..<6).map { item("x\($0)","Task \($0)") },morningDone:true)
+        s.today = TodayState(date:BuddyStore.localDate(),items:(0..<5).map { item("x\($0)","Task \($0)") },morningDone:true)
         s.deferred = []
+        for limit in [3,4] {
+            XCTAssertFalse(s.changeTaskLimit(limit,expectedSignature:s.activeSignature))
+            XCTAssertEqual(s.taskLimit,6)
+            XCTAssertEqual(s.activeCount,5)
+            XCTAssertTrue(s.deferred.isEmpty)
+        }
         let stale = s.activeSignature
-        s.today.items[5].text = "Changed title"
+        _ = s.complete(s.today.items[3]); _ = s.complete(s.today.items[4])
         XCTAssertFalse(s.changeTaskLimit(3,expectedSignature:stale))
-        XCTAssertEqual(s.taskLimit,6)
-        s.today.items[5].state = .focused
         XCTAssertTrue(s.changeTaskLimit(3,expectedSignature:s.activeSignature))
-        XCTAssertEqual(s.today.items.map { $0.id },["x0","x1","x5"])
-        XCTAssertEqual(s.deferred.count,3)
-        XCTAssertTrue(s.changeTaskLimit(6,expectedSignature:s.activeSignature))
+        XCTAssertEqual(s.today.items.count,5)
         XCTAssertEqual(s.activeCount,3)
-        XCTAssertEqual(s.deferred.count,3)
+        XCTAssertTrue(s.deferred.isEmpty)
     }
-
 }

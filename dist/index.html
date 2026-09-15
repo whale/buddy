@@ -363,11 +363,14 @@
     #morning.morning-leaving{ transition: opacity .2s ease; transform:none; }   /* fade only, no shrink */
     @keyframes rm-fade{ from{opacity:0;} to{opacity:1;} }
   }
-  .limit-choice,.limit-action { min-height:44px; border:1px solid var(--line); border-radius:12px; color:var(--ink); background:transparent; padding:8px 12px; }
+  .limit-choice { min-height:44px; border:1px solid var(--line); border-radius:12px; color:var(--ink); background:transparent; padding:8px 12px; }
   .limit-choice { flex:1; font-size:16px; }
   .limit-choice[aria-pressed="true"] { background:var(--sel-bg); color:var(--sel-ink); border-color:transparent; }
-  .limit-choice:hover,.limit-action:hover { box-shadow:inset 0 0 0 999px rgba(0,0,0,.08); }
-  .limit-choice:focus-visible,.limit-action:focus-visible { outline:2px solid var(--ink); outline-offset:3px; }
+  .limit-choice:hover { box-shadow:inset 0 0 0 999px rgba(0,0,0,.08); }
+  .limit-choice[aria-disabled="true"] { color:var(--ink-dim); opacity:.5; cursor:not-allowed; }
+  .limit-choice[aria-disabled="true"]:hover { box-shadow:none; }
+  .limit-tip { padding:10px 12px; border:1px solid var(--line); border-radius:10px; line-height:1.4; }
+  .limit-choice:focus-visible { outline:2px solid var(--ink); outline-offset:3px; }
 </style>
 </head>
 <body class="antialiased select-none text-black">
@@ -503,15 +506,6 @@
                 <button type="button" data-limit="6" aria-label="6 active tasks" aria-pressed="false" class="limit-choice">6</button>
               </div>
               <p class="mt-2 text-[14px] leading-snug" style="color:var(--ink-dim)">Completed tasks don't count. Syncs with your iPhone.</p>
-              <div id="taskLimitConfirm" class="hidden" style="margin-top:16px;color:var(--ink)" role="group" aria-labelledby="taskLimitQuestion">
-                <p id="taskLimitQuestion" class="font-medium"></p>
-                <p id="taskLimitExplanation" class="mt-2 text-[14px]"></p>
-                <ul id="taskLimitPreview" style="padding-left:20px;margin:12px 0;font-size:14px;overflow-wrap:anywhere;list-style:disc"></ul>
-                <div style="display:flex;gap:8px;flex-wrap:wrap">
-                  <button id="taskLimitCancel" class="limit-action">Cancel</button>
-                  <button id="taskLimitAccept" class="limit-action">Move to Future</button>
-                </div>
-              </div>
               <p id="taskLimitStatus" role="status" class="mt-2 text-[14px]" style="color:var(--ink)"></p>
             </div>
             <!-- Celebrate -->
@@ -845,39 +839,46 @@ function parkLimitOverflow(items){
 }
 function enforceTaskLimit(){ parkLimitOverflow(limitOverflow(taskLimit())); }
 function activeSignature(){ return canonicalJSON(state.items.filter(i=>i.state!=='done').map(i=>({id:i.id,text:i.text,state:i.state,v:i.v||1}))); }
-let pendingTaskLimit=null;
+let explainedTaskLimit=null;
+function taskLimitReason(value){
+  const count=Math.max(0,activeCount()-value);
+  return count ? 'Complete or move '+count+' task'+(count===1?'':'s')+' out of Today to choose '+value+'.' : '';
+}
+function explainTaskLimit(value){
+  explainedTaskLimit=value; renderTaskLimit();
+}
 function requestTaskLimit(value){
-  if(![3,4,5,6].includes(value)||editingActive()) return;
-  const overflow=limitOverflow(value);
-  if(!overflow.length){ commitTaskLimit(value,activeSignature()); return; }
-  pendingTaskLimit={value,signature:activeSignature(),overflow}; renderTaskLimit();
+  if(![3,4,5,6].includes(value)) return;
+  if(activeCount()>value){ explainTaskLimit(value); return; }
+  commitTaskLimit(value,activeSignature());
 }
 function commitTaskLimit(value,signature){
+  if(![3,4,5,6].includes(value)||activeCount()>value) { explainTaskLimit(value); return false; }
   if(editingActive()||signature!==activeSignature()){
-    pendingTaskLimit=null; renderTaskLimit();
-    $('#taskLimitStatus').textContent='Your list changed. Choose the limit again to review the tasks.'; return false;
+    renderTaskLimit();
+    $('#taskLimitStatus').textContent='Your list changed or a task is still being edited. Choose the limit again.'; return false;
   }
   const current=normalizeTaskLimit(state.extras.taskLimit);
   if(current.v>=Number.MAX_SAFE_INTEGER-1) return false;
   let writer=lsGet('buddy.preferenceWriter');
   if(!writer || !/^[a-z0-9-]{1,64}$/.test(writer)){ writer=nid().toLowerCase(); localStorage.setItem('buddy.preferenceWriter',writer); }
-  const overflow=limitOverflow(value);
   state.extras.taskLimit={value,v:current.v+1,writer};
-  parkLimitOverflow(overflow); pendingTaskLimit=null;
+  explainedTaskLimit=null;
   save(); render(); renderTaskLimit(); return true;
 }
 function renderTaskLimit(){
   const wrap=$('#taskLimitChoices'); if(!wrap) return;
-  wrap.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.limit===taskLimit())));
-  const box=$('#taskLimitConfirm'); box.classList.toggle('hidden',!pendingTaskLimit);
-  $('#taskLimitStatus').textContent='';
-  if(pendingTaskLimit){
-    const {value,overflow}=pendingTaskLimit;
-    $('#taskLimitQuestion').textContent='Move '+overflow.length+' task'+(overflow.length===1?'':'s')+' to Future?';
-    $('#taskLimitExplanation').textContent='Your list will hold up to '+value+' active tasks. Nothing will be deleted.';
-    const list=$('#taskLimitPreview'); list.replaceChildren();
-    overflow.forEach(it=>{ const li=document.createElement('li'); li.textContent=it.text; list.appendChild(li); });
-  }
+  wrap.querySelectorAll('button').forEach(b=>{
+    const value=+b.dataset.limit, reason=taskLimitReason(value);
+    b.setAttribute('aria-pressed',String(value===taskLimit()));
+    // Keep unavailable options focusable so keyboard users can discover why.
+    b.setAttribute('aria-disabled',String(!!reason));
+    b.setAttribute('aria-description',reason);
+    if(reason) b.setAttribute('aria-describedby','taskLimitStatus'); else b.removeAttribute('aria-describedby');
+  });
+  const status=$('#taskLimitStatus'), reason=explainedTaskLimit===null?'':taskLimitReason(explainedTaskLimit);
+  status.textContent=reason;
+  status.classList.toggle('limit-tip',!!reason);
 }
 
 const ICON_RIGHT = '1.25rem';   // universal right padding: row action icons align to the sheet ✕
@@ -4100,7 +4101,7 @@ function openSettings(){
   renderSyncUI();   // reflect the current pairing state (setup / pairing / linked)
 }
 function closeSettings(){
-  settingsOpen=false; pendingTaskLimit=null;
+  settingsOpen=false; explainedTaskLimit=null;
   settingsSheet.classList.add('closing');
   settingsSheet.setAttribute('data-open','false');
   settingsSheet.setAttribute('aria-hidden','true');
@@ -4109,8 +4110,12 @@ function closeSettings(){
   syncChrome();
 }
 $('#taskLimitChoices').addEventListener('click',e=>{ const b=e.target.closest('button[data-limit]'); if(b) requestTaskLimit(+b.dataset.limit); });
-$('#taskLimitCancel').addEventListener('click',()=>{ pendingTaskLimit=null; renderTaskLimit(); });
-$('#taskLimitAccept').addEventListener('click',()=>{ if(pendingTaskLimit) commitTaskLimit(pendingTaskLimit.value,pendingTaskLimit.signature); });
+for(const event of ['mouseover','focusin']) $('#taskLimitChoices').addEventListener(event,e=>{
+  const b=e.target.closest('button[data-limit]'); if(b) explainTaskLimit(+b.dataset.limit);
+});
+$('#taskLimitChoices').addEventListener('keydown',e=>{
+  if(e.key==='Escape'){ explainedTaskLimit=null; renderTaskLimit(); e.stopPropagation(); }
+});
 gearBtn.addEventListener('click', e=>{ e.stopPropagation();
   if(settingsOpen){ closeSettings(); return; }
   if(state.histOpen){ state.histOpen=false; render(); }   // calendar & settings are mutually exclusive
