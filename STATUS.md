@@ -1,5 +1,28 @@
 # Buddy — Status & Handoff
 
+## Release checkpoint — 2026-09-16 — iOS 0.4.40 (46), Mac pending
+
+- User requested a new release with the single OK button on the left, plus iOS visuals.
+- Commit `c283dab`, draft PR https://github.com/whale/buddy/pull/164.
+- iOS **0.4.40 (46)** archive/upload succeeded; App Store Connect confirms VALID,
+  internal IN_BETA_TESTING, external WAITING_FOR_BETA_REVIEW as of 11:05 Rome.
+  Assigned to Friends through the existing fastlane lane. Do not claim external
+  testers can update until Apple approves. Hosted config restored cleanly.
+- Mac remains **0.4.39**. PR is intentionally draft, not merged (main auto-releases).
+  Native QA launch was blocked by computer-use safety review pending explicit
+  user approval to launch “Buddy Settings QA”. Asynchronous approval question is
+  outstanding. Do not bypass it through shell/another launcher.
+- User was shown the corrected iPhone screenshot before committing. Native iOS
+  screenshots inspected in all 3 themes on iPhone 17 Pro and SE; largest text
+  scrolls while left OK stays visible. Final 2-test dialog suite passes on both.
+- Logs/results/screenshots: `/private/tmp/buddy-ok-release/`. TestFlight log and
+  Apple status are `testflight.log` and `apple-status.log`; final test bundles are
+  `ios-approved.xcresult` and `ios-small-approved.xcresult`.
+- Next: after explicit launch approval, verify Mac native centering, OK/Escape
+  restores narrow drawer without click interception, and Morning handoff. Then
+  mark PR ready/merge, wait for signed/notarized 0.4.40 Mac workflow and verify
+  GitHub tag + updater manifest. User also requested relaunch of the new release.
+
 ## Local follow-up — centered limit explanation (release requested)
 
 The latest requested design is an explanatory Buddy modal, not task selection or
@@ -17,7 +40,7 @@ Dynamic Type. Inspected screenshots in all three themes; text scrolls with OK
 fixed below it at large sizes. Mac settings 18/18, smoke 4/4, merge 3/3,
 cross-build 3/3, live sync 4/4 and Rust check pass. Read-only sync doctor still
 flags the already-known stale DEV bucket versus installed app, not a new regression.
-iOS 0.4.40 release preparation continues independently. Release logs and screenshot results:
+iOS 0.4.40 (46) upload completed; see checkpoint above. Release logs and screenshot results:
 `/private/tmp/buddy-ok-release`.
 
 ## Earlier local follow-up — unavailable lower limits (not released)
