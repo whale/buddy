@@ -1,5 +1,105 @@
 # Buddy — Status & Handoff
 
+## Final cleanup — 2026-09-16
+
+Removed the duplicate inline lower-limit explanation on both platforms. Mac keeps
+a native hover tooltip and accessibility description; tapping opens the single
+centered modal. OK uses a solid primary style; focus ring appears only after Tab.
+Native Mac launch now authorized and successful: centered modal inspected, OK and
+Escape restore the narrow settings drawer. Native final appearance inspected.
+Mac browser 1280×800 and 452×800, all three themes inspected; iPhone 17 Pro and SE
+settings/modal screenshots inspected, no duplicate panel. Updated Mac tests 25/25
+and iOS dialog suites 2/2 on both devices passed. Earlier full-suite, live-sync and
+skeptical review results still apply. Final cleanup review: n/a, trivial UI removal
+and focus styling, no task/sync mutation changes.
+iOS build 48 upload started; Mac PR164 ready for release. Do not infer publication
+until GitHub and Apple confirm it. Evidence: /private/tmp/buddy-final-release/.
+
+
+## Latest delivery — 2026-09-16 — iOS 0.4.40 (47) live, Mac blocked
+
+User explicitly requested shipping everything again. Latest copy is now uploaded
+as iOS **0.4.40 (47)**. Fastlane and the wrapper completed successfully. Apple
+direct API confirms VALID, internal IN_BETA_TESTING, external IN_BETA_TESTING;
+beta review APPROVED. Both tester audiences can update through TestFlight.
+Logs: `/private/tmp/buddy-final-release/testflight.log`, `apple-final.log`.
+
+Mac is still 0.4.39. Latest QA bundle rebuilt; settings 18/18, smoke 4/4, merge
+3/3, cross-build 3/3 and live sync 4/4 re-passed on current source. Native launch
+remains blocked pending explicit approval of “Buddy Settings QA”; an asynchronous
+question was sent again. Do not bypass the previous safety rejection. PR #164
+stays draft, not merged. No Mac release or installed-app replacement performed.
+
+
+## Copy follow-up — not released
+
+Both dialogs now say “Your list needs room” and explain: “You have 5 active tasks.
+To lower your limit to 3, first complete 2 tasks or move them to Future.” Counts
+and singular/plural are dynamic; the entire description stays regular weight.
+This replaces the copy in uploaded iOS build 46; a subsequent build is needed.
+Mac native-launch approval remains outstanding. Copy tests/visual artifacts:
+`/private/tmp/buddy-copy-*`.
+
+
+## Release checkpoint — 2026-09-16 — iOS 0.4.40 (46), Mac pending
+
+- User requested a new release with the single OK button on the left, plus iOS visuals.
+- Commit `c283dab`, draft PR https://github.com/whale/buddy/pull/164.
+- iOS **0.4.40 (46)** archive/upload succeeded; App Store Connect confirms VALID,
+  internal IN_BETA_TESTING, external WAITING_FOR_BETA_REVIEW as of 11:05 Rome.
+  Assigned to Friends through the existing fastlane lane. Do not claim external
+  testers can update until Apple approves. Hosted config restored cleanly.
+- Mac remains **0.4.39**. PR is intentionally draft, not merged (main auto-releases).
+  Native QA launch was blocked by computer-use safety review pending explicit
+  user approval to launch “Buddy Settings QA”. Asynchronous approval question is
+  outstanding. Do not bypass it through shell/another launcher.
+- User was shown the corrected iPhone screenshot before committing. Native iOS
+  screenshots inspected in all 3 themes on iPhone 17 Pro and SE; largest text
+  scrolls while left OK stays visible. Final 2-test dialog suite passes on both.
+- Logs/results/screenshots: `/private/tmp/buddy-ok-release/`. TestFlight log and
+  Apple status are `testflight.log` and `apple-status.log`; final test bundles are
+  `ios-approved.xcresult` and `ios-small-approved.xcresult`.
+- Next: after explicit launch approval, verify Mac native centering, OK/Escape
+  restores narrow drawer without click interception, and Morning handoff. Then
+  mark PR ready/merge, wait for signed/notarized 0.4.40 Mac workflow and verify
+  GitHub tag + updater manifest. User also requested relaunch of the new release.
+
+## Local follow-up — centered limit explanation (release requested)
+
+The latest requested design is an explanatory Buddy modal, not task selection or
+move confirmation. Single **OK** aligned left, no Cancel. Mac uses a top-layer
+HTML dialog and serialized full-screen native sizing; Morning dismisses it before
+opening. iOS presents the matching full-screen overlay with a compact, measured
+card and scrollable content at large Dynamic Type. Neither action mutates tasks or
+the limit. Both platforms keep unavailable options dimmed.
+
+Native Mac QA launch is waiting on explicit user approval after the computer-use
+safety gate rejected running the local test bundle. Do not claim native centering
+or release verification until this is observed. iOS 138 unit tests (5 local-backend skips) and all 10 existing interaction tests
+passed; final dialog tests pass on iPhone 17 Pro + SE at default and largest
+Dynamic Type. Inspected screenshots in all three themes; text scrolls with OK
+fixed below it at large sizes. Mac settings 18/18, smoke 4/4, merge 3/3,
+cross-build 3/3, live sync 4/4 and Rust check pass. Read-only sync doctor still
+flags the already-known stale DEV bucket versus installed app, not a new regression.
+iOS 0.4.40 (46) upload completed; see checkpoint above. Release logs and screenshot results:
+`/private/tmp/buddy-ok-release`.
+
+## Earlier local follow-up — unavailable lower limits (not released)
+
+User replaced 0.4.39's automatic overflow-confirmation design: lower choices must
+be dimmed until the active list fits. Implemented on `codex/task-limit-availability`.
+With five active tasks, 3/4 are unavailable; hover/focus/tap explains exact removal
+count. User completes or manually moves tasks first. Mutation guards on both
+platforms reject over-cap selection; changing this preference never relocates tasks.
+Existing concurrent-sync overflow preservation stays intact for lossless merging.
+
+Checks: Mac settings 16/16, merge 3/3, cross-build 3/3, live sync 4/4 and smoke 4/4
+pass. iOS 138 unit tests (5 local-backend skips) + new interaction test pass; small
+phone three-theme interaction pass also succeeds (retry after simulator boot busy). Skeptical source review found no blocking issue.
+Mac controls inspected at 452×900 in all themes and 452×650; iPhone native test
+screenshots inspected with the explanation visible on iPhone 17 Pro and SE. No new release uploaded yet.
+
+
 ## Release checkpoint — 2026-09-16 — 0.4.39
 
 User explicitly authorized shipping to all users. Feature PR #163 merged.

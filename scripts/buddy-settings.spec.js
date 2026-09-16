@@ -85,23 +85,41 @@ for (const previousDay of [false, true]) for (const done of [false, true]) {
   });
 }
 
-test('reducing requires confirmation, preserves focused work and survives a stale peer', async ({ page }) => {
+test('lower limits stay unavailable until the active list fits, without moving tasks', async ({ page }) => {
   await open(page);
   await page.evaluate(()=>{
-    const b=window.__buddy; b.suppressSave(); b.state.pinned=true;
-    b.state.items=Array.from({length:6},(_,i)=>({id:'x'+i,text:'Task '+i,state:i===5?'focused':'neutral',v:1}));
-    document.querySelector('#morning').classList.add('hidden');
-    b.openDrawer();b.openSettings();
+    const b=window.__buddy;b.suppressSave();b.state.pinned=true;
+    b.state.items=Array.from({length:5},(_,i)=>({id:'x'+i,text:'Task '+i,state:'neutral',v:1}));
+    document.querySelector('#morning').classList.add('hidden');b.render();b.openDrawer();b.openSettings();
   });
-  await page.getByRole('button',{name:'3 active tasks',exact:true}).click();
-  await expect(page.locator('#taskLimitConfirm')).toBeVisible();
-  expect(await page.evaluate(()=>window.__buddy.activeCount())).toBe(6);
-  await page.getByRole('button',{name:'Cancel',exact:true}).click();
-  expect(await page.evaluate(()=>window.__buddy.taskLimit())).toBe(6);
-  await page.getByRole('button',{name:'3 active tasks',exact:true}).click();
-  await page.getByRole('button',{name:'Move to Future',exact:true}).click();
-  const r=await page.evaluate(()=>({limit:window.__buddy.taskLimit(),ids:window.__buddy.state.items.map(i=>i.id),future:window.__buddy.state.deferred.length}));
-  expect(r).toEqual({limit:3,ids:['x0','x1','x5'],future:3});
+  const three=page.getByRole('button',{name:'3 active tasks',exact:true});
+  const four=page.getByRole('button',{name:'4 active tasks',exact:true});
+  await expect(three).toHaveAttribute('aria-disabled','true');
+  await expect(four).toHaveAttribute('aria-disabled','true');
+  await three.hover();
+  await expect(page.locator('#taskLimitStatus')).toBeEmpty();
+  await expect(three).toHaveAttribute('title','Complete or move 2 tasks out of Today to choose 3.');
+  await three.click({force:true});
+  expect(await page.evaluate(()=>({limit:__buddy.taskLimit(),active:__buddy.activeCount(),future:__buddy.state.deferred.length}))).toEqual({limit:6,active:5,future:0});
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.locator('#taskLimitExplanation')).toHaveText('You have 5 active tasks. To lower your limit to 3, first complete 2 tasks or move them to Future.');
+  await expect(page.getByRole('dialog').getByRole('button')).toHaveCount(1);
+  await expect(page.getByRole('button',{name:'OK',exact:true})).toBeFocused();
+  await expect(page.locator('#taskLimitOK')).toHaveCSS('outline-style','none');
+  await page.keyboard.press('Tab');
+  await expect(page.locator('#taskLimitDialog')).toHaveClass('keyboard-nav');
+  await page.getByRole('button',{name:'OK',exact:true}).click();
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(three).toBeFocused();
+  await expect(page.locator('#taskLimitStatus')).toBeEmpty();
+  await three.click({force:true});
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  expect(await page.evaluate(()=>__buddy.commitTaskLimit(3,__buddy.activeSignature()))).toBe(false);
+  await page.evaluate(()=>{const b=__buddy;b.state.items[3].state='done';b.state.items[4].state='done';b.render();});
+  await expect(three).toHaveAttribute('aria-disabled','false');
+  await three.click();
+  expect(await page.evaluate(()=>({limit:__buddy.taskLimit(),items:__buddy.state.items.length,future:__buddy.state.deferred.length}))).toEqual({limit:3,items:5,future:0});
 });
 
 test('malformed browser preferences can be repaired by an explicit switch change', async ({ page }) => {
@@ -138,4 +156,40 @@ test('optional browser shortcut ignores editable, composing and repeated keys', 
     return {edited,repeated,composed,closed:document.querySelector('#drawer').classList.contains('translate-x-full')};
   });
   expect(result).toEqual({edited:false,repeated:false,composed:false,closed:false});
+});
+
+test('dismissing a modal cannot leave a delayed full-width native window', async () => {
+  const vm=require('vm');
+  const source=fs.readFileSync(path.resolve(__dirname,'../dist/index.html'),'utf8');
+  const start=source.indexOf('let nativeFitQueue=');
+  const end=source.indexOf('// resting state when no morning is up:',start);
+  let release;
+  const delayed=new Promise(resolve=>{release=resolve;});
+  const sizes=[];
+  const dialog={open:true};
+  const context=vm.createContext({Promise,console,NATIVE:true,IS_MORNING_WINDOW:false,IS_CONFETTI_WINDOW:false,
+    MENUBAR:30,DRAWER_BOTTOM_GAP:12,DRAWERW:452,SLIVER:2,T:()=>{},$:()=>dialog,
+    window:{__TAURI__:{window:{
+      currentMonitor:async()=>({size:{width:1440,height:900},position:{x:0,y:0},scaleFactor:1}),
+      PhysicalSize:class {constructor(width,height){this.width=width;this.height=height;}},
+      PhysicalPosition:class {constructor(x,y){this.x=x;this.y=y;}},
+      getCurrentWindow:()=>({setSize:async size=>{sizes.push(size.width);if(sizes.length===1)await delayed;},setPosition:async()=>{}})
+    }}}
+  });
+  vm.runInContext(source.slice(start,end),context);
+  const opening=vm.runInContext("nativeFit('drawer')",context);
+  while(!sizes.length) await new Promise(resolve=>setTimeout(resolve,0));
+  dialog.open=false;
+  const closing=vm.runInContext("nativeFit('drawer')",context);
+  release();await Promise.all([opening,closing]);
+  expect(sizes).toEqual([1440,452]);
+});
+
+test('opening Morning dismisses the limit explanation first', async ({page})=>{
+  await open(page);
+  await page.evaluate(()=>{const b=__buddy;b.suppressSave();b.state.pinned=true;b.state.items=Array.from({length:5},(_,i)=>({id:'m'+i,text:'Task',state:'neutral',v:1}));document.querySelector('#morning').classList.add('hidden');b.render();b.openDrawer();b.openSettings();});
+  await page.getByRole('button',{name:'3 active tasks',exact:true}).click({force:true});
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.evaluate(()=>__buddy.showMorning());
+  await expect(page.getByRole('dialog')).not.toBeVisible();
 });

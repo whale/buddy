@@ -487,3 +487,15 @@ not an unfinished upload. Do not describe external iOS distribution as complete 
 All 10 iOS interaction tests and 138 unit tests (5 local-backend skips) pass in the
 full release run. Mac gates rerun successfully against published 0.4.38 baseline.
 Previously documented hands-on gaps were not retroactively marked verified.
+
+
+## 11. Superseding product decision — unavailable lower limits
+
+After 0.4.39 shipped, user requested a safer selection model: do not automatically
+move tasks on reduction. Disable/dim lower values until active count fits; explain
+why on hover, keyboard focus, or tap. With five active tasks, 3 needs two tasks
+completed/moved first, 4 needs one, and 5/6 remain available. Both mutation paths
+independently validate the live active count. Completed tasks do not count. This
+supersedes earlier confirmation/priority-retention behavior for local limit changes;
+existing lossless merge overflow rules are not removed. Implemented locally on
+`codex/task-limit-availability`; not part of published 0.4.39.

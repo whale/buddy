@@ -79,7 +79,7 @@ final class BuddyStore {
     }
     @discardableResult
     func changeTaskLimit(_ value: Int, expectedSignature: String) -> Bool {
-        guard (3...6).contains(value), !isEditing, activeSignature == expectedSignature else { return false }
+        guard (3...6).contains(value), activeCount <= value, !isEditing, activeSignature == expectedSignature else { return false }
         let current = TaskLimit.normalized(extras["taskLimit"])
         guard current.v < TaskLimit.maxRevision else { return false }
         let key = "buddy.preferenceWriter"
@@ -88,7 +88,6 @@ final class BuddyStore {
             writer = UUID().uuidString.lowercased(); UserDefaults.standard.set(writer, forKey: key)
         }
         extras["taskLimit"] = TaskLimit(value: value, v: current.v + 1, writer: writer).json
-        parkLimitOverflow(limitOverflow(value))
         scheduleSave(immediate: true)
         return true
     }

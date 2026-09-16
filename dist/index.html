@@ -363,11 +363,23 @@
     #morning.morning-leaving{ transition: opacity .2s ease; transform:none; }   /* fade only, no shrink */
     @keyframes rm-fade{ from{opacity:0;} to{opacity:1;} }
   }
-  .limit-choice,.limit-action { min-height:44px; border:1px solid var(--line); border-radius:12px; color:var(--ink); background:transparent; padding:8px 12px; }
+  .limit-choice { min-height:44px; border:1px solid var(--line); border-radius:12px; color:var(--ink); background:transparent; padding:8px 12px; }
   .limit-choice { flex:1; font-size:16px; }
   .limit-choice[aria-pressed="true"] { background:var(--sel-bg); color:var(--sel-ink); border-color:transparent; }
-  .limit-choice:hover,.limit-action:hover { box-shadow:inset 0 0 0 999px rgba(0,0,0,.08); }
-  .limit-choice:focus-visible,.limit-action:focus-visible { outline:2px solid var(--ink); outline-offset:3px; }
+  .limit-choice:hover { box-shadow:inset 0 0 0 999px rgba(0,0,0,.08); }
+  .limit-choice[aria-disabled="true"] { color:var(--ink-dim); opacity:.5; cursor:not-allowed; }
+  .limit-choice[aria-disabled="true"]:hover { box-shadow:none; }
+  #taskLimitDialog { box-sizing:border-box; width:min(420px, calc(100vw - 48px)); max-height:calc(100vh - 48px); margin:auto; padding:28px; border:0; border-radius:24px; background:var(--card); color:var(--ink); font-family:var(--font); box-shadow:0 8px 24px rgba(0,0,0,.08),0 24px 70px rgba(0,0,0,.16); }
+  #taskLimitDialog::backdrop { background:rgba(20,22,18,.22); }
+  #taskLimitDialog h2 { margin:0; font-size:24px; font-weight:550; line-height:1.2; letter-spacing:-.7px; }
+  #taskLimitDialog p { margin:14px 0 24px; font-size:15px; line-height:1.5; }
+  #taskLimitDialog .actions { display:flex; justify-content:flex-start; }
+  #taskLimitOK { min-width:120px; min-height:44px; padding:0 24px; border:0; border-radius:999px; background:var(--sel-bg); color:var(--sel-ink); font:500 15px var(--font); cursor:pointer; transition:background-color .15s ease; }
+  #taskLimitOK:hover { background:var(--cta-hover); }
+  #drawer:not(.lvl1):not(.lvl2) #taskLimitOK:hover { background:oklch(from var(--sel-bg) calc(l + .2) c h); }
+  #taskLimitOK:focus { outline:none; }
+  #taskLimitDialog.keyboard-nav #taskLimitOK:focus-visible { outline:2px solid var(--ink); outline-offset:4px; }
+  .limit-choice:focus-visible { outline:2px solid var(--ink); outline-offset:3px; }
 </style>
 </head>
 <body class="antialiased select-none text-black">
@@ -408,6 +420,11 @@
 
 <!-- ============ DRAWER ============ -->
 <aside id="drawer" class="ease-d fixed top-0 right-0 z-50 h-screen w-[416px] translate-x-full flex flex-col items-end gap-2 p-2">
+  <dialog id="taskLimitDialog" aria-labelledby="taskLimitTitle" aria-describedby="taskLimitExplanation">
+    <h2 id="taskLimitTitle">Your list needs room</h2>
+    <p id="taskLimitExplanation"></p>
+    <div class="actions"><button id="taskLimitOK" autofocus>OK</button></div>
+  </dialog>
   <!-- Update banner: slides in above everything when a new version is ready -->
   <div id="updateBanner" class="bcard w-[400px] shrink-0 bg-white rounded-[24px] overflow-hidden hidden">
     <div class="flex items-center justify-between gap-3 px-6 py-4">
@@ -503,15 +520,6 @@
                 <button type="button" data-limit="6" aria-label="6 active tasks" aria-pressed="false" class="limit-choice">6</button>
               </div>
               <p class="mt-2 text-[14px] leading-snug" style="color:var(--ink-dim)">Completed tasks don't count. Syncs with your iPhone.</p>
-              <div id="taskLimitConfirm" class="hidden" style="margin-top:16px;color:var(--ink)" role="group" aria-labelledby="taskLimitQuestion">
-                <p id="taskLimitQuestion" class="font-medium"></p>
-                <p id="taskLimitExplanation" class="mt-2 text-[14px]"></p>
-                <ul id="taskLimitPreview" style="padding-left:20px;margin:12px 0;font-size:14px;overflow-wrap:anywhere;list-style:disc"></ul>
-                <div style="display:flex;gap:8px;flex-wrap:wrap">
-                  <button id="taskLimitCancel" class="limit-action">Cancel</button>
-                  <button id="taskLimitAccept" class="limit-action">Move to Future</button>
-                </div>
-              </div>
               <p id="taskLimitStatus" role="status" class="mt-2 text-[14px]" style="color:var(--ink)"></p>
             </div>
             <!-- Celebrate -->
@@ -845,38 +853,61 @@ function parkLimitOverflow(items){
 }
 function enforceTaskLimit(){ parkLimitOverflow(limitOverflow(taskLimit())); }
 function activeSignature(){ return canonicalJSON(state.items.filter(i=>i.state!=='done').map(i=>({id:i.id,text:i.text,state:i.state,v:i.v||1}))); }
-let pendingTaskLimit=null;
+let explainedTaskLimit=null;
+function taskLimitReason(value){
+  const count=Math.max(0,activeCount()-value);
+  return count ? 'Complete or move '+count+' task'+(count===1?'':'s')+' out of Today to choose '+value+'.' : '';
+}
+function showTaskLimitDialog(value){
+  explainedTaskLimit=value;
+  renderTaskLimit();
+  const dialog=$('#taskLimitDialog');
+  dialog.classList.remove('keyboard-nav');
+  if(!dialog.open) dialog.showModal();
+  clearTimeout(shrinkTimer);
+  if(NATIVE) nativeFit('drawer');
+}
+function dismissTaskLimitDialog(){
+  const dialog=$('#taskLimitDialog');
+  if(!dialog.open) return;
+  dialog.close();
+  if(NATIVE) nativeFit('drawer');
+}
 function requestTaskLimit(value){
-  if(![3,4,5,6].includes(value)||editingActive()) return;
-  const overflow=limitOverflow(value);
-  if(!overflow.length){ commitTaskLimit(value,activeSignature()); return; }
-  pendingTaskLimit={value,signature:activeSignature(),overflow}; renderTaskLimit();
+  if(![3,4,5,6].includes(value)) return;
+  if(activeCount()>value){ showTaskLimitDialog(value); return; }
+  commitTaskLimit(value,activeSignature());
 }
 function commitTaskLimit(value,signature){
+  if(![3,4,5,6].includes(value)||activeCount()>value) { return false; }
   if(editingActive()||signature!==activeSignature()){
-    pendingTaskLimit=null; renderTaskLimit();
-    $('#taskLimitStatus').textContent='Your list changed. Choose the limit again to review the tasks.'; return false;
+    renderTaskLimit();
+    $('#taskLimitStatus').textContent='Your list changed or a task is still being edited. Choose the limit again.'; return false;
   }
   const current=normalizeTaskLimit(state.extras.taskLimit);
   if(current.v>=Number.MAX_SAFE_INTEGER-1) return false;
   let writer=lsGet('buddy.preferenceWriter');
   if(!writer || !/^[a-z0-9-]{1,64}$/.test(writer)){ writer=nid().toLowerCase(); localStorage.setItem('buddy.preferenceWriter',writer); }
-  const overflow=limitOverflow(value);
   state.extras.taskLimit={value,v:current.v+1,writer};
-  parkLimitOverflow(overflow); pendingTaskLimit=null;
+  explainedTaskLimit=null;
   save(); render(); renderTaskLimit(); return true;
 }
 function renderTaskLimit(){
   const wrap=$('#taskLimitChoices'); if(!wrap) return;
-  wrap.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.limit===taskLimit())));
-  const box=$('#taskLimitConfirm'); box.classList.toggle('hidden',!pendingTaskLimit);
+  wrap.querySelectorAll('button').forEach(b=>{
+    const value=+b.dataset.limit, reason=taskLimitReason(value);
+    b.setAttribute('aria-pressed',String(value===taskLimit()));
+    // Keep unavailable options focusable so keyboard users can discover why.
+    b.setAttribute('aria-disabled',String(!!reason));
+    b.setAttribute('aria-description',reason);
+    if(reason) b.setAttribute('title',reason); else b.removeAttribute('title');
+  });
   $('#taskLimitStatus').textContent='';
-  if(pendingTaskLimit){
-    const {value,overflow}=pendingTaskLimit;
-    $('#taskLimitQuestion').textContent='Move '+overflow.length+' task'+(overflow.length===1?'':'s')+' to Future?';
-    $('#taskLimitExplanation').textContent='Your list will hold up to '+value+' active tasks. Nothing will be deleted.';
-    const list=$('#taskLimitPreview'); list.replaceChildren();
-    overflow.forEach(it=>{ const li=document.createElement('li'); li.textContent=it.text; list.appendChild(li); });
+  if(explainedTaskLimit!==null){
+    const active=activeCount(), count=Math.max(0,active-explainedTaskLimit);
+    $('#taskLimitExplanation').textContent=count
+      ? 'You have '+active+' active tasks. To lower your limit to '+explainedTaskLimit+', first complete '+count+' task'+(count===1?'':'s')+' or move '+(count===1?'it':'them')+' to Future.'
+      : 'Your tasks now fit. Close this message and choose a limit of '+explainedTaskLimit+'.';
   }
 }
 
@@ -2600,7 +2631,7 @@ function openDrawer(takeFocus=true){ if(morningUp()) return;
 // Bring Buddy to the front + make it key so its icons receive hover/clicks even
 // when it reveals over another app (otherwise the foreground app keeps the mouse).
 function nativeFocus(){ if(!NATIVE) return; try{ window.__TAURI__.window.getCurrentWindow().setFocus(); }catch(_){} }
-function closeDrawer(){ if(state.pinned || morningUp() || updateBannerHold) return; drawer.classList.add('translate-x-full');
+function closeDrawer(){ if($('#taskLimitDialog').open || state.pinned || morningUp() || updateBannerHold) return; drawer.classList.add('translate-x-full');
   // Let the drawer finish sliding out (.24s) BEFORE shrinking the window to the
   // sliver — otherwise the 2px window clips the panel and it vanishes abruptly.
   if(NATIVE){ clearTimeout(shrinkTimer); shrinkTimer=setTimeout(()=>nativeFit('sliver'), 300); } }
@@ -3759,6 +3790,7 @@ function morningTranslucent(){ if(!NATIVE) return; try{ window.__TAURI__.core.in
 async function showMorning(automatic=false){
   automatic=automatic===true;
   if(automatic && !localPreferences.autoMorning) return;
+  dismissTaskLimitDialog();
   T('showMorning');
   clearTimeout(shrinkTimer); clearTimeout(closeTimer); clearTimeout(openTimer);
   undoneAdded=false; undoneIds=[];
@@ -4100,7 +4132,8 @@ function openSettings(){
   renderSyncUI();   // reflect the current pairing state (setup / pairing / linked)
 }
 function closeSettings(){
-  settingsOpen=false; pendingTaskLimit=null;
+  dismissTaskLimitDialog();
+  settingsOpen=false; explainedTaskLimit=null;
   settingsSheet.classList.add('closing');
   settingsSheet.setAttribute('data-open','false');
   settingsSheet.setAttribute('aria-hidden','true');
@@ -4108,9 +4141,14 @@ function closeSettings(){
   eraseArmed=false;   // an armed erase must not survive the sheet closing (review finding 6)
   syncChrome();
 }
+$('#taskLimitOK').addEventListener('click',dismissTaskLimitDialog);
+$('#taskLimitDialog').addEventListener('cancel',e=>{ e.preventDefault(); dismissTaskLimitDialog(); });
+$('#taskLimitDialog').addEventListener('keydown',e=>{ if(e.key==='Tab') e.currentTarget.classList.add('keyboard-nav'); e.stopPropagation(); });
+$('#taskLimitDialog').addEventListener('pointerdown',e=>{ e.currentTarget.classList.remove('keyboard-nav'); });
 $('#taskLimitChoices').addEventListener('click',e=>{ const b=e.target.closest('button[data-limit]'); if(b) requestTaskLimit(+b.dataset.limit); });
-$('#taskLimitCancel').addEventListener('click',()=>{ pendingTaskLimit=null; renderTaskLimit(); });
-$('#taskLimitAccept').addEventListener('click',()=>{ if(pendingTaskLimit) commitTaskLimit(pendingTaskLimit.value,pendingTaskLimit.signature); });
+$('#taskLimitChoices').addEventListener('keydown',e=>{
+  if(e.key==='Escape'){ explainedTaskLimit=null; renderTaskLimit(); e.stopPropagation(); }
+});
 gearBtn.addEventListener('click', e=>{ e.stopPropagation();
   if(settingsOpen){ closeSettings(); return; }
   if(state.histOpen){ state.histOpen=false; render(); }   // calendar & settings are mutually exclusive
@@ -5759,7 +5797,13 @@ const DRAWERW=452; // revealed/pinned window width — wider than the 416 drawer
 // knows the usable screen area after the menu bar/Dock.
 const MENUBAR=30;
 const DRAWER_BOTTOM_GAP=12;
-async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
+// Serialize geometry updates so a dismissed modal cannot finish expanding later.
+let nativeFitQueue=Promise.resolve();
+function nativeFit(mode){
+  nativeFitQueue=nativeFitQueue.then(()=>applyNativeFit(mode));
+  return nativeFitQueue;
+}
+async function applyNativeFit(mode){   // 'full' | 'drawer' | 'sliver'
   T('nativeFit('+mode+')');
   if(!NATIVE) return;
   // The morning window sizes itself via fitMorningWindow ONLY. A stray drawer
@@ -5770,6 +5814,7 @@ async function nativeFit(mode){   // 'full' | 'drawer' | 'sliver'
     const W=window.__TAURI__.window, D=window.__TAURI__.dpi||W;
     const win=W.getCurrentWindow(), mon=await W.currentMonitor();
     if(!mon || !D.PhysicalSize || !D.PhysicalPosition) return;
+    if($('#taskLimitDialog').open) mode='full';
     const sz=mon.size, p=mon.position, sf=mon.scaleFactor;
     const top=Math.round(MENUBAR*sf);     // clear the menu bar
     if(mode==='full'){

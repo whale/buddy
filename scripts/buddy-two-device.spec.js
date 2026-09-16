@@ -268,7 +268,7 @@ test('pairing view ends on its own once the phone writes the bucket', async ({ b
   if (shots) { await mac.waitForTimeout(800); await mac.evaluate(() => document.getElementById('syncStatus').scrollIntoView({ block: 'center' })); await mac.waitForTimeout(400); await mac.screenshot({ path: `${shots}/pair-after.png` }); }
 });
 
-test('live task limit sync and offline edit survive reduction without losing tasks', async ({ browser }) => {
+test('live task limit sync and offline edit survive manual parking without losing tasks', async ({ browser }) => {
   test.setTimeout(120000);
   const cfg = readSecret();
   test.skip(!cfg || !cfg.url, 'no backend configuration');
@@ -284,7 +284,7 @@ test('live task limit sync and offline edit survive reduction without losing tas
     await expect.poll(async()=>{await sync(phone);return (await texts(phone)).length;},{timeout:20000}).toBe(6);
     await phone.context().setOffline(true);
     await phone.evaluate(()=>{const b=window.__buddy;const i=b.state.items.find(i=>i.id==='limit-live-5');i.text='Edited while offline';i.v++;b.state.savedAt=Date.now();b.flush();});
-    await mac.evaluate(()=>{const b=window.__buddy;b.commitTaskLimit(3,b.activeSignature());return b.syncNow('capacity-reduce');});
+    await mac.evaluate(()=>{const b=window.__buddy; const moved=b.state.items.splice(3); b.state.deferred.push(...moved.map(i=>({...i,wake:''}))); b.commitTaskLimit(3,b.activeSignature());return b.syncNow('capacity-reduce');});
     await settle(mac, 3500);
     await phone.context().setOffline(false);
     await expect.poll(async()=>{
