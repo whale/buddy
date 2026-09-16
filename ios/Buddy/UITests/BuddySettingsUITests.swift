@@ -10,8 +10,8 @@ final class BuddySettingsUITests: XCTestCase {
             XCTAssertTrue(three.waitForExistence(timeout: 5))
             XCTAssertEqual(three.value as? String, "Unavailable")
             three.tap()
-            XCTAssertTrue(app.staticTexts["Make room for a smaller list"].waitForExistence(timeout: 3))
-            XCTAssertTrue(app.staticTexts["You have \(4 + level) active tasks. Move \(level + 1) to Future, or complete \(level == 0 ? "it" : "them"), before choosing a limit of 3."].exists)
+            XCTAssertTrue(app.staticTexts["Your list needs room"].waitForExistence(timeout: 3))
+            XCTAssertTrue(app.staticTexts["You have \(4 + level) active tasks. To lower your limit to 3, first complete \(level + 1) task\(level == 0 ? "" : "s") or move \(level == 0 ? "it" : "them") to Future."].exists)
             XCTAssertEqual(app.buttons.matching(identifier: "taskLimitOK").count, 1)
             XCTAssertFalse(app.buttons["Cancel"].exists)
             XCTAssertTrue(app.alerts.firstMatch.exists)
@@ -21,7 +21,7 @@ final class BuddySettingsUITests: XCTestCase {
             shot.lifetime = .keepAlways
             add(shot)
             app.buttons["taskLimitOK"].tap()
-            XCTAssertFalse(app.staticTexts["Make room for a smaller list"].exists)
+            XCTAssertFalse(app.staticTexts["Your list needs room"].exists)
             XCTAssertTrue(app.buttons["6 active tasks"].isSelected)
             app.buttons["\(4 + level) active tasks"].tap()
             XCTAssertTrue(app.buttons["\(4 + level) active tasks"].isSelected)
@@ -44,7 +44,7 @@ final class BuddySettingsUITests: XCTestCase {
         shot.lifetime = .keepAlways
         add(shot)
         ok.tap()
-        XCTAssertFalse(app.staticTexts["Make room for a smaller list"].exists)
+        XCTAssertFalse(app.staticTexts["Your list needs room"].exists)
     }
 
 }

@@ -101,7 +101,7 @@ test('lower limits stay unavailable until the active list fits, without moving t
   await three.click({force:true});
   expect(await page.evaluate(()=>({limit:__buddy.taskLimit(),active:__buddy.activeCount(),future:__buddy.state.deferred.length}))).toEqual({limit:6,active:5,future:0});
   await expect(page.getByRole('dialog')).toBeVisible();
-  await expect(page.locator('#taskLimitExplanation')).toHaveText('You have 5 active tasks. Move 2 to Future, or complete them, before choosing a limit of 3.');
+  await expect(page.locator('#taskLimitExplanation')).toHaveText('You have 5 active tasks. To lower your limit to 3, first complete 2 tasks or move them to Future.');
   await expect(page.getByRole('dialog').getByRole('button')).toHaveCount(1);
   await expect(page.getByRole('button',{name:'OK',exact:true})).toBeFocused();
   await page.getByRole('button',{name:'OK',exact:true}).click();

@@ -386,7 +386,7 @@ struct TaskLimitExplanation: View {
     private var message: String {
         let count = max(0, activeCount - limit)
         if count == 0 { return "Your tasks now fit. Close this message and choose a limit of \(limit)." }
-        return "You have \(activeCount) active tasks. Move \(count) to Future, or complete \(count == 1 ? "it" : "them"), before choosing a limit of \(limit)."
+        return "You have \(activeCount) active tasks. To lower your limit to \(limit), first complete \(count) task\(count == 1 ? "" : "s") or move \(count == 1 ? "it" : "them") to Future."
     }
 
     var body: some View {
@@ -396,7 +396,7 @@ struct TaskLimitExplanation: View {
                 VStack(alignment: .leading, spacing: 24) {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
-                            Text("Make room for a smaller list")
+                            Text("Your list needs room")
                                 .font(.geist(titleSize, .medium)).tracking(-0.7)
                                 .accessibilityAddTraits(.isHeader)
                                 .accessibilityFocused($headingFocused)

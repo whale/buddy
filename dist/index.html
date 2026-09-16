@@ -421,7 +421,7 @@
 <!-- ============ DRAWER ============ -->
 <aside id="drawer" class="ease-d fixed top-0 right-0 z-50 h-screen w-[416px] translate-x-full flex flex-col items-end gap-2 p-2">
   <dialog id="taskLimitDialog" aria-labelledby="taskLimitTitle" aria-describedby="taskLimitExplanation">
-    <h2 id="taskLimitTitle">Make room for a smaller list</h2>
+    <h2 id="taskLimitTitle">Your list needs room</h2>
     <p id="taskLimitExplanation"></p>
     <div class="actions"><button id="taskLimitOK" autofocus>OK</button></div>
   </dialog>
@@ -910,7 +910,7 @@ function renderTaskLimit(){
   if(explainedTaskLimit!==null){
     const active=activeCount(), count=Math.max(0,active-explainedTaskLimit);
     $('#taskLimitExplanation').textContent=count
-      ? 'You have '+active+' active tasks. Move '+count+' to Future, or complete '+(count===1?'it':'them')+', before choosing a limit of '+explainedTaskLimit+'.'
+      ? 'You have '+active+' active tasks. To lower your limit to '+explainedTaskLimit+', first complete '+count+' task'+(count===1?'':'s')+' or move '+(count===1?'it':'them')+' to Future.'
       : 'Your tasks now fit. Close this message and choose a limit of '+explainedTaskLimit+'.';
   }
 }

@@ -1,5 +1,15 @@
 # Buddy — Status & Handoff
 
+## Copy follow-up — not released
+
+Both dialogs now say “Your list needs room” and explain: “You have 5 active tasks.
+To lower your limit to 3, first complete 2 tasks or move them to Future.” Counts
+and singular/plural are dynamic; the entire description stays regular weight.
+This replaces the copy in uploaded iOS build 46; a subsequent build is needed.
+Mac native-launch approval remains outstanding. Copy tests/visual artifacts:
+`/private/tmp/buddy-copy-*`.
+
+
 ## Release checkpoint — 2026-09-16 — iOS 0.4.40 (46), Mac pending
 
 - User requested a new release with the single OK button on the left, plus iOS visuals.
