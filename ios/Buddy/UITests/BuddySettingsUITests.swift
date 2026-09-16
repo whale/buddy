@@ -22,6 +22,11 @@ final class BuddySettingsUITests: XCTestCase {
             add(shot)
             app.buttons["taskLimitOK"].tap()
             XCTAssertFalse(app.staticTexts["Your list needs room"].exists)
+            XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Complete or move")).firstMatch.exists)
+            let settingsShot = XCTAttachment(screenshot: app.screenshot())
+            settingsShot.name = "Settings without duplicate explanation level \(level)"
+            settingsShot.lifetime = .keepAlways
+            add(settingsShot)
             XCTAssertTrue(app.buttons["6 active tasks"].isSelected)
             app.buttons["\(4 + level) active tasks"].tap()
             XCTAssertTrue(app.buttons["\(4 + level) active tasks"].isSelected)

@@ -15,7 +15,6 @@ struct SettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var reducedMotion
 
     @State private var celebrate: Double = 100
-    @State private var explainedLimit: Int?
     @State private var limitStatus = ""
 
     // Sync section state
@@ -65,8 +64,8 @@ struct SettingsView: View {
                             }.padding(.top, 14)
                             Text("Completed tasks don't count. Syncs with your Mac.")
                                 .font(.geist(14, .regular)).foregroundStyle(theme.sheetFaint).padding(.top, 10)
-                            if !displayedLimitStatus.isEmpty {
-                                Text(displayedLimitStatus).font(.geist(14, .regular)).foregroundStyle(theme.ink).padding(10)
+                            if !limitStatus.isEmpty {
+                                Text(limitStatus).font(.geist(14, .regular)).foregroundStyle(theme.ink).padding(10)
                                     .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.line, lineWidth: 1))
                                     .padding(.top, 10)
                             }
@@ -170,14 +169,9 @@ struct SettingsView: View {
         let count = max(0, store.activeCount - value)
         return count > 0 ? "Complete or move \(count) task\(count == 1 ? "" : "s") out of Today to choose \(value)." : ""
     }
-    private var displayedLimitStatus: String {
-        if let value = explainedLimit { return limitReason(value) }
-        return limitStatus
-    }
     private func selectLimit(_ value: Int) {
         limitStatus = ""
-        if store.activeCount > value { explainedLimit = value; onExplainLimit(value); return }
-        explainedLimit = nil
+        if store.activeCount > value { onExplainLimit(value); return }
         if !store.changeTaskLimit(value, expectedSignature: store.activeSignature) {
             limitStatus = "Your list changed or a task is still being edited. Choose the limit again."
         }

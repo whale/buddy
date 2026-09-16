@@ -377,8 +377,8 @@
   #taskLimitOK { min-width:120px; min-height:44px; padding:0 24px; border:0; border-radius:999px; background:var(--sel-bg); color:var(--sel-ink); font:500 15px var(--font); cursor:pointer; transition:background-color .15s ease; }
   #taskLimitOK:hover { background:var(--cta-hover); }
   #drawer:not(.lvl1):not(.lvl2) #taskLimitOK:hover { background:oklch(from var(--sel-bg) calc(l + .2) c h); }
-  #taskLimitOK:focus-visible { outline:2px solid var(--ink); outline-offset:4px; }
-  .limit-tip { padding:10px 12px; border:1px solid var(--line); border-radius:10px; line-height:1.4; }
+  #taskLimitOK:focus { outline:none; }
+  #taskLimitDialog.keyboard-nav #taskLimitOK:focus-visible { outline:2px solid var(--ink); outline-offset:4px; }
   .limit-choice:focus-visible { outline:2px solid var(--ink); outline-offset:3px; }
 </style>
 </head>
@@ -858,13 +858,11 @@ function taskLimitReason(value){
   const count=Math.max(0,activeCount()-value);
   return count ? 'Complete or move '+count+' task'+(count===1?'':'s')+' out of Today to choose '+value+'.' : '';
 }
-function explainTaskLimit(value){
-  explainedTaskLimit=value; renderTaskLimit();
-}
 function showTaskLimitDialog(value){
   explainedTaskLimit=value;
   renderTaskLimit();
   const dialog=$('#taskLimitDialog');
+  dialog.classList.remove('keyboard-nav');
   if(!dialog.open) dialog.showModal();
   clearTimeout(shrinkTimer);
   if(NATIVE) nativeFit('drawer');
@@ -881,7 +879,7 @@ function requestTaskLimit(value){
   commitTaskLimit(value,activeSignature());
 }
 function commitTaskLimit(value,signature){
-  if(![3,4,5,6].includes(value)||activeCount()>value) { explainTaskLimit(value); return false; }
+  if(![3,4,5,6].includes(value)||activeCount()>value) { return false; }
   if(editingActive()||signature!==activeSignature()){
     renderTaskLimit();
     $('#taskLimitStatus').textContent='Your list changed or a task is still being edited. Choose the limit again.'; return false;
@@ -902,11 +900,9 @@ function renderTaskLimit(){
     // Keep unavailable options focusable so keyboard users can discover why.
     b.setAttribute('aria-disabled',String(!!reason));
     b.setAttribute('aria-description',reason);
-    if(reason) b.setAttribute('aria-describedby','taskLimitStatus'); else b.removeAttribute('aria-describedby');
+    if(reason) b.setAttribute('title',reason); else b.removeAttribute('title');
   });
-  const status=$('#taskLimitStatus'), reason=explainedTaskLimit===null?'':taskLimitReason(explainedTaskLimit);
-  status.textContent=reason;
-  status.classList.toggle('limit-tip',!!reason);
+  $('#taskLimitStatus').textContent='';
   if(explainedTaskLimit!==null){
     const active=activeCount(), count=Math.max(0,active-explainedTaskLimit);
     $('#taskLimitExplanation').textContent=count
@@ -4147,11 +4143,9 @@ function closeSettings(){
 }
 $('#taskLimitOK').addEventListener('click',dismissTaskLimitDialog);
 $('#taskLimitDialog').addEventListener('cancel',e=>{ e.preventDefault(); dismissTaskLimitDialog(); });
-$('#taskLimitDialog').addEventListener('keydown',e=>{ e.stopPropagation(); });
+$('#taskLimitDialog').addEventListener('keydown',e=>{ if(e.key==='Tab') e.currentTarget.classList.add('keyboard-nav'); e.stopPropagation(); });
+$('#taskLimitDialog').addEventListener('pointerdown',e=>{ e.currentTarget.classList.remove('keyboard-nav'); });
 $('#taskLimitChoices').addEventListener('click',e=>{ const b=e.target.closest('button[data-limit]'); if(b) requestTaskLimit(+b.dataset.limit); });
-for(const event of ['mouseover','focusin']) $('#taskLimitChoices').addEventListener(event,e=>{
-  const b=e.target.closest('button[data-limit]'); if(b) explainTaskLimit(+b.dataset.limit);
-});
 $('#taskLimitChoices').addEventListener('keydown',e=>{
   if(e.key==='Escape'){ explainedTaskLimit=null; renderTaskLimit(); e.stopPropagation(); }
 });

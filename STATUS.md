@@ -1,5 +1,21 @@
 # Buddy — Status & Handoff
 
+## Final cleanup — 2026-09-16
+
+Removed the duplicate inline lower-limit explanation on both platforms. Mac keeps
+a native hover tooltip and accessibility description; tapping opens the single
+centered modal. OK uses a solid primary style; focus ring appears only after Tab.
+Native Mac launch now authorized and successful: centered modal inspected, OK and
+Escape restore the narrow settings drawer. Native final appearance inspected.
+Mac browser 1280×800 and 452×800, all three themes inspected; iPhone 17 Pro and SE
+settings/modal screenshots inspected, no duplicate panel. Updated Mac tests 25/25
+and iOS dialog suites 2/2 on both devices passed. Earlier full-suite, live-sync and
+skeptical review results still apply. Final cleanup review: n/a, trivial UI removal
+and focus styling, no task/sync mutation changes.
+iOS build 48 upload started; Mac PR164 ready for release. Do not infer publication
+until GitHub and Apple confirm it. Evidence: /private/tmp/buddy-final-release/.
+
+
 ## Latest delivery — 2026-09-16 — iOS 0.4.40 (47) live, Mac blocked
 
 User explicitly requested shipping everything again. Latest copy is now uploaded
