@@ -1,5 +1,20 @@
 # Buddy — Status & Handoff
 
+## Latest delivery — 2026-09-16 — iOS 0.4.40 (47) live, Mac blocked
+
+User explicitly requested shipping everything again. Latest copy is now uploaded
+as iOS **0.4.40 (47)**. Fastlane and the wrapper completed successfully. Apple
+direct API confirms VALID, internal IN_BETA_TESTING, external IN_BETA_TESTING;
+beta review APPROVED. Both tester audiences can update through TestFlight.
+Logs: `/private/tmp/buddy-final-release/testflight.log`, `apple-final.log`.
+
+Mac is still 0.4.39. Latest QA bundle rebuilt; settings 18/18, smoke 4/4, merge
+3/3, cross-build 3/3 and live sync 4/4 re-passed on current source. Native launch
+remains blocked pending explicit approval of “Buddy Settings QA”; an asynchronous
+question was sent again. Do not bypass the previous safety rejection. PR #164
+stays draft, not merged. No Mac release or installed-app replacement performed.
+
+
 ## Copy follow-up — not released
 
 Both dialogs now say “Your list needs room” and explain: “You have 5 active tasks.
