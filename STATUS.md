@@ -1,5 +1,23 @@
 # Buddy — Status & Handoff
 
+## Shipped — 2026-09-16 — Mac 0.4.40 + iOS 0.4.40 (48)
+
+PR164 merged; Mac release run 35112725517 succeeded. GitHub v0.4.40 and live
+latest.json confirmed, both darwin-aarch64 and darwin-x86_64 available. Installed
+through the actual Buddy update banner, app relaunched; /Applications/Buddy.app
+reports 0.4.40, codesign verification passes, spctl accepts Notarized Developer ID,
+and lipo confirms x86_64 + arm64. Production tasks remained visible after relaunch.
+Final native QA screenshot showed centered modal, solid left OK without automatic
+outline, no duplicate inline explanation; OK/Escape restore narrow settings.
+
+iOS 0.4.40 (48) release archive/upload completed. Direct Apple API confirms VALID,
+internal IN_BETA_TESTING and external IN_BETA_TESTING. Existing testers can update.
+Final source commit df885d3. Release evidence: /private/tmp/buddy-final-release/,
+latest.json, mac-release.log, testflight48.log, apple48.log.
+
+All earlier blocked/pending checkpoints below are historical and superseded.
+
+
 ## Final cleanup — 2026-09-16
 
 Removed the duplicate inline lower-limit explanation on both platforms. Mac keeps
