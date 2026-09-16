@@ -11,6 +11,7 @@ struct SettingsView: View {
     @Bindable var store: BuddyStore
     var sync: SyncEngine? = nil
     var onClose: () -> Void = {}
+    var onExplainLimit: (Int) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reducedMotion
 
     @State private var celebrate: Double = 100
@@ -175,7 +176,7 @@ struct SettingsView: View {
     }
     private func selectLimit(_ value: Int) {
         limitStatus = ""
-        if store.activeCount > value { explainedLimit = value; return }
+        if store.activeCount > value { explainedLimit = value; onExplainLimit(value); return }
         explainedLimit = nil
         if !store.changeTaskLimit(value, expectedSignature: store.activeSignature) {
             limitStatus = "Your list changed or a task is still being edited. Choose the limit again."
@@ -368,4 +369,76 @@ struct SettingsView: View {
 
 #Preview {
     SettingsView(store: { let s = BuddyStore(); return s }())
+}
+
+
+// Shared visual language with the Mac limit dialog; only OK dismisses it.
+struct TaskLimitExplanation: View {
+    let activeCount: Int
+    let limit: Int
+    let theme: EscalationTheme
+    let onDismiss: () -> Void
+    @AccessibilityFocusState private var headingFocused: Bool
+    @ScaledMetric private var titleSize: CGFloat = 24
+    @ScaledMetric private var bodySize: CGFloat = 15
+    @State private var contentHeight: CGFloat = 0
+
+    private var message: String {
+        let count = max(0, activeCount - limit)
+        if count == 0 { return "Your tasks now fit. Close this message and choose a limit of \(limit)." }
+        return "You have \(activeCount) active tasks. Move \(count) to Future, or complete \(count == 1 ? "it" : "them"), before choosing a limit of \(limit)."
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.22).ignoresSafeArea().accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 24) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("Make room for a smaller list")
+                                .font(.geist(titleSize, .medium)).tracking(-0.7)
+                                .accessibilityAddTraits(.isHeader)
+                                .accessibilityFocused($headingFocused)
+                            Text(message)
+                                .font(.geist(bodySize, .regular)).lineSpacing(3)
+                        }
+                        .foregroundStyle(theme.ink)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(GeometryReader { content in
+                            Color.clear.preference(key: LimitExplanationHeight.self, value: content.size.height)
+                        })
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .frame(height: min(contentHeight, max(0, geometry.size.height - 128 - max(44, bodySize * 1.4 + 20))))
+                    .onPreferenceChange(LimitExplanationHeight.self) { contentHeight = $0 }
+                    Button("OK", action: onDismiss)
+                        .font(.geist(bodySize, .medium))
+                        .foregroundStyle(theme.selInk)
+                        .frame(minWidth: 120)
+                        .frame(height: max(44, bodySize * 1.4 + 20))
+                        .background(theme.selBg, in: Capsule())
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("taskLimitOK")
+                }
+                .padding(28)
+                .frame(maxWidth: 420)
+                .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 24))
+                .clipShape(RoundedRectangle(cornerRadius: 24))
+                .shadow(color: .black.opacity(0.16), radius: 24, y: 12)
+                .padding(.horizontal, 24)
+                .accessibilityElement(children: .contain)
+                .accessibilityAddTraits(.isModal)
+                .accessibilityAction(.escape, onDismiss)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .ignoresSafeArea()
+        .onAppear { headingFocused = true }
+    }
+}
+
+private struct LimitExplanationHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

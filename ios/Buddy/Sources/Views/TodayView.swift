@@ -18,6 +18,7 @@ struct TodayView: View {
     // Sheets
     @State private var showHistory  = false
     @State private var showSettings = false
+    @State private var explainedTaskLimit: Int?
 
     // Swipe: which row's actions are currently open (only one at a time)
     @State private var openRowID: String? = nil
@@ -108,7 +109,8 @@ struct TodayView: View {
                                 .transition(sheetTransition)
                         }
                         if showSettings {
-                            SettingsView(store: store, sync: sync, onClose: { withAnimation(BuddyAnim.sheetClose) { showSettings = false } })
+                            SettingsView(store: store, sync: sync, onClose: { withAnimation(BuddyAnim.sheetClose) { showSettings = false } },
+                                         onExplainLimit: { explainedTaskLimit = $0 })
                                 .buddyCard(fill: theme.cardBackground, shadow: false)
                                 .transition(sheetTransition)
                         }
@@ -126,6 +128,8 @@ struct TodayView: View {
                     .animation(.easeOut(duration: 0.15), value: editingId == nil)   // its own small fade, nothing else rides along
                     .allowsHitTesting(editingId == nil)
             }
+            .allowsHitTesting(explainedTaskLimit == nil)
+            .accessibilityHidden(explainedTaskLimit != nil)
             .padding(.horizontal, 8)     // even side gutter
             .padding(.top, 8)            // small gutter below the status-bar safe area (no more)
             .offset(y: -keyboardLift)    // lift the column so the edited row clears the keyboard
@@ -151,6 +155,13 @@ struct TodayView: View {
             CelebrationView(trigger: celebrationTick, intensity: store.settings.celebrate, anchor: celebrationAnchor)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
+        }
+        .overlay {
+            if let limit = explainedTaskLimit {
+                TaskLimitExplanation(activeCount: store.activeCount, limit: limit, theme: theme) {
+                    explainedTaskLimit = nil
+                }
+            }
         }
         .fullScreenCover(isPresented: $showMorning) {
             MorningView(store: store, onDone: { showMorning = false })

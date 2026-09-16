@@ -1,6 +1,26 @@
 # Buddy — Status & Handoff
 
-## Local follow-up — unavailable lower limits (not released)
+## Local follow-up — centered limit explanation (release requested)
+
+The latest requested design is an explanatory Buddy modal, not task selection or
+move confirmation. Single **OK** aligned left, no Cancel. Mac uses a top-layer
+HTML dialog and serialized full-screen native sizing; Morning dismisses it before
+opening. iOS presents the matching full-screen overlay with a compact, measured
+card and scrollable content at large Dynamic Type. Neither action mutates tasks or
+the limit. Both platforms keep unavailable options dimmed.
+
+Native Mac QA launch is waiting on explicit user approval after the computer-use
+safety gate rejected running the local test bundle. Do not claim native centering
+or release verification until this is observed. iOS 138 unit tests (5 local-backend skips) and all 10 existing interaction tests
+passed; final dialog tests pass on iPhone 17 Pro + SE at default and largest
+Dynamic Type. Inspected screenshots in all three themes; text scrolls with OK
+fixed below it at large sizes. Mac settings 18/18, smoke 4/4, merge 3/3,
+cross-build 3/3, live sync 4/4 and Rust check pass. Read-only sync doctor still
+flags the already-known stale DEV bucket versus installed app, not a new regression.
+iOS 0.4.40 release preparation continues independently. Release logs and screenshot results:
+`/private/tmp/buddy-ok-release`.
+
+## Earlier local follow-up — unavailable lower limits (not released)
 
 User replaced 0.4.39's automatic overflow-confirmation design: lower choices must
 be dimmed until the active list fits. Implemented on `codex/task-limit-availability`.
