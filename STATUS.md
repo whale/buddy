@@ -1,5 +1,28 @@
 # Buddy — Status & Handoff
 
+## Infra — 2026-09-28 — Supabase outage fixed, project moved to paid org
+
+**What happened:** the Buddy Cloud project (`awzkpkhsigbhfeklogzk`) was paused
+(INACTIVE) by its free org from 2026-09-24 → Mac logged `sync-error` "Load
+failed" every minute; Mac ⇄ iOS sync was down for ~4 days.
+
+**Fixed:** project transferred into the paid Pro org "hi-whalefyi's projects"
+(the old free org was then deleted), then restored through the Management API
+`POST /v1/projects/{ref}/restore` (~4 min). Transfer does NOT unpause a project.
+Project ref, URL, and anon key are unchanged → no app code or config changes.
+
+**Verified:** project `ACTIVE_HEALTHY`; `pnpm sync:validate` 10/10;
+`pnpm sync:live` 4/4 (the first run right after the restore failed while the
+server warmed up); the Mac log shows successful syncs + `sync-peer-seen ios`;
+the user confirmed on the iPhone that sync works. `sync:doctor` "split brain" =
+the Dev container on its own bucket (expected), not real Buddy vs iPhone.
+
+**CLI access:** a never-expiring `SUPABASE_ACCESS_TOKEN` in `~/.config/secrets.env`
+(the old one was expired → 401). Run CLI calls through `zsh -ic '…'` so the key loads.
+
+**Follow-up idea:** Buddy can't tell a *paused server* apart from other sync
+failures — consider surfacing "server unreachable for >1h" in diagnostics/UI.
+
 ## Shipped — 2026-09-16 — Mac 0.4.40 + iOS 0.4.40 (48)
 
 PR164 merged; Mac release run 35112725517 succeeded. GitHub v0.4.40 and live
