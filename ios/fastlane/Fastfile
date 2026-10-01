@@ -94,14 +94,27 @@ platform :ios do
     # upload_to_testflight hard-fails ("No changelog provided for new build",
     # 2026-07-28). Default keeps every build shippable; BETA_CHANGELOG overrides it
     # per-run when a build has something specific to call out.
-    upload_to_testflight(
-      api_key: api_key,
-      skip_waiting_for_build_processing: false,
-      distribute_external: true,
-      groups: ["Friends"],
-      notify_external_testers: true,
-      changelog: ENV.fetch("BETA_CHANGELOG", "Bug fixes and sync improvements.")
-    )
+    # BETA_INTERNAL_ONLY=1 → a "just me" build: uploaded for INTERNAL testers (the
+    # App Store Connect team) only — NOT submitted to the external Friends group.
+    # For trying a branch on your own phone before it ships to anyone else.
+    if ENV["BETA_INTERNAL_ONLY"] == "1"
+      UI.important("BETA_INTERNAL_ONLY=1 — internal testers only; Friends will NOT get this build.")
+      upload_to_testflight(
+        api_key: api_key,
+        skip_waiting_for_build_processing: false,
+        distribute_external: false,
+        changelog: ENV.fetch("BETA_CHANGELOG", "Internal test build.")
+      )
+    else
+      upload_to_testflight(
+        api_key: api_key,
+        skip_waiting_for_build_processing: false,
+        distribute_external: true,
+        groups: ["Friends"],
+        notify_external_testers: true,
+        changelog: ENV.fetch("BETA_CHANGELOG", "Bug fixes and sync improvements.")
+      )
+    end
   end
 
   desc "Show the latest TestFlight builds with their REAL visibility state. " \
