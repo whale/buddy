@@ -57,10 +57,14 @@
      only when they no longer fit does it scroll, with Add sticky. Sent rows stay compact. */
   .future-body{ display:flex; flex-direction:column; min-height:100%; }
   .future-body > .future-list{ flex:1 1 auto; display:flex; flex-direction:column; }
-  .future-list > .future-row, .future-list > .future-add{ flex:1 1 110px; min-height:110px; }
+  /* Rows grow to fill; each is at least max(its text, --fmin). fitFuture() shrinks --fmin and the
+     text (--ffs) step by step as the list fills — down to the "Sent to today!" row's size — and
+     only past that does the list scroll under the sticky Add. A long edit grows its own row. */
+  .future-list{ --fmin:110px; --ffs:24px; }
+  .future-list > .future-row, .future-list > .future-add{ flex:1 0 var(--fmin); min-height:auto; }   /* equal from --fmin; never below its own text (auto min) */
   .future-list > .future-row.future-sent{ flex:0 0 auto; min-height:0; }
-  /* The row being typed in sizes to its text (never squeezed under it), so a long edit grows. */
-  .future-list > .future-row.editing{ flex-basis:auto; flex-shrink:0; }
+  .future-list.fit-probe > *{ flex-grow:0 !important; }   /* measure natural heights, no fill */
+  .seg-count{ opacity:.55; }   /* "(n)" on the Future / Done tabs: quieter than the label, still legible */
   .future-title:not([contenteditable]){ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
   .future-title[contenteditable]{ outline:none; white-space:pre-wrap; overflow-wrap:anywhere; }
 
@@ -3690,7 +3694,7 @@ function buildFutureTitle(id, text){
   if(state.histOpen && futureEditEl && futureEditEl.dataset.fid===id) return futureEditEl;
   const t=document.createElement('div');
   t.className='future-title cursor-text flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2]';
-  t.style.cssText='font-size:24px;color:var(--ink);';
+  t.style.cssText='font-size:var(--ffs,24px);color:var(--ink);';
   t.dataset.fid=id; t.dataset.ph='Untitled';
   t.textContent=text||''; if(!text) t.classList.add('empty');
   // Editable on MOUSEDOWN (before the caret is placed) so one click edits — same as Today.
@@ -3740,7 +3744,7 @@ function buildFutureAddRow(){
   const add=document.createElement('div');
   add.className='future-add addrow pressable row-neutral bd flex items-center cursor-pointer border-[#d9d9d9]';
   add.style.cssText='position:sticky;bottom:0;z-index:2;padding:0 32px;background:var(--card);';   // height: .future-body flex rule
-  add.innerHTML='<div class="addtxt flex gap-[18px] font-medium tracking-[-0.48px]" style="font-size:24px"><span>Add</span><span>+</span></div>';
+  add.innerHTML='<div class="addtxt flex gap-[18px] font-medium tracking-[-0.48px]" style="font-size:var(--ffs,24px)"><span>Add</span><span>+</span></div>';
   add.addEventListener('mousedown',e=>e.preventDefault());   // keep focus in the field until we commit it
   add.addEventListener('click',()=>addFutureAndEdit());
   return add;
@@ -3765,8 +3769,29 @@ function renderFuture(){
   wrap.appendChild(add);
   histBody.appendChild(wrap);
   // Re-attached the live editor → give focus straight back (same tick, so no keystroke is lost).
+  fitFuture(wrap);
   if(futureWasFocused && futureEditEl && futureEditEl.isConnected) focusFutureEdit(futureEditEl, futureCaretSaved);
 }
+// Shrink-to-fit, like Today's fitWrap: the largest step (24px text / 110px rows → 18px / 59px,
+// the "Sent to today!" size) at which every row fits the panel. Past the smallest step the list
+// scrolls under the sticky Add. Mid-edit the size is held, so the row you're typing in never jumps.
+const FUTURE_FIT={ FS:[24,18], MIN:[110,59], STEPS:12 };
+let futureFit=0;
+function fitFuture(list){
+  list=list||histBody.querySelector('.future-list'); if(!list || !list.isConnected) return;
+  const apply=t=>{ const [f0,f1]=FUTURE_FIT.FS, [m0,m1]=FUTURE_FIT.MIN;
+    list.style.setProperty('--ffs', (f0+(f1-f0)*t).toFixed(2)+'px');
+    list.style.setProperty('--fmin', Math.round(m0+(m1-m0)*t)+'px'); };
+  if(futureWasFocused || futureEditLive()){ apply(futureFit); return; }
+  const H=histScroll.clientHeight; if(H<=0){ apply(futureFit); return; }
+  list.classList.add('fit-probe');
+  let k=0;
+  for(; k<FUTURE_FIT.STEPS; k++){ apply(k/(FUTURE_FIT.STEPS-1)); if(list.scrollHeight<=H) break; }
+  list.classList.remove('fit-probe');
+  futureFit=Math.min(k, FUTURE_FIT.STEPS-1)/(FUTURE_FIT.STEPS-1);
+  apply(futureFit);
+}
+window.addEventListener('resize', ()=>{ if(state.histOpen && state.histTab==='future') fitFuture(); });
 
 // Sent rows ride on top (compact, like Today's Donezo), then plain rows oldest-first.
 function futureDisplayOrder(){
@@ -3810,6 +3835,17 @@ function buildSentFutureRow(d){
 // Tombstone the id — without it a synced peer's copy resurrects the row on the next pass.
 function deleteDeferred(id){ tombstone(id); state.deferred=state.deferred.filter(d=>d.id!==id); save(); render(); }
 
+// "(n)" on the tabs. Future = items still parked (sent-to-today rows aren't waiting any more);
+// Done = everything the Done tab can show: today's completions + every archived done task.
+function histTabCount(tab){
+  if(tab==='future') return (state.deferred||[]).filter(d=>!d.sent && String(d.text||'').trim()).length;
+  if(tab==='past'){
+    const today=(state.items||[]).filter(it=>it.state==='done').length;
+    const past=(state.history||[]).reduce((n,d)=>n+(d.items||[]).filter(it=>it && it.done && String(it.text||'').trim()).length, 0);
+    return today+past;
+  }
+  return null;
+}
 // Sticky header of the OPEN history panel: a [ Future | Past ] segmented toggle.
 function renderHistHeader(){
   last7.innerHTML='';
@@ -3824,8 +3860,13 @@ function renderHistHeader(){
     b.className='px-4 grid place-items-center rounded-full text-[15px] tracking-[-0.3px] transition-colors '+
       (active?'seg-sel shadow-sm':'');
     b.style.minHeight='38px';                        // generous tap target (was ~22px — fiddly to hit)
+    b.style.whiteSpace='nowrap';                     // "Future (12)" stays on one line
     if(!active) b.style.color='var(--chrome-ink)';
-    b.textContent=label;
+    // One inline run (the button is a grid — separate children would stack onto two lines).
+    const run=document.createElement('span'); run.textContent=label;
+    const n=histTabCount(tab);
+    if(n!==null){ const c=document.createElement('span'); c.className='seg-count'; c.textContent=' ('+n+')'; run.appendChild(c); }
+    b.appendChild(run);
     b.addEventListener('mousedown',e=>{ if(futureEditEl) e.preventDefault(); });   // keep the header alive till click; settleFutureEdit commits the field
     b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; pastDaysShown=PAST_PAGE; render(); } });
     return b;

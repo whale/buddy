@@ -25,6 +25,9 @@ async function boot(page, { long = false, today = 2 } = {}) {
     s.deferred = deferred.map((text, i) => ({ id: 'f' + i, text, wake: '', v: 1 }));
     s.histOpen = true; s.histTab = 'future';
     document.querySelector('#morning').classList.add('hidden');
+    // Browser-only dev button (absent in the Tauri app) sits over the bottom-left of the drawer —
+    // right where a shrunk Add row lands — and would swallow the clicks.
+    const dev = document.getElementById('devMorning'); if (dev) dev.style.display = 'none';
     B.openDrawer(); B.render();
   }, [long ? BASE.concat(EXTRA) : BASE, today]);
   await page.waitForTimeout(600);
@@ -83,7 +86,7 @@ test('closing the panel or switching tab mid-typing keeps the text', async ({ pa
 
   await boot(page);
   await clickAdd(page); await page.keyboard.type('Tabbed');
-  await page.getByText('Done', { exact: true }).click(); await settle(page);
+  await page.locator('#histSheet button', { hasText: /^Done/ }).click(); await settle(page);
   expect(await texts(page)).toEqual([...BASE, 'Tabbed']);
 });
 
@@ -285,7 +288,7 @@ test('long typing in a long list stays visible above the sticky Add row', async 
 test('mid-edit, the Done tab and the close button work on the FIRST human-speed click', async ({ page }) => {
   await boot(page);
   await clickAdd(page); await page.keyboard.type('Via tab');
-  await humanClick(page, page.getByText('Done', { exact: true }));
+  await humanClick(page, page.locator('#histSheet button', { hasText: /^Done/ }));
   expect(await page.evaluate(() => window.__buddy.state.histTab)).toBe('past');
   expect(await texts(page)).toEqual([...BASE, 'Via tab']);
 
@@ -338,10 +341,13 @@ test('sent rows sit on top and stay thin; plain rows still fill', async ({ page 
   expect(rows[1].h).toBeGreaterThan(110);
 });
 
-test('too many items: rows stop at 110px, the list scrolls, Add stays pinned', async ({ page }) => {
+test('too many items: rows shrink to the sent-row size, then the list scrolls with Add pinned', async ({ page }) => {
   await boot(page, { long: true });
+  await page.evaluate(() => { const s = window.__buddy.state; for (let i = 0; i < 6; i++) s.deferred.push({ id: 'x' + i, text: 'Extra ' + i, wake: '', v: 1 }); window.__buddy.render(); });
   const rows = await rowHeights(page);
-  expect(rows.every(r => r.h === 110)).toBe(true);
+  const fit = await page.evaluate(() => { const l = document.querySelector('.future-list'); return { ffs: l.style.getPropertyValue('--ffs'), fmin: l.style.getPropertyValue('--fmin') }; });
+  expect(fit).toEqual({ ffs: '18.00px', fmin: '59px' });          // smallest step = the "Sent to today!" row
+  expect(rows.filter(r => r.kind === 'row').every(r => r.h >= 59)).toBe(true);
   const pinned = await page.evaluate(async () => {
     const scroller = document.querySelector('.future-body').parentElement;
     const before = document.querySelector('.future-add').getBoundingClientRect().bottom;
@@ -349,4 +355,35 @@ test('too many items: rows stop at 110px, the list scrolls, Add stays pinned', a
     return { scrolls: scroller.scrollHeight > scroller.clientHeight, still: document.querySelector('.future-add').getBoundingClientRect().bottom === before };
   });
   expect(pinned).toEqual({ scrolls: true, still: true });
+});
+
+test('as Future fills, text and rows shrink step by step before anything scrolls', async ({ page }) => {
+  const steps = [];
+  for (const n of [2, 5, 7]) {
+    await boot(page);
+    await page.evaluate(n => { const s = window.__buddy.state; s.deferred = Array.from({ length: n }, (_, i) => ({ id: 'f' + i, text: 'Item ' + i, wake: '', v: 1 })); window.__buddy.render(); }, n);
+    steps.push(await page.evaluate(() => {
+      const l = document.querySelector('.future-list'), sc = document.querySelector('.future-body').parentElement;
+      return { fs: parseFloat(l.style.getPropertyValue('--ffs')), scrolls: sc.scrollHeight > sc.clientHeight + 1 };
+    }));
+  }
+  expect(steps[0].fs).toBe(24);
+  expect(steps[1].fs).toBeLessThan(24);
+  expect(steps[2].fs).toBeLessThan(steps[1].fs);
+  expect(steps.every(x => !x.scrolls)).toBe(true);                // all of these still fit — no scrolling yet
+});
+
+test('tabs show Future (n) / Done (n), with a quieter count that stays on one line', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    const s = window.__buddy.state;
+    s.today.items[0].state = 'done';
+    s.history = [{ date: '2026-09-30', weekday: 'Tue', items: [{ id: 'h1', text: 'old', done: true }, { id: 'h2', text: 'not done', done: false }] }];
+    s.deferred.push({ id: 'fs', text: 'Sent one', wake: '', v: 2, sent: true, sentTid: 't0' });
+    window.__buddy.render();
+  });
+  const tabs = await page.evaluate(() => [...document.querySelectorAll('#histSheet button')].filter(b => /\(\d+\)/.test(b.textContent))
+    .map(b => ({ text: b.textContent, oneLine: b.getBoundingClientRect().height < 45, quiet: getComputedStyle(b.querySelector('.seg-count')).opacity })));
+  expect(tabs.map(t => t.text)).toEqual(['Future (2)', 'Done (2)']);   // sent rows aren't waiting; undone history isn't done
+  expect(tabs.every(t => t.oneLine && t.quiet === '0.55')).toBe(true);
 });
