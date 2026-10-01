@@ -2560,12 +2560,28 @@ function rolloverAndCarry(){
   return rolled;
 }
 
-// Done history: store up to ~1 year. The Done tab shows ONE WEEK at a time and a
-// "Load more" button reveals the next week (no per-user setting). RETENTION bounds
-// storage growth. `pastDaysShown` is transient UI state, reset to a week each time
-// the panel opens or the tab switches.
+// Done history: store up to ~1 year (RETENTION bounds storage growth). The Done tab
+// pages by items (DONE_PAGE below); `pastDaysShown` still pages the legacy Skipped view
+// by week. Both are transient UI state, reset when the panel opens or the tab switches.
 const PAST_PAGE=7, RETENTION_DAYS=365;
 let pastDaysShown=PAST_PAGE;
+// Done pages by ITEMS, not days (whale 2026-10-01): 30 completed tasks at a time — a busy
+// week no longer floods it, a quiet one no longer looks empty. Reset on open / tab switch.
+const DONE_PAGE=30;
+let doneShown=DONE_PAGE;
+// Every archived day with done tasks, newest first. Days within the last week read as a
+// weekday; older ones add the date, since paging by items can reach back past a week.
+function doneDays(){
+  const today=localDate(), weekAgo=localDate(new Date(Date.now()-7*86400000));
+  return (state.history||[])
+    .filter(r=>r && typeof r.date==='string' && r.date<today)
+    .sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:0)
+    .map(r=>{ const d=new Date(r.date+'T00:00:00');
+      const name = r.date>weekAgo ? DOW[d.getDay()]
+        : DOW[d.getDay()]+', '+d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+      return { name, items:(r.items||[]).filter(it=>it && it.done && String(it.text||'').trim()) }; })
+    .filter(d=>d.items.length);
+}
 // Drop archived days older than the retention window so storage stays bounded.
 function pruneHistory(){
   if(!Array.isArray(state.history)) return;
@@ -3466,9 +3482,14 @@ function restoreHistoryTask(text){
 // they live in the Skipped tab.
 function renderPast(){
   const todayDone = state.items.filter(it=>it.state==='done');     // live: today's completions
-  const past = lastNDays(pastDaysShown)
-    .map(d=>({ name:d.name, items:(d.items||[]).filter(it=>it && it.done && String(it.text||'').trim()) }))
-    .filter(d=>d.items.length);
+  // First `doneShown` completions (today's count toward the page), cutting mid-day if needed.
+  let room=Math.max(0, doneShown-todayDone.length), total=todayDone.length;
+  const past=[];
+  for(const d of doneDays()){
+    total+=d.items.length;
+    if(room>0){ past.push({ name:d.name, items:d.items.slice(0,room) }); room-=Math.min(room, d.items.length); }
+  }
+  const doneHasMore = total > doneShown;
   if(!todayDone.length && !past.length){ histBody.appendChild(histEmpty('No completed tasks yet.')); return; }
   const groups=[];
   if(todayDone.length) groups.push({ name:'Today', items:todayDone.map(it=>({text:it.text,liveId:it.id,id:it.id,doneWord:it.doneWord})), today:true });
@@ -3497,7 +3518,7 @@ function renderPast(){
     });
     histBody.appendChild(grp);
   });
-  histLoadMore();
+  if(doneHasMore) histBody.appendChild(loadMoreButton(()=>{ doneShown+=DONE_PAGE; render(); }));
 }
 // SKIPPED tab = PAST tasks left undone. Plain (no strike, no done-word), each
 // restorable into today via + — hidden when today is full (taskLimit()), so a skipped
@@ -3539,13 +3560,16 @@ function histLoadMore(){
   const boundary = localDate(new Date(Date.now()-pastDaysShown*86400000));   // = today − pastDaysShown
   const hasMore = (state.history||[]).some(r=> r && typeof r.date==='string' && r.date < boundary);
   if(!hasMore) return;
+  histBody.appendChild(loadMoreButton(()=>{ pastDaysShown+=PAST_PAGE; render(); }));
+}
+function loadMoreButton(onMore){
   const more=document.createElement('button');
   more.className='bd w-full px-8 py-4 text-[15px] tracking-[-0.3px] border-t ihover';
   more.style.color='var(--ink-dim)';                       // adaptive: light on red
   more.textContent='Load more';
   more.addEventListener('mousedown',e=>e.preventDefault());
-  more.addEventListener('click',()=>{ pastDaysShown+=PAST_PAGE; render(); });
-  histBody.appendChild(more);
+  more.addEventListener('click',onMore);
+  return more;
 }
 // One Future row shell: 110px (grows while editing so long text never clips) + hover rail.
 function makeFutureHoverRow(contentEl, actions){
@@ -3868,7 +3892,7 @@ function renderHistHeader(){
     if(n!==null){ const c=document.createElement('span'); c.className='seg-count'; c.textContent=' ('+n+')'; run.appendChild(c); }
     b.appendChild(run);
     b.addEventListener('mousedown',e=>{ if(futureEditEl) e.preventDefault(); });   // keep the header alive till click; settleFutureEdit commits the field
-    b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; pastDaysShown=PAST_PAGE; render(); } });
+    b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; pastDaysShown=PAST_PAGE; doneShown=DONE_PAGE; render(); } });
     return b;
   };
   seg.append(mkSeg('future','Future'), mkSeg('past','Done'));
@@ -4429,7 +4453,7 @@ $('#histBtn')?.addEventListener('click', e=>{ e.stopPropagation();
   const wasSettings=settingsOpen;
   if(settingsOpen) closeSettings();
   state.histOpen = wasSettings ? true : !state.histOpen;   // from settings → always show calendar
-  if(state.histOpen){ pastDaysShown=PAST_PAGE; futureCursor=-1; }   // fresh open → one week, no Tab cursor
+  if(state.histOpen){ pastDaysShown=PAST_PAGE; doneShown=DONE_PAGE; futureCursor=-1; }   // fresh open → one week, no Tab cursor
   render(); if(state.histOpen) histScroll.scrollTop=0;
 });
 // keep the toggle honest if the user flips system reduced-motion live
@@ -5038,15 +5062,16 @@ window.__buddy = {
       state.today={date:localDate(),morningDone:true,items:[]};
       state.history=[];
       for(let i=1;i<=20;i++){ const dd=localDate(new Date(Date.now()-i*86400000));
-        state.history.push({date:dd,weekday:DOW[new Date(dd+'T00:00:00').getDay()],items:[{id:'lm'+i,text:'day '+i,done:true}]}); }
-      pastDaysShown=PAST_PAGE; state.histOpen=true; state.histTab='past';
+        state.history.push({date:dd,weekday:DOW[new Date(dd+'T00:00:00').getDay()],items:[{id:'lm'+i+'a',text:'day '+i+' a',done:true},{id:'lm'+i+'b',text:'day '+i+' b',done:true},{id:'lm'+i+'c',text:'skipped',done:false}]}); }
+      doneShown=DONE_PAGE; state.histOpen=true; state.histTab='past';
       document.querySelector('#morning').classList.add('hidden'); editingId=null; render();
       const lmBtn=[...histBody.querySelectorAll('button')].find(b=>b.textContent.trim()==='Load more');
-      ok('load more: one week shown initially', histBody.querySelectorAll('.hrow').length===7, 'rows='+histBody.querySelectorAll('.hrow').length);
-      ok('load more: button appears when older days exist', !!lmBtn);
-      pastDaysShown+=PAST_PAGE; render();
-      ok('load more: next week revealed on click', histBody.querySelectorAll('.hrow').length===14, 'rows='+histBody.querySelectorAll('.hrow').length);
-      pastDaysShown=PAST_PAGE; state.histOpen=false;          // reset transient UI
+      ok('load more: 30 done items shown initially', histBody.querySelectorAll('.hrow').length===30, 'rows='+histBody.querySelectorAll('.hrow').length);
+      ok('load more: button appears when more done items exist', !!lmBtn);
+      lmBtn && lmBtn.click();
+      ok('load more: the rest revealed on click (40 done)', histBody.querySelectorAll('.hrow').length===40, 'rows='+histBody.querySelectorAll('.hrow').length);
+      ok('load more: no button once everything is shown', ![...histBody.querySelectorAll('button')].some(b=>b.textContent.trim()==='Load more'));
+      doneShown=DONE_PAGE; state.histOpen=false;          // reset transient UI
 
       // Mid-edit sync must never truncate a commit ("Thing" → "Thi", field report
       // 2026-07-10): passes SKIP while editing (no half-typed push), blur bumps v,
