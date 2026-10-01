@@ -71,6 +71,17 @@ enum ScreenshotHarness {
             store.deferred = [DeferredTask(id: "f1", text: "Renew the domain", wake: "2026-07-05"),
                               DeferredTask(id: "f2", text: "Plan Q3 offsite", wake: "2026-07-10")]
             return (store, .history, false, false)
+        case "history-lvl1":
+            store.seedForScreenshot(tasks: MockData.warningTasks, history: recentHistory())
+            store.deferred = [DeferredTask(id: "f1", text: "Renew the domain", wake: "2026-07-05"),
+                              DeferredTask(id: "f2", text: "Plan Q3 offsite", wake: "2026-07-10")]
+            return (store, .history, false, false)
+        case "future-long-lvl2":
+            store.seedForScreenshot(tasks: MockData.alarmTasks)
+            store.deferred = (1...12).map { i in
+                DeferredTask(id: "fl\(i)", text: "Future item \(i)", wake: "2099-01-01")
+            }
+            return (store, .history, false, false)
         case "future-long":
             // 12 parked rows — the Future tab MUST scroll (field report 2026-07-10 R2-5).
             store.seedForScreenshot(tasks: MockData.normalTasks)

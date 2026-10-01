@@ -347,10 +347,45 @@ final class BuddyStore {
 
     /// Remove a parked (Future) task for good. Mirrors the Mac Future-tab × button.
     /// Tombstone the id so a stale push from the other device can't resurrect it.
-    func deleteDeferred(id: String) {
+    func deleteDeferred(id: String, immediate: Bool = false) {
         tombstone(id)
         deferred.removeAll { $0.id == id }
-        scheduleSave()
+        scheduleSave(immediate: immediate)
+    }
+
+    /// Add a task straight to Future (History → Future → Add). Takes the FINISHED text — the
+    /// view keeps the in-progress draft locally, so a blank row is never written here (it would
+    /// sync to the Mac as an empty task). Blank / whitespace-only text is rejected (nil).
+    /// Appends (store order = oldest first), so the new row lands right above the Add row.
+    /// `immediate` writes to disk now (the backgrounding path — the app may be killed next).
+    @discardableResult
+    func addDeferred(text: String, immediate: Bool = false) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let id = newId()                   // iPhone-minted → UPPERCASE UUID
+        deferred.append(DeferredTask(id: id, text: trimmed, wake: "", v: 1))
+        scheduleSave(immediate: immediate)
+        return id
+    }
+
+    /// Edit a parked (Future) row's text. Empty → delete via the × path (tombstoned).
+    /// A real change bumps the row's v so the edit beats the peer's stale copy in merge
+    /// (Mac parity: `d.v=(d.v|0)+1`). Sent rows aren't editable.
+    /// `original` = the text when editing began: if the user didn't change it, this is a no-op —
+    /// otherwise a sync that updated the row mid-edit would be reverted by the stale copy with v+1.
+    func editDeferred(id: String, text: String, original: String? = nil, immediate: Bool = false) {
+        guard let idx = deferred.firstIndex(where: { $0.id == id }) else { return }
+        guard deferred[idx].sent != true else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let original, trimmed == original.trimmingCharacters(in: .whitespacesAndNewlines) { return }
+        if trimmed.isEmpty {
+            deleteDeferred(id: id, immediate: immediate)
+            return
+        }
+        guard deferred[idx].text != trimmed else { return }
+        deferred[idx].text = trimmed
+        deferred[idx].v += 1
+        scheduleSave(immediate: immediate)
     }
 
     /// Every completed task text (today + history), newest first — for the Settings export.

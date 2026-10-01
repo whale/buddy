@@ -674,12 +674,21 @@ enum InitialSheetKind { case none, history, settings }
 // SwiftUI FocusState was unstable here on device: the row could flicker between focused
 // and unfocused while the keyboard was trying to rise. This tiny UIKit bridge gives the
 // task editor one native first-responder owner, so the keyboard has a stable anchor.
-private struct InlineTaskEditor: UIViewRepresentable {
+struct InlineTaskEditor: UIViewRepresentable {
     @Binding var text: String
     let fontSize: CGFloat
     let textColor: UIColor
     let accessibilityIdentifier: String
+    var wrapsToProposedWidth = false   // opt-in (Future rows): wrap at the offered width instead of one long line
     let onCommit: () -> Void
+
+    // Without this a non-scrolling UITextView reports its one-line natural width, so long
+    // text overflows the row. Opt-in so Today's tuned editor metrics stay untouched.
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        guard wrapsToProposedWidth, let w = proposal.width, w.isFinite, w > 0 else { return nil }
+        let fit = uiView.sizeThatFits(CGSize(width: w, height: .greatestFiniteMagnitude))
+        return CGSize(width: w, height: ceil(fit.height))   // own height → the row grows with the text
+    }
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
