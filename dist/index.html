@@ -75,6 +75,7 @@
     transition:opacity var(--t-drift) var(--ease-out), transform var(--t-drift) var(--ease-out), color .1s ease; }
   .future-more.still{ transition:none !important; }   /* rebuilt by a render: land in place, no replay */
   .future-more:hover{ color:var(--addtxt-hover); }
+  .future-add:has(.future-more:active){ transform:none; }   /* tapping the count isn't an Add press */
   .fm-num{ display:inline-grid; overflow:hidden; vertical-align:bottom; }
   .fm-num > span{ grid-area:1/1; text-align:right; }
   .fm-num > .fm-in-up{   animation: fm-in-up .18s var(--ease-out) both; }
@@ -3507,7 +3508,8 @@ function restoreHistoryTask(text){
 // they live in the Skipped tab.
 function renderPast(){
   const todayDone = state.items.filter(it=>it.state==='done');     // live: today's completions
-  // First `doneShown` completions (today's count toward the page), cutting mid-day if needed.
+  // First `doneShown` completions: today's are always all shown (and count toward the page);
+  // past days fill the rest, cut mid-day if needed.
   let room=Math.max(0, doneShown-todayDone.length), total=todayDone.length;
   const past=[];
   for(const d of doneDays()){
@@ -3801,8 +3803,9 @@ function buildFutureAddRow(){
   // (.still = no transition) — the fade only plays when the count truly appears/leaves.
   const more=document.createElement('span');
   more.className='future-more still'+(futureMoreN>0?' on':''); more.title='Scroll to the bottom';
-  more.innerHTML='<span class="fm-num"><span></span></span> more ↓';
-  if(futureMoreN>0) futureMoreShown=futureMoreN;
+  more.innerHTML='<span class="fm-num" aria-hidden="true"><span></span></span><span aria-hidden="true"> more ↓</span>';
+  more.setAttribute('role','button');
+  if(futureMoreN>0){ futureMoreShown=futureMoreN; more.setAttribute('aria-label', futureMoreN+' more below'); }
   more.querySelector('.fm-num > span').textContent=String(futureMoreShown||'');
   more.addEventListener('click',e=>{ e.stopPropagation(); histScroll.scrollTo({ top:histScroll.scrollHeight, behavior:'smooth' }); });
   add.appendChild(more);
@@ -3829,14 +3832,17 @@ function updateFutureMore(){
   const num=more.querySelector('.fm-num');
   if(!more.classList.contains('on')){                         // appearing: set the number, then Fade+Drift in
     num.replaceChildren(Object.assign(document.createElement('span'),{textContent:String(n)}));
-    futureMoreShown=n; more.classList.add('on'); return;
+    futureMoreShown=n; more.classList.add('on'); more.setAttribute('aria-label', n+' more below'); return;
   }
   if(n===futureMoreShown) return;
   // Roll: fewer hidden (scrolling down) → numbers move up; more hidden → they move down.
   const dir = n<prev ? 'up' : 'down';
-  [...num.children].forEach(old=>{ old.className='fm-out-'+dir; old.addEventListener('animationend',()=>old.remove(),{once:true}); });
+  [...num.children].forEach(old=>{
+    if(reducedMotion()){ old.remove(); return; }    // RM hides outgoing spans (no animationend) — drop them now
+    old.className='fm-out-'+dir; old.addEventListener('animationend',()=>old.remove(),{once:true}); });
   const fresh=document.createElement('span'); fresh.className='fm-in-'+dir; fresh.textContent=String(n);
   num.appendChild(fresh); futureMoreShown=n;
+  more.setAttribute('aria-label', n+' more below');
 }
 histScroll.addEventListener('scroll', ()=>{
   if(!(state.histOpen && state.histTab==='future') || futureMoreRaf) return;
@@ -3848,6 +3854,7 @@ function renderFuture(){
   const wrap=document.createElement('div');
   wrap.className='bd';
   wrap.classList.add('future-list');
+  setFutureFitVars(wrap, futureFit);   // born at the last fitted size → one layout per render, not two
   if(futureCursor>=state.deferred.length) futureCursor=-1;   // clamp after removals
   const rows=futureDisplayOrder().map((d,i)=>{
     const row=d.sent ? buildSentFutureRow(d) : buildFutureRow(d, full);
@@ -3865,7 +3872,11 @@ function renderFuture(){
   fitFuture(wrap);
   if(futureWasFocused && futureEditEl && futureEditEl.isConnected) focusFutureEdit(futureEditEl, futureCaretSaved);
   updateFutureMore();
-  clearTimeout(futureMoreTimer); futureMoreTimer=setTimeout(updateFutureMore, 450);   // re-read once the open/enter animations settle
+  // Re-read once the open/enter animations settle — and re-fit then too: on a session's first
+  // open the Tailwind runtime only styles new class names AFTER this script, so the first
+  // probe measured unstyled rows and could pick a step one too big (skeptic 2026-10-01).
+  clearTimeout(futureMoreTimer);
+  futureMoreTimer=setTimeout(()=>{ if(state.histOpen && state.histTab==='future'){ fitFuture(null, true); updateFutureMore(); } }, 450);
 }
 let futureMoreTimer=null;
 // Shrink-to-fit, like Today's fitWrap: the largest step (24px text / 110px rows → 18px / 59px,
@@ -3873,21 +3884,42 @@ let futureMoreTimer=null;
 // scrolls under the sticky Add. Mid-edit the size is held, so the row you're typing in never jumps.
 const FUTURE_FIT={ FS:[24,18], MIN:[110,59], STEPS:12 };
 let futureFit=0;
-function fitFuture(list){
+function setFutureFitVars(list, t){
+  const [f0,f1]=FUTURE_FIT.FS, [m0,m1]=FUTURE_FIT.MIN;
+  list.style.setProperty('--ffs', (f0+(f1-f0)*t).toFixed(2)+'px');
+  list.style.setProperty('--fmin', Math.round(m0+(m1-m0)*t)+'px');
+}
+function fitFuture(list, force){
   list=list||histBody.querySelector('.future-list'); if(!list || !list.isConnected) return;
-  const apply=t=>{ const [f0,f1]=FUTURE_FIT.FS, [m0,m1]=FUTURE_FIT.MIN;
-    list.style.setProperty('--ffs', (f0+(f1-f0)*t).toFixed(2)+'px');
-    list.style.setProperty('--fmin', Math.round(m0+(m1-m0)*t)+'px'); };
+  const apply=t=>setFutureFitVars(list, t);
   if(futureWasFocused || futureEditLive()){ apply(futureFit); return; }
   const H=histScroll.clientHeight; if(H<=0){ apply(futureFit); return; }
+  // Each probe step re-lays-out every row's text, so (skeptic 2026-10-01: 75ms/render at 20
+  // items in WebKit with a 12-step linear scan): skip entirely when nothing that affects the
+  // answer changed, and otherwise check the smallest step first, then binary-search — "fits"
+  // is monotonic in the step, so this picks the same step in ≤5 probes instead of 12.
+  const key=[H, histScroll.clientWidth, list.children.length,
+    [...list.querySelectorAll('.future-title')].reduce((n,t)=>n+t.textContent.length,0)].join('|');
+  if(!force && key===futureFitKey) return;   // built at this size already — nothing to touch
+  const last=FUTURE_FIT.STEPS-1, fits=k=>{ apply(k/last); return list.scrollHeight<=H; };
   list.classList.add('fit-probe');
-  let k=0;
-  for(; k<FUTURE_FIT.STEPS; k++){ apply(k/(FUTURE_FIT.STEPS-1)); if(list.scrollHeight<=H) break; }
+  let k;
+  if(!fits(last)) k=last;                     // even the smallest doesn't fit → scroll under Add
+  else { let lo=0, hi=last; while(lo<hi){ const mid=(lo+hi)>>1; if(fits(mid)) hi=mid; else lo=mid+1; } k=lo; }
   list.classList.remove('fit-probe');
-  futureFit=Math.min(k, FUTURE_FIT.STEPS-1)/(FUTURE_FIT.STEPS-1);
+  futureFit=k/last; futureFitKey=key;
   apply(futureFit);
 }
-window.addEventListener('resize', ()=>{ if(state.histOpen && state.histTab==='future'){ fitFuture(); updateFutureMore(); } });
+let futureFitKey='';
+// Resize: once per frame, and not while Morning (the same native window) is up or the drawer
+// is tucked — dragging the Morning window's edge must not re-fit a hidden list per event.
+let futureResizeRaf=0;
+window.addEventListener('resize', ()=>{
+  if(futureResizeRaf || !(state.histOpen && state.histTab==='future') || morningUp()) return;
+  futureResizeRaf=requestAnimationFrame(()=>{ futureResizeRaf=0;
+    if(drawer.classList.contains('translate-x-full')) return;
+    fitFuture(); updateFutureMore(); });
+});
 
 // Sent rows ride on top (compact, like Today's Donezo), then plain rows oldest-first.
 function futureDisplayOrder(){
@@ -3935,10 +3967,12 @@ function deleteDeferred(id){ tombstone(id); state.deferred=state.deferred.filter
 // Done = everything the Done tab can show: today's completions + every archived done task.
 function histTabCount(tab){
   if(tab==='future') return (state.deferred||[]).filter(d=>!d.sent && String(d.text||'').trim()).length;
-  if(tab==='past'){
-    const today=(state.items||[]).filter(it=>it.state==='done').length;
-    const past=(state.history||[]).reduce((n,d)=>n+(d.items||[]).filter(it=>it && it.done && String(it.text||'').trim()).length, 0);
-    return today+past;
+  if(tab==='past'){  // same rule the Done tab renders with (done:true, has text, dated before today) —
+    const today=localDate();   // counted directly: building doneDays()' labels cost ~13ms/render
+    let n=(state.items||[]).filter(it=>it.state==='done').length;
+    for(const r of state.history||[]) if(r && typeof r.date==='string' && r.date<today)
+      for(const it of r.items||[]) if(it && it.done && String(it.text||'').trim()) n++;
+    return n;
   }
   return null;
 }
