@@ -3423,9 +3423,10 @@ function buildDonezoRow(it, idx, morning){
   return row;
 }
 
-let futureCaretSaved=null;                   // caret of the live Future field across a rebuild
+let futureCaretSaved=null, futureWasFocused=false;   // the live Future field's focus + caret across a rebuild
 function renderHist(){
-  futureCaretSaved = futureEditEl && document.activeElement===futureEditEl ? futureCaret(futureEditEl) : null;
+  futureWasFocused = !!futureEditEl && document.activeElement===futureEditEl;
+  futureCaretSaved = futureWasFocused ? futureCaret(futureEditEl) : null;
   histBody.innerHTML='';            // .stagger is applied by render() on the open transition only
   if(state.histTab==='skipped') state.histTab='past';   // Skipped tab removed → fall back to Done
   if(state.histTab==='future') renderFuture();
@@ -3579,25 +3580,45 @@ const futureEditLive = () => !!futureEditEl && document.activeElement===futureEd
 
 // Commit whatever the live field holds. Draft: push if it has text, else discard.
 // Existing row: save the edit (v-bump for sync), or delete it (tombstone) if emptied.
+// Same key the sync merge uses to collapse plain Future rows with one title (mergeDeferred's
+// same-title dedupe). Two plain rows with one key can't coexist after a sync, so we resolve it
+// NOW, the way the merge would — instead of one row silently vanishing on the next pass.
+const futureKey = t => String(t||'').replace(/\s+/g,' ').trim().toLowerCase();
+const futureTwin = (id, text) => (state.deferred||[]).find(x => x.id!==id && !x.sent && futureKey(x.text)===futureKey(text));
+let futureFlashId=null, futureFlashTimer=null;
+// "That's already in Future": scroll to the existing row and ring it briefly (cursor-ring
+// is the adaptive keyboard-cursor tint, so it follows lvl0/1/2).
+function flashFutureRow(id){
+  futureFlashId=id; clearTimeout(futureFlashTimer);
+  futureFlashTimer=setTimeout(()=>{ futureFlashId=null; render(); }, 1200);
+  requestAnimationFrame(()=>histBody.querySelector(`[data-fid="${id}"]`)?.closest('.future-row')?.scrollIntoView({block:'nearest'}));
+}
 function commitFutureEdit(){
   const el=futureEditEl; if(!el) return;
   futureEditEl=null;
   const id=el.dataset.fid, text=el.textContent.replace(/\s+/g,' ').trim();
   if(futureDraft && futureDraft.id===id){
     futureDraft=null;
-    if(text) state.deferred.push({ id, text, wake:'', v:1 });
+    if(!text) return;
+    const twin=futureTwin(id, text);
+    if(twin){ flashFutureRow(twin.id); return; }                    // already there — don't mint a duplicate
+    state.deferred.push({ id, text, wake:'', v:1 });
     return;
   }
   const d=(state.deferred||[]).find(x=>x.id===id); if(!d) return;   // removed meanwhile (e.g. by sync)
-  if(!text){ tombstone(id); state.deferred=state.deferred.filter(x=>x.id!==id); }
-  else if(text!==d.text){ d.text=text; d.v=(d.v|0)+1; }            // v-bump: the edit must beat the peer's stale copy
+  if(!text){ tombstone(id); state.deferred=state.deferred.filter(x=>x.id!==id); return; }
+  if(text!==d.text){ d.text=text; d.v=(d.v|0)+1; }                 // v-bump: the edit must beat the peer's stale copy
+  // Renamed to match another row: the merge would keep this one (higher v) and drop the
+  // other — do that now, tombstoned so the peer's copy can't bring it back.
+  const twin=futureTwin(id, text);
+  if(twin){ tombstone(twin.id); state.deferred=state.deferred.filter(x=>x.id!==twin.id); }
 }
 // Write what's typed into state without ending the edit (quit / hide safety net). Empty is
 // left alone — deleting a row the user is still typing into would be worse than keeping it.
 function flushFutureEdit(){
   const el=futureEditEl; if(!el) return;
   const id=el.dataset.fid, text=el.textContent.replace(/\s+/g,' ').trim(); if(!text) return;
-  if(futureDraft && futureDraft.id===id){ state.deferred.push({ id, text, wake:'', v:1 }); futureDraft=null; return; }
+  if(futureDraft && futureDraft.id===id){ if(!futureTwin(id, text)) state.deferred.push({ id, text, wake:'', v:1 }); futureDraft=null; return; }
   const d=(state.deferred||[]).find(x=>x.id===id);
   if(d && text!==d.text){ d.text=text; d.v=(d.v|0)+1; }
 }
@@ -3674,6 +3695,9 @@ function buildFutureTitle(id, text){
     futureEditEl=t; t.setAttribute('contenteditable','plaintext-only'); t.classList.remove('empty');
     t.closest('.future-row')?.classList.add('editing');
   });
+  // The row grows as you type; the browser's own caret-scrolling ignores the sticky Add row,
+  // so the last line would slide underneath it — keep it in view ourselves.
+  t.addEventListener('input',()=>scrollFutureEditIntoView());
   t.addEventListener('keydown',e=>{
     // Every key stays in the field: 'plaintext-only' doesn't match the global layer's
     // [contenteditable="true"] typing check, so letters would otherwise fire shortcuts.
@@ -3720,7 +3744,7 @@ function renderFuture(){
   if(futureCursor>=state.deferred.length) futureCursor=-1;   // clamp after removals
   const rows=state.deferred.map((d,i)=>{
     const row=d.sent ? buildSentFutureRow(d) : buildFutureRow(d, full);
-    if(i===futureCursor) row.classList.add('cursor-ring');   // Tab keyboard cursor
+    if(i===futureCursor || d.id===futureFlashId) row.classList.add('cursor-ring');   // Tab keyboard cursor / "already here" flash
     return row;
   });
   if(futureDraft) rows.push(buildFutureDraftRow());
@@ -3729,7 +3753,7 @@ function renderFuture(){
   const add=buildFutureAddRow(); if(rows.length) add.classList.add('border-t');
   histBody.appendChild(add);
   // Re-attached the live editor → give focus straight back (same tick, so no keystroke is lost).
-  if(futureEditEl && futureEditEl.isConnected) focusFutureEdit(futureEditEl, futureCaretSaved);
+  if(futureWasFocused && futureEditEl && futureEditEl.isConnected) focusFutureEdit(futureEditEl, futureCaretSaved);
 }
 
 function buildFutureRow(d, full){
@@ -3783,6 +3807,7 @@ function renderHistHeader(){
     b.style.minHeight='38px';                        // generous tap target (was ~22px — fiddly to hit)
     if(!active) b.style.color='var(--chrome-ink)';
     b.textContent=label;
+    b.addEventListener('mousedown',e=>{ if(futureEditEl) e.preventDefault(); });   // keep the header alive till click; settleFutureEdit commits the field
     b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; pastDaysShown=PAST_PAGE; render(); } });
     return b;
   };
@@ -3791,6 +3816,7 @@ function renderHistHeader(){
   const close=document.createElement('button'); close.title='Close';
   close.className='chrome-btn pressable size-[36px] grid place-items-center rounded-full';
   close.innerHTML=XICON;
+  close.addEventListener('mousedown',e=>{ if(futureEditEl) e.preventDefault(); });
   close.addEventListener('click',()=>{ state.histOpen=false; render(); });
   wrap.append(seg, close);
   const divider=document.createElement('div'); divider.className='divider h-px w-full bg-[#d9d9d9]';
@@ -4570,7 +4596,7 @@ async function resumeMorningCheck(){
 async function resumeMorningCheckInner(){
   T('resumeMorningCheck');
   await refreshFromDurableState('system-resume');
-  if(editingId!==null) return;               // don't steal/roll while a field is active
+  if(editingId!==null || futureEditLive()) return;   // don't steal/roll while a field is active
   const rolled=rolloverAndCarry();
   if(rolled){ setDate(); writeNow(); render(); }
   // Wake is the moment Buddy must be first. If today is still unplanned — either

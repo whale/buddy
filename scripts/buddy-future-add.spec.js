@@ -238,3 +238,72 @@ test('clicking + on a row you just emptied removes it instead of leaving a blank
   expect(await page.evaluate(() => document.querySelectorAll('.future-title').length)).toBe(1);
   expect(await page.evaluate(() => window.__buddy.state.items.length)).toBe(2);   // nothing blank sent to today
 });
+
+// ---- Second adversarial round (fresh reviewers 2026-10-01) ----
+
+// A real press takes ~90ms; Playwright's instant click hid the two-click bug.
+async function humanClick(page, locator) {
+  const r = await locator.boundingBox();
+  await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+  await page.mouse.down(); await page.waitForTimeout(90); await page.mouse.up();
+  await page.waitForTimeout(150);
+}
+
+test('adding a title that is already in Future does not create a twin (sync would drop one)', async ({ page }) => {
+  await boot(page);
+  await clickAdd(page); await page.keyboard.type('  renew   PASSPORT ');
+  await page.keyboard.press('Enter'); await settle(page);
+  expect(await texts(page)).toEqual(BASE);                       // nothing new, nothing lost
+  const ringed = await page.evaluate(() => document.querySelector('[data-fid="f0"]').closest('.future-row').classList.contains('cursor-ring'));
+  expect(ringed).toBe(true);                                      // the existing row is pointed out
+  await page.waitForTimeout(1400);
+  expect(await page.evaluate(() => document.querySelectorAll('.future-row.cursor-ring').length)).toBe(0);
+});
+
+test('renaming a row to match another keeps the renamed one and tombstones the twin', async ({ page }) => {
+  await boot(page);
+  await clickTitle(page, 1);
+  await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.type('Renew Passport');
+  await page.keyboard.press('Enter'); await settle(page);
+  expect(await texts(page)).toEqual(['Renew Passport']);
+  expect(await page.evaluate(() => window.__buddy.state.deferred[0].id)).toBe('f1');
+  expect(await page.evaluate(() => !!window.__buddy.state.tombstones.f0)).toBe(true);
+});
+
+test('long typing in a long list stays visible above the sticky Add row', async ({ page }) => {
+  await boot(page, { long: true });
+  await clickAdd(page);
+  await page.keyboard.type('A very long future task that keeps going and going so it wraps onto four lines under the add row');
+  const ok = await page.evaluate(() => {
+    const r = document.activeElement.getBoundingClientRect(), a = document.querySelector('.future-add').getBoundingClientRect();
+    return r.bottom <= a.top + 1;
+  });
+  expect(ok).toBe(true);
+});
+
+test('mid-edit, the Done tab and the close button work on the FIRST human-speed click', async ({ page }) => {
+  await boot(page);
+  await clickAdd(page); await page.keyboard.type('Via tab');
+  await humanClick(page, page.getByText('Done', { exact: true }));
+  expect(await page.evaluate(() => window.__buddy.state.histTab)).toBe('past');
+  expect(await texts(page)).toEqual([...BASE, 'Via tab']);
+
+  await boot(page);
+  await clickTitle(page, 0); await page.keyboard.type('!');
+  await humanClick(page, page.locator('#histSheet button[title=Close]'));
+  expect(await page.evaluate(() => window.__buddy.state.histOpen)).toBe(false);
+  expect(await texts(page)).toEqual(['Renew passport!', BASE[1]]);
+});
+
+test('a render landing right after Enter does not pull focus back into the field', async ({ page }) => {
+  await boot(page);
+  await clickAdd(page); await page.keyboard.type('Done typing');
+  await page.evaluate(() => {
+    const el = document.activeElement;
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    window.__buddy.render();
+  });
+  await settle(page);
+  expect(await page.evaluate(() => !!document.activeElement.dataset.fid)).toBe(false);
+  expect(await texts(page)).toEqual([...BASE, 'Done typing']);
+});
