@@ -37,6 +37,7 @@ final class BuddyFutureAddUITests: XCTestCase {
     /// Evidence capture: set TEST_RUNNER_BUDDY_SHOT_DIR to save keyboard-up PNGs there.
     private func saveShot(_ name: String) {
         guard let dir = ProcessInfo.processInfo.environment["BUDDY_SHOT_DIR"] else { return }
+        let name = name + (ProcessInfo.processInfo.environment["BUDDY_SHOT_TAG"] ?? "")
         let png = XCUIScreen.main.screenshot().pngRepresentation
         try? png.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
     }
@@ -273,5 +274,73 @@ final class BuddyFutureAddUITests: XCTestCase {
         for _ in 0..<3 { drag(0.50, 0.57) }      // back up → count rises (rolls down)
         drag(0.70, 0.30); sleep(1)               // fling to the bottom → fades out
         drag(0.40, 0.52); sleep(2)               // back up a bit → fades in again
+    }
+
+    // MARK: - Review 4 regressions
+
+    // Editing a row in a list that FITS must stay a fitting list: the keyboard rising must not
+    // flip Future into overflow (pinned Add + "N more") and hide the edited text under Add.
+    func testEditInFittingListStaysInline() throws {
+        let app = launch("future-6")
+        let row = el(app, "future-row-fn5")
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        row.tap()
+        let editor = el(app, "future-editor-fn5")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        editor.typeText(" and then a long tail that wraps onto a second line")
+        sleep(1)
+        saveShot("fix-1-edit-fitting")
+        let more = el(app, "future-more")
+        XCTAssertTrue(!more.exists || !more.isHittable, "no 'N more' — nothing is hidden")
+        XCTAssertLessThanOrEqual(editor.frame.maxY, keyboard.frame.minY + 1, "edited text above the keyboard")
+        let add = el(app, "future-add")
+        XCTAssertTrue(!add.isHittable || add.frame.minY >= editor.frame.maxY - 1, "Add never covers the edited text")
+    }
+
+    // The quiet count must re-count when the keyboard shortens the list (not stay stale).
+    func testCountUpdatesWhenKeyboardRises() throws {
+        let app = launch("future-12")
+        let row = el(app, "future-row-fn2")
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        row.tap()
+        let editor = el(app, "future-editor-fn2")
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        editor.typeText(" soon")                       // the simulator raises its keyboard on typing
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 3))
+        // Wait until the keyboard is really up on screen (not just in the tree).
+        let up = NSPredicate { _, _ in keyboard.exists && keyboard.frame.minY < app.windows.firstMatch.frame.maxY - 200 }
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: up, object: nil)], timeout: 5), .completed)
+        sleep(1)
+        saveShot("fix-2-count-keyboard")
+        let add = el(app, "future-add"), more = el(app, "future-more")
+        XCTAssertTrue(more.waitForExistence(timeout: 2))
+        let n = Int(more.label.split(separator: " ").first ?? "") ?? -1
+        let pitchH = pitch(el(app, "future-row-fn3"), el(app, "future-row-fn4"))
+        let addTop = add.frame.midY - pitchH / 2
+        let hidden = (1...12).filter { i in
+            let r = el(app, "future-row-fn\(i)")
+            return r.exists && r.frame.midY > addTop
+        }.count
+        XCTAssertEqual(n, hidden, accuracy: 1, "count \(n) vs rows actually under Add \(hidden)")
+    }
+
+    // Committing a draft in an overflowing list leaves the new row in view, just above Add.
+    func testCommitDraftInOverflowKeepsNewRowAboveAdd() throws {
+        let app = launch("future-12")
+        let add = el(app, "future-add")
+        XCTAssertTrue(add.waitForExistence(timeout: 3))
+        add.tap()
+        XCTAssertTrue(draftEditor(app).waitForExistence(timeout: 3))
+        draftEditor(app).typeText("Brand new thing\n")
+        sleep(1)
+        saveShot("fix-3-commit-overflow")
+        let fresh = app.staticTexts["Brand new thing"]
+        XCTAssertTrue(fresh.waitForExistence(timeout: 2))
+        XCTAssertTrue(fresh.isHittable, "the new row is in view")
+        XCTAssertLessThanOrEqual(fresh.frame.maxY, el(app, "future-add").frame.minY, "…and not under the pinned Add")
+        XCTAssertFalse(el(app, "future-row-fn1").isHittable, "the list didn't jump back to the top")
     }
 }

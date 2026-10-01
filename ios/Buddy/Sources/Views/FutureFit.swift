@@ -74,7 +74,7 @@ enum FutureFit {
     /// - texts: the flex rows' texts in order (plain rows, then the draft) — the Add row is implied.
     /// - heldStep: non-nil while editing → keep that step (no jump mid-type).
     static func compute(texts: [String], sentCount: Int, sentH: CGFloat, height H: CGFloat, width W: CGFloat,
-                        heldStep: Int? = nil,
+                        heldStep: Int? = nil, heldOverflow: Bool? = nil,
                         measure: (String, CGFloat, CGFloat) -> CGFloat = textHeight) -> Result {
         let dividers = CGFloat(texts.count + sentCount)                 // one between each row, incl. above Add
         let avail = H - CGFloat(sentCount) * sentH - dividers
@@ -97,7 +97,7 @@ enum FutureFit {
             }
         }
         let nat = naturals(k)
-        let overflow = H <= 0 || nat.reduce(0, +) > avail + 0.5
+        let overflow = heldOverflow ?? (H <= 0 || nat.reduce(0, +) > avail + 0.5)
         var heights = nat
         if !overflow {
             // Equal shares; a row whose text needs more keeps its natural height, others re-share.
@@ -108,7 +108,7 @@ enum FutureFit {
                 let share = (avail - big.reduce(0) { $0 + nat[$1] }) / CGFloat(rest.count)
                 let grow = rest.filter { nat[$0] > share }
                 if grow.isEmpty {
-                    for i in rest { heights[i] = floor(share) }
+                    for i in rest { heights[i] = max(floorH(k, sentH: sentH), floor(share)) }   // never below the floor (held mode may not fit → scrolls)
                     break
                 }
                 big.formUnion(grow)

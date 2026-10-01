@@ -71,17 +71,22 @@ enum HistoryModel {
     private static func isBlank(_ s: String) -> Bool {
         s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-    private static func parse(_ ds: String) -> Date? {
+    // Formatters are expensive to build — make them once (main-thread use only).
+    private static let isoDay: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy-MM-dd"
-        return f.date(from: ds)
-    }
+        return f
+    }()
+    private static var named: [String: DateFormatter] = [:]
+    private static func parse(_ ds: String) -> Date? { isoDay.date(from: ds) }
     private static func format(_ d: Date, _ fmt: String) -> String {
+        if let f = named[fmt] { return f.string(from: d) }
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US")
         f.dateFormat = fmt
+        named[fmt] = f
         return f.string(from: d)
     }
 }

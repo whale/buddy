@@ -35,12 +35,18 @@ struct HistoryView: View {
     @State private var moreN = 0                       // rows currently ≥ half under the pinned Add
     @State private var moreShown = 0                   // number on screen (kept while fading out)
     @State private var moreRollUp = true
+    @State private var landedId: String? = nil
+    @State private var moreTapWidth: CGFloat = 400         // a just-committed draft's new row id (scroll it into view)
     // Memo: the fit is a pure function of these inputs — re-renders (scrolling, the count, sync
     // adopts that don't touch Future) reuse the last result instead of re-measuring.
     private final class FitMemo {
         var lastStep = 0
         var key: [AnyHashable] = []
         var result: FutureFit.Result?
+        var lastH: CGFloat = 0, lastW: CGFloat = 0           // the frozen panel size last fitted to
+        var heldOverflow: (session: Int, overflow: Bool)?    // overflow mode, held for one edit session
+        var lastMids: [String: CGFloat] = [:]                // row mid-Ys, for re-counting on resize
+        var moreHiddenAt: Date = .distantPast                // when "N more" last started fading out
     }
     @State private var keyboardTop: CGFloat = .infinity
     @State private var sheetMaxY: CGFloat = 0
@@ -208,12 +214,19 @@ struct HistoryView: View {
             case .draft: texts.append(editText)
             }
         }
-        let key: [AnyHashable] = [texts, sent, H, W, heldFitStep ?? -1]
+        // While editing, overflow mode is held too (decided on the edit's first layout): the
+        // field growing to 2 lines must not flip Add into the pinned bar mid-type — the list
+        // just scrolls instead (Mac: the fit is frozen while a field is live).
+        let editing = editingId != nil
+        let held = editing ? fitMemo.heldOverflow.flatMap { $0.session == editSession ? $0.overflow : nil } : nil
+        let key: [AnyHashable] = [texts, sent, H, W, heldFitStep ?? -1, held.map { $0 ? 1 : 0 } ?? -1]
+        fitMemo.lastH = H; fitMemo.lastW = W
         if let cached = fitMemo.result, fitMemo.key == key { return cached }
         let r = FutureFit.compute(texts: texts, sentCount: sent, sentH: sentRowHeight,
-                                  height: H, width: W, heldStep: heldFitStep)
+                                  height: H, width: W, heldStep: heldFitStep, heldOverflow: held)
+        if editing && held == nil { fitMemo.heldOverflow = (editSession, r.overflow) }
         fitMemo.key = key; fitMemo.result = r
-        fitMemo.lastStep = r.step
+        if !editing { fitMemo.lastStep = r.step }
         return r
     }
 
@@ -227,10 +240,12 @@ struct HistoryView: View {
     /// A row counts once at least HALF of it is under the pinned Add (one change per row while
     /// scrolling). Nothing can hide when the list doesn't overflow.
     private func updateMore(mids: [String: CGFloat], addTop: CGFloat, overflow: Bool) {
+        fitMemo.lastMids = mids
         let n = overflow ? mids.values.filter { $0 > addTop }.count : 0
         let prev = moreN
         guard n != prev else { return }
         if n == 0 {                                            // fade out (0.24s), keeping the last number
+            fitMemo.moreHiddenAt = Date()
             withAnimation(BuddyEase.out(0.24)) { moreN = 0 }
             return
         }
@@ -252,7 +267,10 @@ struct HistoryView: View {
         GeometryReader { geo in
             // While the keyboard is up the list is shortened (padding below); keep sizing rows
             // from the pre-keyboard height so they don't jump as it rises — the list scrolls.
-            let H = keyboardOverlap > 0 && futureLayoutHeight > 0 ? futureLayoutHeight : geo.size.height
+            // Frozen for the WHOLE edit (not just once the keyboard is up): the panel shrinks as the
+            // keyboard starts rising, before keyboardOverlap reports it, and refitting to that
+            // flipped a fitting list into overflow mid-type.
+            let H = editingId != nil && futureLayoutHeight > 0 ? futureLayoutHeight : geo.size.height
             let items = futureItems
             let fit = futureFit(height: H, width: geo.size.width, items: items)
             let addH = fit.heights.last ?? fit.floorH
@@ -308,13 +326,35 @@ struct HistoryView: View {
                     withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .center) }
                 }
                 .onChange(of: keyboardOverlap) { _, _ in
+                    // After the shortened list has laid out — scrolling in the same pass measured
+                    // against the old height and went nowhere.
                     guard let id = editingId else { return }
-                    withAnimation(.easeOut(duration: 0.2)) { scrollToEditor(id, proxy: proxy, overflow: fit.overflow) }
+                    DispatchQueue.main.async {
+                        withAnimation(.easeOut(duration: 0.2)) { scrollToEditor(id, proxy: proxy, overflow: fit.overflow) }
+                    }
+                }
+                // The field grows as you type — keep its last line in view (not under Add/keyboard).
+                .onChange(of: editText) { _, _ in
+                    guard let id = editingId else { return }
+                    DispatchQueue.main.async { scrollToEditor(id, proxy: proxy, overflow: fit.overflow) }
+                }
+                // A draft just landed in an overflowing list → show it right above the pinned Add.
+                .onChange(of: landedId) { _, id in
+                    guard let id else { return }
+                    landedId = nil
+                    DispatchQueue.main.async {
+                        if fit.overflow { proxy.scrollTo(Self.endID, anchor: .bottom) }
+                        else { proxy.scrollTo(id, anchor: .bottom) }
+                    }
                 }
             }
             .coordinateSpace(name: "futureViewport")
-            .onAppear { if keyboardOverlap == 0 { futureLayoutHeight = geo.size.height } }
-            .onChange(of: geo.size.height) { _, h in if keyboardOverlap == 0 { futureLayoutHeight = h } }
+            .onAppear { if editingId == nil { futureLayoutHeight = geo.size.height } }
+            .onChange(of: geo.size.height) { _, h in
+                if editingId == nil && keyboardOverlap == 0 { futureLayoutHeight = h }
+                // The viewport moved under the rows (keyboard) — re-count with the last row positions.
+                updateMore(mids: fitMemo.lastMids, addTop: h - addH - 1, overflow: fit.overflow)
+            }
         }
         // The app column ignores the keyboard, so shrink just this list while editing so
         // the field (and the pinned Add) stay above the keyboard.
@@ -324,9 +364,10 @@ struct HistoryView: View {
     private static let endID = "future-end"
 
     /// Keep the field in view: above the pinned Add when overflowing (the draft is last → the end
-    /// spacer; a middle row → centred), else at the bottom edge.
+    /// spacer), else centred in what's left above the keyboard. (A .bottom anchor on a row did
+    /// nothing once the keyboard shortened the list — observed; .center lands reliably.)
     private func scrollToEditor(_ id: String, proxy: ScrollViewProxy, overflow: Bool) {
-        if !overflow { proxy.scrollTo(id, anchor: .bottom) }
+        if !overflow { proxy.scrollTo(id, anchor: .center) }
         else if id == Self.draftID { proxy.scrollTo(Self.endID, anchor: .bottom) }
         else { proxy.scrollTo(id, anchor: .center) }
     }
@@ -377,7 +418,14 @@ struct HistoryView: View {
         .padding(.horizontal, 32)
         .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .leading)
         .contentShape(Rectangle())
-        .onTapGesture { startDraft() }
+        .onTapGesture(coordinateSpace: .local) { loc in
+            // A tap aimed at "N more" while it fades must not fall through and start an add.
+            let fading = Date().timeIntervalSince(fitMemo.moreHiddenAt) < 0.35
+            if proxy != nil, fading, loc.x > 0.6 * moreTapWidth { return }
+            startDraft()
+        }
+        .background(GeometryReader { g in Color.clear.onAppear { moreTapWidth = g.size.width }
+            .onChange(of: g.size.width) { _, w in moreTapWidth = w } })
     }
 
     // Inline editor row — the same UIKit editor as Today, at the Future rows' 24pt. At least
@@ -411,7 +459,7 @@ struct HistoryView: View {
         editText = ""
         editOriginal = nil
         editSession += 1
-        heldFitStep = fitMemo.lastStep     // hold the size while typing (Mac: futureFit held mid-edit)
+        heldFitStep = freshStep(withDraft: true)   // hold the size while typing (Mac: futureFit held mid-edit)
         editingId = Self.draftID
         store.isEditingFuture = true       // sync adopt + rollover wait until this edit ends
     }
@@ -422,9 +470,20 @@ struct HistoryView: View {
         editText = text                    // keep the existing text (don't blank the row)
         editOriginal = text
         editSession += 1
-        heldFitStep = fitMemo.lastStep
+        heldFitStep = freshStep(withDraft: false)
         editingId = id
         store.isEditingFuture = true       // sync adopt + rollover wait until this edit ends
+    }
+
+    /// The step a FRESH fit would pick right now — after any previous edit was committed, and
+    /// counting the new draft row (Mac: render → fitFuture runs before the new field is live).
+    /// Never the previous edit's held step.
+    private func freshStep(withDraft: Bool) -> Int {
+        guard fitMemo.lastH > 0, fitMemo.lastW > 0 else { return fitMemo.lastStep }
+        let plain = store.deferred.filter { $0.sent != true }.map(\.text) + (withDraft ? [""] : [])
+        let sent = store.deferred.count - store.deferred.filter { $0.sent != true }.count
+        return FutureFit.compute(texts: plain, sentCount: sent, sentH: sentRowHeight,
+                                 height: fitMemo.lastH, width: fitMemo.lastW).step
     }
 
     /// Commit whatever is being edited. Draft → addDeferred (rejects blank); existing row →
@@ -444,8 +503,10 @@ struct HistoryView: View {
         var duplicateOf: String? = nil
         withoutAnimation {
             if id == Self.draftID {
-                if case .duplicate(let existing) = store.addDeferred(text: text, immediate: immediate) {
-                    duplicateOf = existing
+                switch store.addDeferred(text: text, immediate: immediate) {
+                case .duplicate(let existing)?: duplicateOf = existing
+                case .added(let newId)?: landedId = newId
+                case nil: break
                 }
             } else {
                 store.editDeferred(id: id, text: text, original: original, immediate: immediate)
