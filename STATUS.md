@@ -24,6 +24,24 @@ iPhone hardware beyond TestFlight install.
 Known limits (by design): cross-device order when both devices add at once;
 concurrent edits to one row resolve by tie-break.
 
+Handoff (end of session 2026-10-01): clean tree after the docs-fold merge (#166).
+Review: update Buddy on Mac (banner → 0.4.41) and iPhone (TestFlight build 50), open
+Future, add items, watch rows shrink → "N more ↓" on a long list; Done tab → Load more.
+Tests: `pnpm test:future` (+ ui:smoke, test:edit, test:settings, test:merge,
+test:crossbuild); iOS `xcodebuild test` per RELEASE-CHECKLIST §1.
+
+Next:
+1. Owner checks build 50 on a real iPhone — keyboard + shrink-to-fit while drafting
+   at a mid step, and the "N more" roll (only simulator-verified).
+2. Two-device check: add/edit a Future item on Mac 0.4.41, confirm it lands on the
+   phone and back (live sync harness passed; real devices not yet).
+3. Consider: "N more ↓" contrast at lvl0 (20% black at 15px, matches Add — reviewer
+   flagged as faint); Done-heading weekday edge in DST week (Mac + iOS match).
+4. Optional cleanup: delete the stale local branch `codex/task-limit-availability`
+   (its 2 docs commits landed via #166).
+5. If cross-device add order ever bothers: add a creation stamp to deferred rows and
+   sort by it (touches the sync wire — ship Mac + iOS together, RULE 5).
+
 
 ## Infra — 2026-09-28 — Supabase outage fixed, project moved to paid org
 
