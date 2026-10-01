@@ -131,7 +131,7 @@ test('typing survives constant background renders and never triggers shortcuts',
   expect(await texts(page)).toEqual([...BASE, 'Typed during constant renders b n t']);
 });
 
-test('long text grows the row while editing, back to 110px after', async ({ page }) => {
+test('long text grows the row while editing, back to equal filling rows after', async ({ page }) => {
   await boot(page);
   await clickAdd(page);
   await page.keyboard.type('A very long future task that wraps onto many many lines to see what happens with the row height here');
@@ -142,7 +142,8 @@ test('long text grows the row while editing, back to 110px after', async ({ page
   expect(fit).toBe(true);
   await page.keyboard.press('Enter'); await settle(page);
   const heights = await page.evaluate(() => [...document.querySelectorAll('.future-row')].map(r => r.offsetHeight));
-  expect(heights).toEqual([110, 110, 110]);
+  expect(new Set(heights).size).toBe(1);                         // the 2-line clamp keeps rows equal again
+  expect(heights[0]).toBeGreaterThanOrEqual(110);
 });
 
 test('long list: Add is pinned to the bottom and the new row scrolls into view above it', async ({ page }) => {
@@ -306,4 +307,46 @@ test('a render landing right after Enter does not pull focus back into the field
   await settle(page);
   expect(await page.evaluate(() => !!document.activeElement.dataset.fid)).toBe(false);
   expect(await texts(page)).toEqual([...BASE, 'Done typing']);
+});
+
+// ---- Layout (whale 2026-10-01): fill like Today until it can't, then scroll under a sticky Add ----
+
+const rowHeights = page => page.evaluate(() => [...document.querySelectorAll('.future-list > .future-row, .future-list > .future-add')]
+  .map(r => ({ kind: r.classList.contains('future-sent') ? 'sent' : r.classList.contains('future-add') ? 'add' : 'row', h: Math.round(r.getBoundingClientRect().height) })));
+
+test('few items: rows + Add share the panel equally, no empty band at the bottom', async ({ page }) => {
+  await boot(page);
+  const rows = await rowHeights(page);
+  expect(rows.map(r => r.kind)).toEqual(['row', 'row', 'add']);
+  expect(new Set(rows.map(r => r.h)).size).toBe(1);              // equal, exactly like Today
+  expect(rows[0].h).toBeGreaterThan(110);
+  const gap = await page.evaluate(() => Math.round(document.querySelector('#histSheet').getBoundingClientRect().bottom - document.querySelector('.future-add').getBoundingClientRect().bottom));
+  expect(gap).toBe(0);
+});
+
+test('sent rows sit on top and stay thin; plain rows still fill', async ({ page }) => {
+  await boot(page, { today: 3 });
+  await page.evaluate(() => {
+    const s = window.__buddy.state;
+    s.deferred.push({ id: 'fs', text: 'Ghost Navigation', wake: '', v: 2, sent: true, sentTid: 't0' });
+    window.__buddy.render();
+  });
+  const rows = await rowHeights(page);
+  expect(rows.map(r => r.kind)).toEqual(['sent', 'row', 'row', 'add']);
+  expect(rows[0].h).toBeLessThan(80);
+  expect(rows[1].h).toBe(rows[2].h);
+  expect(rows[1].h).toBeGreaterThan(110);
+});
+
+test('too many items: rows stop at 110px, the list scrolls, Add stays pinned', async ({ page }) => {
+  await boot(page, { long: true });
+  const rows = await rowHeights(page);
+  expect(rows.every(r => r.h === 110)).toBe(true);
+  const pinned = await page.evaluate(async () => {
+    const scroller = document.querySelector('.future-body').parentElement;
+    const before = document.querySelector('.future-add').getBoundingClientRect().bottom;
+    scroller.scrollTop = 120; await new Promise(r => requestAnimationFrame(r));
+    return { scrolls: scroller.scrollHeight > scroller.clientHeight, still: document.querySelector('.future-add').getBoundingClientRect().bottom === before };
+  });
+  expect(pinned).toEqual({ scrolls: true, still: true });
 });

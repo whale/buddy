@@ -53,6 +53,14 @@
      blank white band the eye reads as padding — invisible, yet holding a cap slot. Show it
      always, and via the token so it adapts on red (RULE 1) instead of staying dark. */
   .empty:before{content:attr(data-ph);color:var(--ink-dim)}
+  /* Future fills the panel like Today: plain rows + Add share the height (110px floor each);
+     only when they no longer fit does it scroll, with Add sticky. Sent rows stay compact. */
+  .future-body{ display:flex; flex-direction:column; min-height:100%; }
+  .future-body > .future-list{ flex:1 1 auto; display:flex; flex-direction:column; }
+  .future-list > .future-row, .future-list > .future-add{ flex:1 1 110px; min-height:110px; }
+  .future-list > .future-row.future-sent{ flex:0 0 auto; min-height:0; }
+  /* The row being typed in sizes to its text (never squeezed under it), so a long edit grows. */
+  .future-list > .future-row.editing{ flex-basis:auto; flex-shrink:0; }
   .future-title:not([contenteditable]){ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
   .future-title[contenteditable]{ outline:none; white-space:pre-wrap; overflow-wrap:anywhere; }
 
@@ -3429,6 +3437,7 @@ function renderHist(){
   futureCaretSaved = futureWasFocused ? futureCaret(futureEditEl) : null;
   histBody.innerHTML='';            // .stagger is applied by render() on the open transition only
   if(state.histTab==='skipped') state.histTab='past';   // Skipped tab removed → fall back to Done
+  histBody.classList.toggle('future-body', state.histTab==='future');
   if(state.histTab==='future') renderFuture();
   else renderPast();
   settleFutureEdit();
@@ -3538,7 +3547,7 @@ function histLoadMore(){
 function makeFutureHoverRow(contentEl, actions){
   const row=document.createElement('div');
   row.className='future-row bd group/h relative flex items-stretch border-[#d9d9d9]';
-  row.style.cssText='min-height:110px;background:var(--card);';
+  row.style.background='var(--card)';   // height: .future-list flex rule (fills like Today, 110px floor)
 
   const front=document.createElement('div');
   front.className='flex items-center px-8 pr-[88px] py-4 w-full min-w-0';   // stretches to the row; grows it for long edits
@@ -3730,7 +3739,7 @@ function buildFutureTitle(id, text){
 function buildFutureAddRow(){
   const add=document.createElement('div');
   add.className='future-add addrow pressable row-neutral bd flex items-center cursor-pointer border-[#d9d9d9]';
-  add.style.cssText='position:sticky;bottom:0;z-index:2;height:110px;padding:0 32px;background:var(--card);';
+  add.style.cssText='position:sticky;bottom:0;z-index:2;padding:0 32px;background:var(--card);';   // height: .future-body flex rule
   add.innerHTML='<div class="addtxt flex gap-[18px] font-medium tracking-[-0.48px]" style="font-size:24px"><span>Add</span><span>+</span></div>';
   add.addEventListener('mousedown',e=>e.preventDefault());   // keep focus in the field until we commit it
   add.addEventListener('click',()=>addFutureAndEdit());
@@ -3741,21 +3750,29 @@ function renderFuture(){
   const full = activeCount()>=taskLimit();            // today maxed → hide every +
   const wrap=document.createElement('div');
   wrap.className='bd';
+  wrap.classList.add('future-list');
   if(futureCursor>=state.deferred.length) futureCursor=-1;   // clamp after removals
-  const rows=state.deferred.map((d,i)=>{
+  const rows=futureDisplayOrder().map((d,i)=>{
     const row=d.sent ? buildSentFutureRow(d) : buildFutureRow(d, full);
     if(i===futureCursor || d.id===futureFlashId) row.classList.add('cursor-ring');   // Tab keyboard cursor / "already here" flash
     return row;
   });
   if(futureDraft) rows.push(buildFutureDraftRow());
   rows.forEach((row,i)=>{ if(i>0) row.classList.add('border-t'); wrap.appendChild(row); });
-  histBody.appendChild(wrap);
+  // Add lives IN the list so it shares the height equally with the rows (exactly like Today's
+  // Add); sticky bottom still pins it once the list outgrows the panel.
   const add=buildFutureAddRow(); if(rows.length) add.classList.add('border-t');
-  histBody.appendChild(add);
+  wrap.appendChild(add);
+  histBody.appendChild(wrap);
   // Re-attached the live editor → give focus straight back (same tick, so no keystroke is lost).
   if(futureWasFocused && futureEditEl && futureEditEl.isConnected) focusFutureEdit(futureEditEl, futureCaretSaved);
 }
 
+// Sent rows ride on top (compact, like Today's Donezo), then plain rows oldest-first.
+function futureDisplayOrder(){
+  const all=state.deferred||[];
+  return [...all.filter(d=>d.sent), ...all.filter(d=>!d.sent)];
+}
 function buildFutureRow(d, full){
   const t=buildFutureTitle(d.id, d.text);
   const actions=[];
@@ -3786,7 +3803,9 @@ function buildSentFutureRow(d){
   ttl.className='future-sent-dim truncate'; ttl.style.cssText='font-size:18px;color:var(--ink-dim)';
   ttl.textContent=d.text;
   lab.append(tag, ttl);
-  return makeFutureHoverRow(lab, [{title:'Undo — back to Future', icon:UNDO, run:()=>unsendDeferred(d.id)}]);
+  const row=makeFutureHoverRow(lab, [{title:'Undo — back to Future', icon:UNDO, run:()=>unsendDeferred(d.id)}]);
+  row.classList.add('future-sent');   // thin, like Today's Donezo row
+  return row;
 }
 // Tombstone the id — without it a synced peer's copy resurrects the row on the next pass.
 function deleteDeferred(id){ tombstone(id); state.deferred=state.deferred.filter(d=>d.id!==id); save(); render(); }
@@ -4518,7 +4537,7 @@ document.addEventListener('keydown', e=>{
   // FUTURE panel: Tab / Shift+Tab walk the parked rows (cursor-ring), Enter
   // sends the cursored row to today (same as its + action, cap-respecting).
   if(state.histOpen && state.histTab==='future'){
-    const rows=(state.deferred||[]).slice();   // displayed order (oldest first, like Today)
+    const rows=futureDisplayOrder();   // displayed order (sent on top, then oldest first)
     if(e.key==='Tab' && rows.length){
       e.preventDefault();
       futureCursor=((futureCursor+(e.shiftKey?-1:1))%rows.length+rows.length)%rows.length;

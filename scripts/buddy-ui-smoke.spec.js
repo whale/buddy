@@ -31,7 +31,7 @@ test('Mac morning Skip aligns with task text column', async ({ page }) => {
   expect(Math.abs(positions.skipTextLeft - positions.taskTextLeft)).toBeLessThanOrEqual(1);
 });
 
-test('Future uses Today-style fixed rows without an extra heading', async ({ page }) => {
+test('Future uses Today-style filling rows without an extra heading', async ({ page }) => {
   await page.setViewportSize({ width: 452, height: 900 });
   await page.goto('file://' + path.resolve(__dirname, '../dist/index.html'));
   await page.waitForFunction(() => window.__buddy && window.__buddy.render);
@@ -60,7 +60,9 @@ test('Future uses Today-style fixed rows without an extra heading', async ({ pag
   });
 
   expect(layout.rowCount).toBe(2);
-  expect(layout.heights).toEqual(['110px', '110px']);
+  // Rows fill the panel like Today (whale 2026-10-01): equal heights, never below the 110px floor.
+  expect(layout.heights[0]).toBe(layout.heights[1]);
+  expect(parseFloat(layout.heights[0])).toBeGreaterThanOrEqual(110);
   expect(layout.extraFutureHeadings).toBe(0);
 
   const hoverActions = await page.evaluate(() => {
