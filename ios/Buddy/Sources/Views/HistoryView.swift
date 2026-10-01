@@ -24,6 +24,7 @@ struct HistoryView: View {
     @State private var editText: String = ""
     @State private var editOriginal: String? = nil     // text when an existing-row edit began (nil for a draft)
     @Environment(\.scenePhase) private var scenePhase
+    @State private var highlightId: String? = nil      // existing row flashed when an Add is a duplicate title
     @State private var editSession = 0                 // bumps per edit → a fresh editor + stale-write guard
     private static let draftID = "future-draft"
     private static let addRowHeight: CGFloat = 110
@@ -68,6 +69,8 @@ struct HistoryView: View {
         // (same gate as TodayView).
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { commitFutureEdit(immediate: true) }
+            // Heal: the Future sync guard is only ever up while an editor is (never wedge sync).
+            if phase == .active, editingId == nil, store.isEditingFuture { store.isEditingFuture = false }
         }
         #if DEBUG
         .onAppear {   // screenshot harness: -uiTab Future|Done|Skipped, -uiFutureDraft "text"
@@ -182,6 +185,10 @@ struct HistoryView: View {
                         withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .bottom) }
                     }
                 }
+                .onChange(of: highlightId) { _, id in
+                    guard let id else { return }
+                    withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .center) }
+                }
                 .onChange(of: keyboardOverlap) { _, _ in
                     guard let id = editingId else { return }
                     withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .bottom) }
@@ -277,6 +284,7 @@ struct HistoryView: View {
         editOriginal = nil
         editSession += 1
         editingId = Self.draftID
+        store.isEditingFuture = true       // sync adopt + rollover wait until this edit ends
     }
 
     private func startFutureEdit(id: String, text: String) {
@@ -286,20 +294,43 @@ struct HistoryView: View {
         editOriginal = text
         editSession += 1
         editingId = id
+        store.isEditingFuture = true       // sync adopt + rollover wait until this edit ends
     }
 
     /// Commit whatever is being edited. Draft → addDeferred (rejects blank); existing row →
     /// editDeferred (empty deletes + tombstones; a change bumps v). Idempotent.
     private func commitFutureEdit(immediate: Bool = false) {
-        guard let id = editingId else { return }
+        guard let id = editingId else {
+            if store.isEditingFuture { store.isEditingFuture = false }   // never leave sync wedged
+            return
+        }
         let text = editText
         let original = editOriginal
         editingId = nil
         editText = ""
         editOriginal = nil
+        store.isEditingFuture = false      // edit over — the next sync pass may adopt again
+        var duplicateOf: String? = nil
         withoutAnimation {
-            if id == Self.draftID { store.addDeferred(text: text, immediate: immediate) }
-            else { store.editDeferred(id: id, text: text, original: original, immediate: immediate) }
+            if id == Self.draftID {
+                if case .duplicate(let existing) = store.addDeferred(text: text, immediate: immediate) {
+                    duplicateOf = existing
+                }
+            } else {
+                store.editDeferred(id: id, text: text, original: original, immediate: immediate)
+            }
+        }
+        if let existing = duplicateOf { flashDuplicate(existing) }
+    }
+
+    // Already in Future under the same title → nothing added; point at the existing row instead.
+    private func flashDuplicate(_ id: String) {
+        highlightId = nil
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.15)) { highlightId = id }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                if highlightId == id { withAnimation(.easeOut(duration: 0.4)) { highlightId = nil } }
+            }
         }
     }
 
@@ -351,6 +382,10 @@ struct HistoryView: View {
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .padding(.horizontal, 32)
+                // Duplicate-add flash: the adaptive hairline token as a soft wash (RULE 1 —
+                // grey on white at lvl0/lvl1, translucent white on red at lvl2).
+                .background(theme.line.opacity(highlightId == id ? 0.7 : 0))
+                .accessibilityIdentifier(highlightId == id ? "future-highlight" : "future-row-\(id)")
         }
         .frame(height: 110)
     }

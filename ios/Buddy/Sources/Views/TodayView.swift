@@ -206,6 +206,7 @@ struct TodayView: View {
                 // whether a field is actually up, so it is what can say so. (The Mac has the same
                 // hazard and heals it via editingActive(); this is the iOS equivalent.)
                 if editingId == nil && store.isEditing { store.isEditing = false }
+                if !showHistory && store.isEditingFuture { store.isEditingFuture = false }   // same heal for a Future edit
                 store.performRolloverIfNeeded()
                 store.sweepStrandedBlanks()                     // an untitled row left by an interrupted add must not hold a cap slot
                 sync?.syncOnForeground()                        // pull + go live on foreground

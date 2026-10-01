@@ -96,8 +96,13 @@ final class BuddyFutureAddUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Kept on leave"].waitForExistence(timeout: 3))
     }
 
-    // Review #1: a draft typed in Future survives background → kill → relaunch.
-    func testDraftSurvivesBackgroundThenKill() throws {
+    // END-TO-END background-commit check: a draft typed in Future is still there after
+    // background → kill → relaunch. HONEST LIMIT: this does NOT prove the immediate disk
+    // write on .background — on the simulator the keyboard's own end-editing commit plus
+    // the 0.25s debounced save also land inside iOS's background grace period (verified:
+    // it passes with the .background commit removed). The immediate write is pinned by the
+    // unit test FutureAddStoreTests.testImmediateAddAndEditReachDiskWithoutDebounce.
+    func testBackgroundedDraftIsStillThereAfterRelaunch_EndToEnd() throws {
         let app = launch()
         let add = app.descendants(matching: .any)["future-add"].firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 3))
@@ -122,5 +127,21 @@ final class BuddyFutureAddUITests: XCTestCase {
         relaunched.staticTexts["Future"].firstMatch.tap()
         XCTAssertTrue(relaunched.staticTexts["Survives the kill"].waitForExistence(timeout: 3),
                       "A backgrounded Future draft must be persisted before the app can be killed")
+    }
+
+    // Same title as an existing row (case/whitespace-insensitive) → nothing added; the
+    // existing row is flashed instead (sync would otherwise make one of them vanish).
+    func testDuplicateTitleIsNotAdded() throws {
+        let app = launch()
+        let add = app.descendants(matching: .any)["future-add"].firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 3))
+        add.tap()
+        XCTAssertTrue(draftEditor(app).waitForExistence(timeout: 3))
+        draftEditor(app).typeText("  renew THE   domain\n")
+        // The flash lasts ~1.2s — read ONE accessibility snapshot straight away (a polling
+        // element query can take longer than the flash itself).
+        XCTAssertTrue(app.debugDescription.contains("future-highlight"), "The existing row should flash")
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label ==[c] 'renew the domain'")).count, 1)
+        XCTAssertFalse(app.staticTexts["renew THE domain"].exists)
     }
 }
