@@ -64,7 +64,7 @@
   .future-list > .future-row, .future-list > .future-add{ flex:1 0 var(--fmin); min-height:auto; }   /* equal from --fmin; never below its own text (auto min) */
   .future-list > .future-row.future-sent{ flex:0 0 auto; min-height:0; }
   .future-list.fit-probe > *{ flex-grow:0 !important; }   /* measure natural heights, no fill */
-  .seg-count{ opacity:.55; }   /* "(n)" on the Future / Done tabs: quieter than the label, still legible */
+  .seg-count{ opacity:.55; margin-left:6px; }   /* "(n)" on the Future / Done tabs: quieter than the label, still legible; 6px past the word space */
   /* "6 more ↓" in the sticky Add row while rows sit underneath it (whale 2026-10-01).
      Moves in Buddy's language: appears with Fade+Drift (--t-drift, --ease-out), leaves
      faster, and the number rolls (old up/out, new in) like item-in — never pops. */
