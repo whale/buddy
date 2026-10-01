@@ -387,3 +387,22 @@ test('tabs show Future (n) / Done (n), with a quieter count that stays on one li
   expect(tabs.map(t => t.text)).toEqual(['Future (2)', 'Done (2)']);   // sent rows aren't waiting; undone history isn't done
   expect(tabs.every(t => t.oneLine && t.quiet === '0.55')).toBe(true);
 });
+
+// ---- "N more ↓" in the sticky Add row (whale 2026-10-01: chose the quiet count) ----
+
+test('quiet count: shows how many rows hide under Add, click scrolls (does not add), gone at the bottom', async ({ page }) => {
+  await boot(page);
+  expect(await page.locator('.future-more').isVisible()).toBe(false);   // short list: nothing hidden
+  await page.evaluate(() => { const s = window.__buddy.state; s.deferred = Array.from({ length: 16 }, (_, i) => ({ id: 'f' + i, text: 'Item ' + i, wake: '', v: 1 })); window.__buddy.render(); });
+  const more = page.locator('.future-more');
+  await expect(more).toBeVisible();
+  const n = parseInt(await more.textContent(), 10);
+  expect(n).toBeGreaterThan(0);
+  expect(await more.textContent()).toBe(n + ' more ↓');
+  await more.click(); await page.waitForTimeout(700);
+  expect(await texts(page)).toHaveLength(16);                    // the click scrolled — no draft, no new item
+  expect(await page.evaluate(() => !!document.activeElement.dataset.fid)).toBe(false);
+  await expect(more).toBeHidden();                                // at the bottom: nothing left underneath
+  const color = await page.evaluate(() => getComputedStyle(document.querySelector('.future-more')).color);
+  expect(color).toBeTruthy();
+});

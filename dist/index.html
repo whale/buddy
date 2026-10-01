@@ -64,7 +64,11 @@
   .future-list > .future-row, .future-list > .future-add{ flex:1 0 var(--fmin); min-height:auto; }   /* equal from --fmin; never below its own text (auto min) */
   .future-list > .future-row.future-sent{ flex:0 0 auto; min-height:0; }
   .future-list.fit-probe > *{ flex-grow:0 !important; }   /* measure natural heights, no fill */
-  .seg-count{ opacity:.55; }   /* "(n)" on the Future / Done tabs: quieter than the label, still legible */
+  .seg-count{ opacity:.55; }
+  /* "6 more ↓" in the sticky Add row while rows sit underneath it (whale 2026-10-01). */
+  .future-more{ margin-left:auto; font-size:15px; letter-spacing:-0.3px; color:var(--addtxt); white-space:nowrap; cursor:pointer; transition:color .1s ease; }
+  .future-more:hover{ color:var(--addtxt-hover); }
+  .future-more[hidden]{ display:none; }   /* "(n)" on the Future / Done tabs: quieter than the label, still legible */
   .future-title:not([contenteditable]){ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
   .future-title[contenteditable]{ outline:none; white-space:pre-wrap; overflow-wrap:anywhere; }
 
@@ -3734,7 +3738,7 @@ function buildFutureTitle(id, text){
   });
   // The row grows as you type; the browser's own caret-scrolling ignores the sticky Add row,
   // so the last line would slide underneath it — keep it in view ourselves.
-  t.addEventListener('input',()=>scrollFutureEditIntoView());
+  t.addEventListener('input',()=>{ scrollFutureEditIntoView(); updateFutureMore(); });
   t.addEventListener('keydown',e=>{
     // Every key stays in the field: 'plaintext-only' doesn't match the global layer's
     // [contenteditable="true"] typing check, so letters would otherwise fire shortcuts.
@@ -3771,8 +3775,26 @@ function buildFutureAddRow(){
   add.innerHTML='<div class="addtxt flex gap-[18px] font-medium tracking-[-0.48px]" style="font-size:var(--ffs,24px)"><span>Add</span><span>+</span></div>';
   add.addEventListener('mousedown',e=>e.preventDefault());   // keep focus in the field until we commit it
   add.addEventListener('click',()=>addFutureAndEdit());
+  // Quiet count of rows hidden under the sticky Add; click jumps to the bottom (not an add).
+  const more=document.createElement('span');
+  more.className='future-more'; more.hidden=true; more.title='Scroll to the bottom';
+  more.addEventListener('click',e=>{ e.stopPropagation(); histScroll.scrollTo({ top:histScroll.scrollHeight, behavior:'smooth' }); });
+  add.appendChild(more);
   return add;
 }
+// How many rows are (even partly) tucked under the sticky Add row right now.
+function updateFutureMore(){
+  const add=histBody.querySelector('.future-add'), more=add && add.querySelector('.future-more');
+  if(!more) return;
+  // Nothing can hide if the list doesn't scroll — also guards the open animation, whose
+  // translated rows would otherwise read as "under" the Add row for a moment.
+  const overflows = histScroll.scrollHeight > histScroll.clientHeight+1;
+  const floor=add.getBoundingClientRect().top+2;
+  const n = !overflows ? 0 : [...histBody.querySelectorAll('.future-list > .future-row')].filter(r=>r.getBoundingClientRect().bottom>floor).length;
+  more.hidden = n===0;
+  if(n) more.textContent = n+' more ↓';
+}
+histScroll.addEventListener('scroll', ()=>{ if(state.histOpen && state.histTab==='future') updateFutureMore(); }, { passive:true });
 function renderFuture(){
   if(!state.deferred) state.deferred=[];
   const full = activeCount()>=taskLimit();            // today maxed → hide every +
@@ -3795,7 +3817,10 @@ function renderFuture(){
   // Re-attached the live editor → give focus straight back (same tick, so no keystroke is lost).
   fitFuture(wrap);
   if(futureWasFocused && futureEditEl && futureEditEl.isConnected) focusFutureEdit(futureEditEl, futureCaretSaved);
+  updateFutureMore();
+  clearTimeout(futureMoreTimer); futureMoreTimer=setTimeout(updateFutureMore, 450);   // re-read once the open/enter animations settle
 }
+let futureMoreTimer=null;
 // Shrink-to-fit, like Today's fitWrap: the largest step (24px text / 110px rows → 18px / 59px,
 // the "Sent to today!" size) at which every row fits the panel. Past the smallest step the list
 // scrolls under the sticky Add. Mid-edit the size is held, so the row you're typing in never jumps.
@@ -3815,7 +3840,7 @@ function fitFuture(list){
   futureFit=Math.min(k, FUTURE_FIT.STEPS-1)/(FUTURE_FIT.STEPS-1);
   apply(futureFit);
 }
-window.addEventListener('resize', ()=>{ if(state.histOpen && state.histTab==='future') fitFuture(); });
+window.addEventListener('resize', ()=>{ if(state.histOpen && state.histTab==='future'){ fitFuture(); updateFutureMore(); } });
 
 // Sent rows ride on top (compact, like Today's Donezo), then plain rows oldest-first.
 function futureDisplayOrder(){
