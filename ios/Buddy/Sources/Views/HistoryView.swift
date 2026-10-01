@@ -14,7 +14,7 @@ struct HistoryView: View {
 
     enum Tab: String, CaseIterable { case future = "Future", done = "Done" }
     @State private var tab: Tab = .future
-    @State private var pastDaysShown = 7   // Mac PAST_PAGE — "Load more" pages a week at a time
+    @State private var doneShown = HistoryModel.donePage   // Mac DONE_PAGE — 30 completed items per page
     @State private var openFutureRowID: String? = nil
 
     // Future inline editing — mirrors TodayView's Add/edit. The NEW-item draft lives ONLY
@@ -27,9 +27,21 @@ struct HistoryView: View {
     @State private var highlightId: String? = nil      // existing row flashed when an Add is a duplicate title
     @State private var editSession = 0                 // bumps per edit → a fresh editor + stale-write guard
     private static let draftID = "future-draft"
-    private static let addRowHeight: CGFloat = 110
     @State private var futureLayoutHeight: CGFloat = 0 // panel height without the keyboard (row sizing)
-    @State private var sentRowHeight: CGFloat = 44     // measured compact "Sent to today!" row height
+    private var sentRowHeight: CGFloat { FutureFit.sentRowHeight }   // compact "Sent to today!" row = fit floor
+    @State private var heldFitStep: Int? = nil         // fit step frozen while editing (no jump mid-type)
+    @State private var fitMemo = FitMemo()             // last computed step (read when an edit starts)
+    // "N more ↓" — parent-owned so a rebuilt Add row never replays its entrance.
+    @State private var moreN = 0                       // rows currently ≥ half under the pinned Add
+    @State private var moreShown = 0                   // number on screen (kept while fading out)
+    @State private var moreRollUp = true
+    // Memo: the fit is a pure function of these inputs — re-renders (scrolling, the count, sync
+    // adopts that don't touch Future) reuse the last result instead of re-measuring.
+    private final class FitMemo {
+        var lastStep = 0
+        var key: [AnyHashable] = []
+        var result: FutureFit.Result?
+    }
     @State private var keyboardTop: CGFloat = .infinity
     @State private var sheetMaxY: CGFloat = 0
 
@@ -63,7 +75,7 @@ struct HistoryView: View {
         }
         // Leaving Future or closing the sheet commits a draft with text (Mac parity);
         // an empty draft is simply dropped.
-        .onChange(of: tab) { _, _ in commitFutureEdit() }
+        .onChange(of: tab) { _, _ in commitFutureEdit(); doneShown = HistoryModel.donePage; moreN = 0 }
         .onDisappear { commitFutureEdit() }
         // TRUE backgrounding flushes the edit straight to disk — the app may be killed next.
         // Not .inactive: Control Center / app switcher / Face ID mustn't end the edit
@@ -85,62 +97,64 @@ struct HistoryView: View {
         #endif
     }
 
-    // MARK: Segmented control ([Future | Done | Skipped])
+    // MARK: Segmented control ([Future (n) | Done (n)])
+    private func tabCount(_ t: Tab) -> Int {
+        switch t {
+        case .future: return HistoryModel.futureCount(store.deferred)
+        case .done:   return HistoryModel.doneCount(todayDone: store.doneTasks, history: store.history)
+        }
+    }
+
     private var segmented: some View {
         HStack(spacing: 4) {
             ForEach(Tab.allCases, id: \.self) { t in
                 let active = tab == t
-                Text(t.rawValue)
-                    .font(.geist(15, .regular)).tracking(-0.30)
-                    // Selected label follows escalation (black → red at lvl1/lvl2);
-                    // pill stays white at every level — mirrors Mac .seg-sel.
-                    .foregroundStyle(active ? theme.segSelInk : theme.chromeInk)
-                    .padding(.horizontal, 16).frame(height: 38)
-                    .background(
-                        Capsule().fill(active ? Color.white : .clear)
-                            .shadow(color: active && theme.level != .lvl2 ? .black.opacity(0.08) : .clear, radius: 2, y: 1)
-                    )
-                    .contentShape(Capsule())
-                    .onTapGesture { tab = t }
+                // "Future (12)": the count is the label's own colour at 55% (so it follows
+                // lvl0/1/2), 6pt past the word space, and never wraps (Mac .seg-count).
+                HStack(spacing: 0) {
+                    Text(t.rawValue)
+                    Text(" (\(tabCount(t)))").opacity(0.55).padding(.leading, 6)
+                }
+                .font(.geist(15, .regular)).tracking(-0.30)
+                .lineLimit(1).fixedSize()
+                // Selected label follows escalation (black → red at lvl1/lvl2);
+                // pill stays white at every level — mirrors Mac .seg-sel.
+                .foregroundStyle(active ? theme.segSelInk : theme.chromeInk)
+                .padding(.horizontal, 16).frame(height: 38)
+                .background(
+                    Capsule().fill(active ? Color.white : .clear)
+                        .shadow(color: active && theme.level != .lvl2 ? .black.opacity(0.08) : .clear, radius: 2, y: 1)
+                )
+                .contentShape(Capsule())
+                .onTapGesture { tab = t }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(t.rawValue), \(tabCount(t))")
+                .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
+                .accessibilityIdentifier("tab-\(t.rawValue.lowercased())")
             }
         }
         .padding(4)
         .background(Capsule().fill(theme.segTrack))
     }
 
-    // A rendered group: a header + its lines. Precomputed so the view body stays
-    // simple enough for the Swift type-checker (nested filter/tuple/ForEach times out).
-    private struct HistLine: Identifiable { let id: String; let text: String }
-    private struct HistGroup: Identifiable { let id: String; let header: String; let lines: [HistLine] }
-
-    private var doneGroups: [HistGroup] {
-        var out: [HistGroup] = []
-        let today = store.doneTasks.map { HistLine(id: $0.id, text: $0.text) }
-        if !today.isEmpty { out.append(HistGroup(id: "today", header: "Today", lines: today)) }
-        for d in pastDays {
-            let lines = d.items.filter { $0.done }.map { HistLine(id: $0.id, text: $0.text) }
-            if !lines.isEmpty { out.append(HistGroup(id: d.date, header: d.weekday.isEmpty ? d.date : d.weekday, lines: lines)) }
-        }
-        return out
-    }
-
-    // MARK: Done — today's completions + past done, struck with a done word
+    // MARK: Done — the first `doneShown` completions (today's count toward it), newest first,
+    // struck with a done word; "Load more" adds another page (Mac renderPast).
     @ViewBuilder private var doneBody: some View {
-        let groups = doneGroups
-        if groups.isEmpty {
+        let page = HistoryModel.donePage(todayDone: store.doneTasks, history: store.history, shown: doneShown)
+        if page.groups.isEmpty {
             emptyState("No completed tasks yet.")
         } else {
-            ForEach(groups) { g in
+            ForEach(page.groups) { g in
                 group(header: g.header) {
                     ForEach(g.lines) { line in doneRow(id: line.id, text: line.text) }
                 }
             }
-            if store.hasHistoryBefore(days: pastDaysShown) { loadMoreButton }
+            if page.hasMore { loadMoreButton }
         }
     }
 
     private var loadMoreButton: some View {
-        Button { withAnimation { pastDaysShown += 7 } } label: {
+        Button { withAnimation { doneShown += HistoryModel.donePage } } label: {
             Text("Load more")
                 .font(.geist(15, .regular)).tracking(-0.30).foregroundStyle(theme.inkDim)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -148,6 +162,7 @@ struct HistoryView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("done-load-more")
     }
 
     // MARK: Future — parked tasks, oldest first (store order, like Today), then Add.
@@ -184,17 +199,53 @@ struct HistoryView: View {
         return out
     }
 
-    /// Equal share for each flex row (plain + draft + Add) in a panel of height H.
-    /// Returns (rowHeight ≥ 110, overflowing).
-    private func futureLayout(height H: CGFloat, items: [FutureItem]) -> (rowH: CGFloat, overflow: Bool) {
-        let sentCount = items.filter { if case .sent = $0 { return true } else { return false } }.count
-        let flexCount = items.count - sentCount + 1                   // + the Add row
-        let dividers = CGFloat(items.count)                           // one between each of items + Add
-        let avail = H - CGFloat(sentCount) * sentRowHeight - dividers
-        let share = avail / CGFloat(flexCount)
-        guard H > 0, share.isFinite else { return (Self.addRowHeight, false) }
-        if share + 0.5 < Self.addRowHeight { return (Self.addRowHeight, true) }
-        return (floor(share), false)
+    private func futureFit(height H: CGFloat, width W: CGFloat, items: [FutureItem]) -> FutureFit.Result {
+        var texts: [String] = [], sent = 0
+        for item in items {
+            switch item {
+            case .sent: sent += 1
+            case .plain(let d): texts.append(editingId == d.id ? editText : d.text)
+            case .draft: texts.append(editText)
+            }
+        }
+        let key: [AnyHashable] = [texts, sent, H, W, heldFitStep ?? -1]
+        if let cached = fitMemo.result, fitMemo.key == key { return cached }
+        let r = FutureFit.compute(texts: texts, sentCount: sent, sentH: sentRowHeight,
+                                  height: H, width: W, heldStep: heldFitStep)
+        fitMemo.key = key; fitMemo.result = r
+        fitMemo.lastStep = r.step
+        return r
+    }
+
+    private struct RowMidsKey: PreferenceKey {
+        static var defaultValue: [String: CGFloat] = [:]
+        static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+            value.merge(nextValue(), uniquingKeysWith: { $1 })
+        }
+    }
+
+    /// A row counts once at least HALF of it is under the pinned Add (one change per row while
+    /// scrolling). Nothing can hide when the list doesn't overflow.
+    private func updateMore(mids: [String: CGFloat], addTop: CGFloat, overflow: Bool) {
+        let n = overflow ? mids.values.filter { $0 > addTop }.count : 0
+        let prev = moreN
+        guard n != prev else { return }
+        if n == 0 {                                            // fade out (0.24s), keeping the last number
+            withAnimation(BuddyEase.out(0.24)) { moreN = 0 }
+            return
+        }
+        if prev == 0 {                                         // appearing: number set first (no roll),
+            var tx = Transaction(animation: nil); tx.disablesAnimations = true
+            withTransaction(tx) { moreShown = n }
+            withAnimation(BuddyEase.out(BuddyEase.drift)) { moreN = n }   // then Fade + Drift in (0.48s)
+            return
+        }
+        moreN = n
+        if n == moreShown { return }
+        // Roll: fewer hidden (scrolling down) → up; more hidden → down. Direction renders first
+        // so the outgoing number leaves the right way, then the value changes.
+        moreRollUp = n < prev
+        DispatchQueue.main.async { withAnimation(BuddyEase.out(0.18)) { moreShown = moreN > 0 ? moreN : moreShown } }
     }
 
     private var futureScroll: some View {
@@ -203,7 +254,9 @@ struct HistoryView: View {
             // from the pre-keyboard height so they don't jump as it rises — the list scrolls.
             let H = keyboardOverlap > 0 && futureLayoutHeight > 0 ? futureLayoutHeight : geo.size.height
             let items = futureItems
-            let layout = futureLayout(height: H, items: items)
+            let fit = futureFit(height: H, width: geo.size.width, items: items)
+            let addH = fit.heights.last ?? fit.floorH
+            let flexIndex = flexIndices(items)
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
@@ -214,28 +267,40 @@ struct HistoryView: View {
                                 case .sent(let d):
                                     sentFutureRow(id: d.id, text: d.text)
                                 case .plain(let d):
-                                    if editingId == d.id { futureEditorRow(id: d.id, height: layout.rowH) }
-                                    else { futureRow(id: d.id, text: d.text, height: layout.rowH) }
+                                    let h = fit.heights[flexIndex[i] ?? 0]
+                                    if editingId == d.id { futureEditorRow(id: d.id, height: h, fit: fit) }
+                                    else { futureRow(id: d.id, text: d.text, height: h, fit: fit) }
                                 case .draft:
                                     // View-local only, no + / × actions (it isn't a task yet).
-                                    futureEditorRow(id: Self.draftID, height: layout.rowH)
+                                    futureEditorRow(id: Self.draftID, height: fit.heights[flexIndex[i] ?? 0], fit: fit)
                                 }
                             }
                             .id(item.id)
+                            .background(GeometryReader { g in
+                                Color.clear.preference(key: RowMidsKey.self,
+                                                       value: [item.id: g.frame(in: .named("futureViewport")).midY])
+                            })
                         }
-                        if !layout.overflow { addBlock(showDivider: !items.isEmpty, height: layout.rowH) }
+                        if !fit.overflow { addBlock(showDivider: !items.isEmpty, height: addH, fit: fit, proxy: nil) }
+                        // Overflow: room for the pinned Add at the very end, so the last row can
+                        // scroll up to sit just above it (scrollTo ignores a safeAreaInset).
+                        if fit.overflow { Color.clear.frame(height: addH + 1).id(Self.endID) }
                     }
                 }
                 .scrollBounceBehavior(.basedOnSize)
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if layout.overflow {
-                        addBlock(showDivider: true, height: Self.addRowHeight).background(theme.cardBackground)
+                .overlay(alignment: .bottom) {
+                    if fit.overflow {
+                        addBlock(showDivider: true, height: addH, fit: fit, proxy: proxy)
+                            .background(theme.cardBackground)
                     }
+                }
+                .onPreferenceChange(RowMidsKey.self) { mids in
+                    updateMore(mids: mids, addTop: geo.size.height - addH - 1, overflow: fit.overflow)
                 }
                 .onChange(of: editingId) { _, id in
                     guard let id else { return }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .bottom) }
+                        withAnimation(.easeOut(duration: 0.2)) { scrollToEditor(id, proxy: proxy, overflow: fit.overflow) }
                     }
                 }
                 .onChange(of: highlightId) { _, id in
@@ -244,9 +309,10 @@ struct HistoryView: View {
                 }
                 .onChange(of: keyboardOverlap) { _, _ in
                     guard let id = editingId else { return }
-                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .bottom) }
+                    withAnimation(.easeOut(duration: 0.2)) { scrollToEditor(id, proxy: proxy, overflow: fit.overflow) }
                 }
             }
+            .coordinateSpace(name: "futureViewport")
             .onAppear { if keyboardOverlap == 0 { futureLayoutHeight = geo.size.height } }
             .onChange(of: geo.size.height) { _, h in if keyboardOverlap == 0 { futureLayoutHeight = h } }
         }
@@ -255,38 +321,70 @@ struct HistoryView: View {
         .padding(.bottom, keyboardOverlap)
     }
 
-    @ViewBuilder private func addBlock(showDivider: Bool, height: CGFloat) -> some View {
+    private static let endID = "future-end"
+
+    /// Keep the field in view: above the pinned Add when overflowing (the draft is last → the end
+    /// spacer; a middle row → centred), else at the bottom edge.
+    private func scrollToEditor(_ id: String, proxy: ScrollViewProxy, overflow: Bool) {
+        if !overflow { proxy.scrollTo(id, anchor: .bottom) }
+        else if id == Self.draftID { proxy.scrollTo(Self.endID, anchor: .bottom) }
+        else { proxy.scrollTo(id, anchor: .center) }
+    }
+
+    /// items index → index into fit.heights (flex rows only: plain + draft).
+    private func flexIndices(_ items: [FutureItem]) -> [Int: Int] {
+        var out: [Int: Int] = [:], k = 0
+        for (i, item) in items.enumerated() {
+            if case .sent = item { continue }
+            out[i] = k; k += 1
+        }
+        return out
+    }
+
+    @ViewBuilder private func addBlock(showDivider: Bool, height: CGFloat, fit: FutureFit.Result,
+                                       proxy: ScrollViewProxy?) -> some View {
         VStack(spacing: 0) {
             if showDivider { historyDivider }
-            futureAddRow(height: height)
+            futureAddRow(height: height, fit: fit, proxy: proxy)
         }
     }
 
-    // Same "Add +" as Today's Add row (Geist medium, −0.48 tracking, 18pt gap, addInk token),
-    // at the Future rows' fixed 24pt / 110pt.
-    private func futureAddRow(height: CGFloat) -> some View {
-        HStack(spacing: 18) {
-            Text("Add")
-            Text("+")
+    // Same "Add +" as Today's Add row (Geist medium, −0.48-per-24pt tracking, 18pt gap, addInk),
+    // at the Future rows' current fit size. While rows sit under it, the quiet "N more ↓"
+    // count rides on the right (Mac: a fixed 15px beside a 24→18px Add — see FutureFit.moreFont).
+    private func futureAddRow(height: CGFloat, fit: FutureFit.Result, proxy: ScrollViewProxy?) -> some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 18) {
+                Text("Add")
+                Text("+")
+            }
+            .font(.geist(fit.font, .medium))
+            .tracking(-0.02 * fit.font)
+            .foregroundStyle(theme.addInk)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Add to Future")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("future-add")
+            Spacer(minLength: 12)
+            if let proxy {
+                FutureMoreCount(shown: moreShown, visible: moreN > 0, rollUp: moreRollUp,
+                                fontSize: FutureFit.moreFont(fit.step), theme: theme) {
+                    // Jump to the bottom — never starts an add.
+                    withAnimation(BuddyEase.out(BuddyEase.drift)) { proxy.scrollTo(Self.endID, anchor: .bottom) }
+                }
+            }
         }
-        .font(.geist(24, .medium))
-        .tracking(-0.48)
-        .foregroundStyle(theme.addInk)
         .padding(.horizontal, 32)
         .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture { startDraft() }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Add to Future")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("future-add")
     }
 
     // Inline editor row — the same UIKit editor as Today, at the Future rows' 24pt. At least
     // 110pt, and it GROWS with long text while editing instead of clipping. It sizes from the
     // editor's own measured height (not Today's invisible-Text ghost): UITextView lines are a
     // touch taller than SwiftUI Text, so a ghost-sized box clipped the 3rd+ line.
-    private func futureEditorRow(id: String, height: CGFloat) -> some View {
+    private func futureEditorRow(id: String, height: CGFloat, fit: FutureFit.Result) -> some View {
         let session = editSession
         let binding = Binding<String>(
             get: { editText },
@@ -295,7 +393,7 @@ struct HistoryView: View {
         )
         return InlineTaskEditor(
             text: binding,
-            fontSize: 24,
+            fontSize: fit.font,
             textColor: UIColor(theme.escalationText),
             accessibilityIdentifier: "future-editor-\(id)",
             wrapsToProposedWidth: true,
@@ -303,7 +401,7 @@ struct HistoryView: View {
         )
         .id(session)   // a fresh UITextView per edit — never reuse the last entry's text
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 32).padding(.vertical, 16)
+        .padding(.horizontal, 32).padding(.vertical, fit.vpad)
         .frame(minHeight: height)          // its share of the panel; grows past it for long text
     }
 
@@ -313,6 +411,7 @@ struct HistoryView: View {
         editText = ""
         editOriginal = nil
         editSession += 1
+        heldFitStep = fitMemo.lastStep     // hold the size while typing (Mac: futureFit held mid-edit)
         editingId = Self.draftID
         store.isEditingFuture = true       // sync adopt + rollover wait until this edit ends
     }
@@ -323,6 +422,7 @@ struct HistoryView: View {
         editText = text                    // keep the existing text (don't blank the row)
         editOriginal = text
         editSession += 1
+        heldFitStep = fitMemo.lastStep
         editingId = id
         store.isEditingFuture = true       // sync adopt + rollover wait until this edit ends
     }
@@ -339,6 +439,7 @@ struct HistoryView: View {
         editingId = nil
         editText = ""
         editOriginal = nil
+        heldFitStep = nil                  // re-fit once the edit lands
         store.isEditingFuture = false      // edit over — the next sync pass may adopt again
         var duplicateOf: String? = nil
         withoutAnimation {
@@ -396,8 +497,8 @@ struct HistoryView: View {
         Rectangle().fill(theme.line).frame(height: 1)
     }
 
-    // Future rows use the Today row visual language, but fixed at 110pt and scrollable.
-    private func futureRow(id: String, text: String, height: CGFloat) -> some View {
+    // Future rows use the Today row visual language at the list's current fit size.
+    private func futureRow(id: String, text: String, height: CGFloat, fit: FutureFit.Result) -> some View {
         SwipeableRow(
             rowID: id,
             openRowID: $openFutureRowID,
@@ -407,9 +508,9 @@ struct HistoryView: View {
             onTap: { startFutureEdit(id: id, text: text) }
         ) {
             Text(text)
-                .font(.geist(24, .medium)).tracking(-0.48).lineSpacing(2)
+                .font(.geist(fit.font, .medium)).tracking(-0.02 * fit.font).lineSpacing(FutureFit.lineSpacing)
                 .foregroundStyle(theme.escalationText)
-                .lineLimit(2)
+                .lineLimit(FutureFit.maxLines)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .padding(.horizontal, 32)
                 // Duplicate-add flash: the adaptive hairline token as a soft wash (RULE 1 —
@@ -438,15 +539,9 @@ struct HistoryView: View {
                 Spacer(minLength: 8)
             }
             .padding(.horizontal, 32)
-            .padding(.vertical, RowFit.donePad(for: RowFit.padMax))
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
-        .fixedSize(horizontal: false, vertical: true)
-        .background(GeometryReader { g in
-            Color.clear
-                .onAppear { sentRowHeight = g.size.height }
-                .onChange(of: g.size.height) { _, v in sentRowHeight = v }
-        })
+        .frame(height: sentRowHeight)      // exact — the fit's floor is this same number
     }
 
     // Rightmost row icon: glyph hugs the row's trailing edge so every surface's icons line up
@@ -473,16 +568,6 @@ struct HistoryView: View {
         withTransaction(tx) { action() }
     }
 
-    // Last N days from history that fall within the configured window, most-recent first.
-    private var pastDays: [Day] {
-        let n = pastDaysShown
-        guard n > 0 else { return [] }
-        let base = Date()
-        return (1...n).compactMap { i -> Day? in
-            guard let d = Calendar.current.date(byAdding: .day, value: -i, to: base) else { return nil }
-            return store.history.first(where: { $0.date == BuddyStore.localDate(d) })
-        }
-    }
 }
 
 #Preview {

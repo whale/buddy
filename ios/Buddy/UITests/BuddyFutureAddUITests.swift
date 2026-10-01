@@ -155,16 +155,17 @@ final class BuddyFutureAddUITests: XCTestCase {
     // the distance between two consecutive rows' (vertically centred) text = row height + 1pt divider.
     private func pitch(_ a: XCUIElement, _ b: XCUIElement) -> CGFloat { b.frame.midY - a.frame.midY }
 
-    // Few items → plain rows + Add share the panel equally (each ≥ 110pt), no empty band.
+    // Few items → big 24pt rows that share the panel equally (each > 110pt), no empty band.
+    // (The Add row's accessibility frame is its label, so all rows are measured by pitch.)
     func testShortListFillsPanelWithEqualRows() throws {
         let app = launch()
         let r1 = el(app, "future-row-f1"), r2 = el(app, "future-row-f2"), add = el(app, "future-add")
         XCTAssertTrue(add.waitForExistence(timeout: 3))
         let rowH = pitch(r1, r2) - 1
         XCTAssertGreaterThan(rowH, 110, "rows stretch past the 110pt floor to fill")
-        XCTAssertEqual(rowH, add.frame.height, accuracy: 1.5, "plain rows and Add get equal shares")
+        XCTAssertEqual(pitch(r2, add) - 1, rowH, accuracy: 1.5, "plain rows and Add get equal shares")
         let barTop = el(app, "chrome-calendar").frame.minY
-        XCTAssertGreaterThan(add.frame.maxY, barTop - 60, "Add reaches the panel bottom (no empty band; the icon sits ~40pt into the bottom bar)")
+        XCTAssertGreaterThan(add.frame.maxY + rowH / 2, barTop - 60, "Add reaches the panel bottom (no empty band)")
     }
 
     // Sent rows: on TOP (above plain rows, store order kept) and compact like Donezo rows.
@@ -176,18 +177,101 @@ final class BuddyFutureAddUITests: XCTestCase {
         XCTAssertLessThan(a.frame.minY, b.frame.minY)                  // store order among sent rows
         XCTAssertLessThan(b.frame.maxY, p1.frame.minY)                 // all sent rows above plain rows
         XCTAssertLessThan(pitch(a, b), 60, "sent rows are compact, not 110pt")
-        XCTAssertGreaterThanOrEqual(pitch(p1, p2) - 1, 110)
-        XCTAssertEqual(pitch(p1, p2) - 1, el(app, "future-add").frame.height, accuracy: 1.5)
+        XCTAssertGreaterThan(pitch(p1, p2) - 1, 90, "plain rows stay big (shrink-to-fit may take a step)")
+        XCTAssertEqual(pitch(p2, el(app, "future-add")) - 1, pitch(p1, p2) - 1, accuracy: 1.5)
     }
 
-    // Overflow → rows sit at the 110pt floor, the list scrolls, Add stays pinned & tappable.
-    func testOverflowScrollsWithPinnedAdd() throws {
-        let app = launch("future-long")
+    // ~7 items → rows SHRINK (below 110pt, smaller text) so everything fits — no scroll, no count.
+    func testRowsShrinkBeforeScrolling() throws {
+        let app = launch("future-7")
         let add = el(app, "future-add")
         XCTAssertTrue(add.waitForExistence(timeout: 3))
-        XCTAssertEqual(pitch(el(app, "future-row-fl1"), el(app, "future-row-fl2")) - 1, 110, accuracy: 1)
-        XCTAssertEqual(add.frame.height, 110, accuracy: 1)
+        let rowH = pitch(el(app, "future-row-fn1"), el(app, "future-row-fn2")) - 1
+        XCTAssertLessThan(rowH, 110, "shrunk below the big row")
+        XCTAssertGreaterThan(rowH, 46, "but not yet at the smallest step")
+        XCTAssertLessThan(el(app, "future-row-fn1").frame.height, 27, "text shrank from 24pt")
+        XCTAssertTrue(el(app, "future-row-fn7").isHittable, "every row is on screen")
         XCTAssertTrue(add.isHittable)
-        XCTAssertFalse(el(app, "future-row-fl12").isHittable, "the end of the list is scrolled off")
+        let more = el(app, "future-more")
+        XCTAssertTrue(!more.exists || !more.isHittable, "nothing hidden → no count")
+    }
+
+    // ~16 items → smallest step, scrolls under the pinned Add; the quiet count appears, taps to
+    // the bottom WITHOUT starting an add, and fades away there.
+    func testOverflowScrollsWithPinnedAddAndQuietCount() throws {
+        let app = launch("future-16")
+        let add = el(app, "future-add")
+        XCTAssertTrue(add.waitForExistence(timeout: 3))
+        XCTAssertEqual(pitch(el(app, "future-row-fn1"), el(app, "future-row-fn2")) - 1, 46, accuracy: 3)
+        XCTAssertTrue(add.isHittable)
+        XCTAssertFalse(el(app, "future-row-fn16").isHittable, "the end of the list is scrolled off")
+        let more = el(app, "future-more")
+        XCTAssertTrue(more.waitForExistence(timeout: 3))
+        XCTAssertTrue(more.isHittable)
+        XCTAssertTrue(more.label.hasSuffix("more items below"), more.label)
+        let n = Int(more.label.split(separator: " ").first ?? "") ?? 0
+        XCTAssertGreaterThan(n, 0)
+        XCTAssertLessThan(n, 16)
+        more.tap()
+        sleep(1)
+        XCTAssertFalse(draftEditor(app).exists, "tapping the count must not start an add")
+        XCTAssertTrue(el(app, "future-row-fn16").isHittable, "tapping the count scrolls to the bottom")
+        let gone = el(app, "future-more")
+        XCTAssertTrue(!gone.exists || !gone.isHittable, "at the bottom the count fades away")
+        saveShot("final-future-16-bottom")
+    }
+
+    // Tab pills read "Future (n)" / "Done (n)" on one line.
+    func testTabLabelsCarryCounts() throws {
+        let app = launch("future-sent")                                  // 2 plain + 2 sent parked
+        let fut = el(app, "tab-future"), done = el(app, "tab-done")
+        XCTAssertTrue(fut.waitForExistence(timeout: 3))
+        XCTAssertEqual(fut.label, "Future, 2", "sent rows aren't counted")
+        XCTAssertTrue(done.label.hasPrefix("Done, "), done.label)
+        XCTAssertLessThanOrEqual(fut.frame.height, 39, "one line in the 38pt pill")
+    }
+
+    // Done shows the first 30 completions; Load more adds 30 (older days carry the date).
+    func testDonePagesThirtyThenLoadMore() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiFixture", "done-many", "-uiTab", "Done"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Today task 1"].waitForExistence(timeout: 3))
+        // 6 today + 4 × 6 days = 30 → "Day 6 task 4" is the last on page one.
+        let loadMore = el(app, "done-load-more")
+        for _ in 0..<12 where !loadMore.isHittable { app.swipeUp() }
+        XCTAssertTrue(app.staticTexts["Day 6 task 4"].exists)
+        XCTAssertFalse(app.staticTexts["Day 7 task 1"].exists, "page one stops at 30")
+        XCTAssertTrue(loadMore.isHittable)
+        saveShot("final-done-load-more")
+        loadMore.tap()
+        XCTAssertTrue(app.staticTexts["Day 7 task 1"].waitForExistence(timeout: 2), "Load more adds the next page")
+        // 60 = 6 today + 13 days × 4 + 2 → page two cuts INSIDE day 14.
+        XCTAssertTrue(app.staticTexts["Day 14 task 2"].exists)
+        XCTAssertFalse(app.staticTexts["Day 14 task 3"].exists, "…30 more, not everything (cut mid-day)")
+        let dated = app.staticTexts.matching(NSPredicate(format: "label MATCHES '^[A-Z][a-z]+day, [A-Z][a-z]{2} [0-9]{1,2}$'"))
+        XCTAssertGreaterThan(dated.count, 0, "older days read 'Monday, Sep 22'")
+    }
+
+    // Evidence driver for a screen recording (skipped in normal runs): slow, row-sized drags
+    // down then up the long list so the count's roll and fade can be inspected frame by frame.
+    func testRecordScrollForVideo() throws {
+        guard ProcessInfo.processInfo.environment["BUDDY_RECORD"] != nil else {
+            throw XCTSkip("set TEST_RUNNER_BUDDY_RECORD=1 to drive the recording")
+        }
+        let app = launch("future-16")
+        XCTAssertTrue(el(app, "future-add").waitForExistence(timeout: 3))
+        sleep(2)
+        let w = app.windows.firstMatch
+        func drag(_ from: CGFloat, _ to: CGFloat) {
+            w.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
+                .press(forDuration: 0.1, thenDragTo: w.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to)),
+                       withVelocity: .slow, thenHoldForDuration: 0.3)
+            sleep(1)
+        }
+        for _ in 0..<4 { drag(0.62, 0.55) }      // ~1 row each, downward through the list
+        for _ in 0..<3 { drag(0.50, 0.57) }      // back up → count rises (rolls down)
+        drag(0.70, 0.30); sleep(1)               // fling to the bottom → fades out
+        drag(0.40, 0.52); sleep(2)               // back up a bit → fades in again
     }
 }

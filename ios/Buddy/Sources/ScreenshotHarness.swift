@@ -28,7 +28,21 @@ enum ScreenshotHarness {
             store.syncNotice = nil
             return (store, .settings, false, false)
         }
+        // future-<n>[-lvl1|-lvl2]: n parked rows of realistic length (fit / shrink / scroll shots).
+        if parts.count >= 2, parts[0] == "future", let n = Int(parts[1]), n > 0 {
+            let lvl = parts.count == 3 ? parts[2] : "lvl0"
+            store.seedForScreenshot(tasks: lvl == "lvl2" ? MockData.alarmTasks : lvl == "lvl1" ? MockData.warningTasks : MockData.normalTasks)
+            store.deferred = (0..<n).map { i in
+                DeferredTask(id: "fn\(i + 1)", text: futureTitles[i % futureTitles.count] + (i >= futureTitles.count ? " \(i / futureTitles.count + 1)" : ""), wake: "")
+            }
+            return (store, .history, false, false)
+        }
         switch fixture {
+        case "done-many":
+            // 6 done today + 20 archived days × 4 done → 86 completions: Done pages 30 at a time.
+            let today = (0..<6).map { BuddyTask(id: "dm-t\($0)", text: "Today task \($0 + 1)", state: .done, doneAt: Date()) }
+            store.seedForScreenshot(tasks: today + MockData.normalTasks.filter { !$0.isDone }, history: manyDoneHistory())
+            return (store, .history, false, false)
         case "lvl0":
             store.seedForScreenshot(tasks: MockData.normalTasks)
             return (store, .none, false, false)
@@ -154,6 +168,22 @@ enum ScreenshotHarness {
         default:
             store.seedForScreenshot(tasks: MockData.normalTasks)
             return (store, .none, false, false)
+        }
+    }
+
+    static let futureTitles = ["Renew the domain", "Plan Q3 offsite", "Call the bank about the mortgage", "Fix the bike",
+        "Book the vet", "Sort the garage shelves", "Email the accountant", "Order new running shoes",
+        "Read the sync design doc", "Clean the gutters", "Back up the photo library", "Pick a birthday gift",
+        "Update the portfolio site", "Return the library books", "Try the new ramen place", "Write to grandma"]
+
+    private static func manyDoneHistory() -> [Day] {
+        let cal = Calendar.current, wf = DateFormatter(); wf.dateFormat = "EEEE"
+        return (1...20).map { back in
+            let date = cal.date(byAdding: .day, value: -back, to: Date())!
+            let ds = BuddyStore.localDate(date)
+            return Day(date: ds, weekday: wf.string(from: date), items: (0..<4).map {
+                DayItem(id: "dm-\(ds)-\($0)", text: "Day \(back) task \($0 + 1)", done: true) } +
+                [DayItem(id: "dm-\(ds)-skip", text: "Skipped one", done: false)])
         }
     }
 
