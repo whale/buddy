@@ -1,5 +1,30 @@
 # Buddy — Status & Handoff
 
+## Shipped — 2026-10-01 — Mac 0.4.41 + iOS 0.4.41 (50)
+
+PR #165 merged (squash ff85afb); Mac release run 36924585708 succeeded. GitHub
+v0.4.41 published with DMG, Buddy.app.tar.gz and latest.json; the owner's Mac reports
+0.4.41 after updating. iOS build 50 (0.4.41) uploaded via `pnpm ios:beta`; App Store
+Connect confirms VALID and distributed to external testers (Friends).
+
+What shipped (Mac + iOS): add items directly in Future with Today's Add UX; Future
+fills the panel, shrinks text/rows step by step to the "Sent to today!" size, then
+scrolls under a sticky Add with a quiet "N more ↓" count; sent rows on top, compact;
+"Future (n)" / "Done (n)" tabs; Done pages 30 completed items. iOS addInk lvl1 token
+parity fix. Fastfile `BETA_INTERNAL_ONLY=1` = just-me TestFlight build (used for
+build 49 during design iteration).
+
+Verification: `pnpm test:future` 29/29 (WebKit + Chromium) plus ui:smoke, test:edit,
+test:settings, test:merge, test:crossbuild; iOS unit 171 + UI 27, 0 failures; Release
+builds sim + device. Six adversarial review rounds (3 Mac, 3 iOS), all CONFIRMED
+findings fixed with regression tests (incl. a 10–100× Future render slowdown and
+iOS keyboard/overflow bugs). Live two-device sync run converged. Not verified: real
+iPhone hardware beyond TestFlight install.
+
+Known limits (by design): cross-device order when both devices add at once;
+concurrent edits to one row resolve by tie-break.
+
+
 ## Infra — 2026-09-28 — Supabase outage fixed, project moved to paid org
 
 **What happened:** the Buddy Cloud project (`awzkpkhsigbhfeklogzk`) was paused
