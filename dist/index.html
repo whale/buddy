@@ -53,6 +53,8 @@
      blank white band the eye reads as padding — invisible, yet holding a cap slot. Show it
      always, and via the token so it adapts on red (RULE 1) instead of staying dark. */
   .empty:before{content:attr(data-ph);color:var(--ink-dim)}
+  .future-title:not([contenteditable]){ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .future-title[contenteditable]{ outline:none; white-space:pre-wrap; overflow-wrap:anywhere; }
 
   /* press feedback intentionally OFF — no click movement (text was shrinking/icons bouncing) */
   .pressable:active{ transform:none; }
@@ -1123,8 +1125,11 @@ function save(){ if(saveSuppressed) return;
 
 /* Force-flush synchronously when the tab is hidden / closing — a trailing
    debounce gets killed by tab close, so cancel the timer and write inline. */
-window.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') writeNow(); });
-window.addEventListener('beforeunload', writeNow);
+// A Future field mid-typing lives only in the DOM until it commits — fold it in first, or an
+// updater relaunch / quit would drop it (Today's rows write it.text live, so they're covered).
+const flushAndWrite=()=>{ if(typeof flushFutureEdit==='function') flushFutureEdit(); writeNow(); };
+window.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') flushAndWrite(); });
+window.addEventListener('beforeunload', flushAndWrite);
 
 /* --------------------------------------------------------------------
    LOAD + MIGRATE  — corruption guard: a bad blob must NEVER reach render
@@ -1795,7 +1800,7 @@ function applyWire(blob){
   // Never clobber an in-progress edit: render() would tear down the contenteditable
   // mid-type and the blur handler could tombstone a half-typed task. Defer — the next
   // sync pass re-merges and applies once the edit commits.
-  if(editingActive()){ diag('adopt-deferred-editing', {}); return; }
+  if(editingActive() || futureEditLive()){ diag('adopt-deferred-editing', {}); return; }
   const keepPinned = state.pinned;               // pinned is device-local — never adopt the remote's
   const h = hydrate(migrate(blob));
   if(!h) return;
@@ -3418,11 +3423,14 @@ function buildDonezoRow(it, idx, morning){
   return row;
 }
 
+let futureCaretSaved=null;                   // caret of the live Future field across a rebuild
 function renderHist(){
+  futureCaretSaved = futureEditEl && document.activeElement===futureEditEl ? futureCaret(futureEditEl) : null;
   histBody.innerHTML='';            // .stagger is applied by render() on the open transition only
   if(state.histTab==='skipped') state.histTab='past';   // Skipped tab removed → fall back to Done
   if(state.histTab==='future') renderFuture();
   else renderPast();
+  settleFutureEdit();
 }
 function histEmpty(msg){
   const e=document.createElement('div');
@@ -3525,16 +3533,14 @@ function histLoadMore(){
   more.addEventListener('click',()=>{ pastDaysShown+=PAST_PAGE; render(); });
   histBody.appendChild(more);
 }
-// FUTURE: a manual holding pen. Parked tasks DON'T auto-return — you pull each
-// into today with + (capped) or drop it with ×. Rows are read-only (edit a task
-// after pulling it into today). Newest-parked on top; no date grouping.
+// One Future row shell: 110px (grows while editing so long text never clips) + hover rail.
 function makeFutureHoverRow(contentEl, actions){
   const row=document.createElement('div');
-  row.className='future-row bd group/h relative flex items-center border-[#d9d9d9]';
-  row.style.cssText='height:110px;background:var(--card);';
+  row.className='future-row bd group/h relative flex items-stretch border-[#d9d9d9]';
+  row.style.cssText='min-height:110px;background:var(--card);';
 
   const front=document.createElement('div');
-  front.className='flex items-center px-8 pr-[88px] w-full h-full min-w-0';
+  front.className='flex items-center px-8 pr-[88px] py-4 w-full min-w-0';   // stretches to the row; grows it for long edits
   front.appendChild(contentEl);
   row.appendChild(front);
 
@@ -3553,33 +3559,195 @@ function makeFutureHoverRow(contentEl, actions){
   row.appendChild(rail);
   return row;
 }
-// FUTURE: a manual holding pen. Parked tasks DON'T auto-return — you pull each
-// into today with + (capped) or drop it with ×. Rows are read-only (edit a task
-// after pulling it into today). Newest-parked on top; no date grouping.
+// FUTURE: a holding pen. Parked tasks DON'T auto-return — you pull each into today
+// with + (capped) or drop it with ×. Oldest first, like Today, so "Add +" sits right
+// after the last item and a new item lands just above it. Once the list outgrows the
+// panel, the Add row sticks to the bottom and items scroll beneath it.
+//
+// Adding/editing mirrors Today (click Add → blank row with the caret; Enter / Esc / Tab
+// commit; an emptied row deletes itself) with two deliberate differences, each closing a
+// bug the prototype hit:
+//  • The blank row being typed is a DRAFT (futureDraft), never in state.deferred until it
+//    has text. A blank in state would sync to the phone as an empty task, show + / × that
+//    act on nothing, and be left behind as a ghost when Add is clicked twice.
+//  • The field being edited is ONE persistent DOM node (futureEditEl). renderFuture()
+//    re-uses it instead of rebuilding it, so a background render (sync adopt, Donezo
+//    timer) can't drop keystrokes, split the text, or strand the edit.
+let futureDraft = null;     // { id } — the new row being typed; not yet in state.deferred
+let futureEditEl = null;    // the live contenteditable (draft or existing row), kept across renders
+const futureEditLive = () => !!futureEditEl && document.activeElement===futureEditEl;
+
+// Commit whatever the live field holds. Draft: push if it has text, else discard.
+// Existing row: save the edit (v-bump for sync), or delete it (tombstone) if emptied.
+function commitFutureEdit(){
+  const el=futureEditEl; if(!el) return;
+  futureEditEl=null;
+  const id=el.dataset.fid, text=el.textContent.replace(/\s+/g,' ').trim();
+  if(futureDraft && futureDraft.id===id){
+    futureDraft=null;
+    if(text) state.deferred.push({ id, text, wake:'', v:1 });
+    return;
+  }
+  const d=(state.deferred||[]).find(x=>x.id===id); if(!d) return;   // removed meanwhile (e.g. by sync)
+  if(!text){ tombstone(id); state.deferred=state.deferred.filter(x=>x.id!==id); }
+  else if(text!==d.text){ d.text=text; d.v=(d.v|0)+1; }            // v-bump: the edit must beat the peer's stale copy
+}
+// Write what's typed into state without ending the edit (quit / hide safety net). Empty is
+// left alone — deleting a row the user is still typing into would be worse than keeping it.
+function flushFutureEdit(){
+  const el=futureEditEl; if(!el) return;
+  const id=el.dataset.fid, text=el.textContent.replace(/\s+/g,' ').trim(); if(!text) return;
+  if(futureDraft && futureDraft.id===id){ state.deferred.push({ id, text, wake:'', v:1 }); futureDraft=null; return; }
+  const d=(state.deferred||[]).find(x=>x.id===id);
+  if(d && text!==d.text){ d.text=text; d.v=(d.v|0)+1; }
+}
+// A field whose row didn't make it into the latest render (tab switched, panel closed,
+// row removed by sync) is detached — commit it so typed text is never silently lost.
+function settleFutureEdit(){
+  if(futureEditEl && !futureEditEl.isConnected){ commitFutureEdit(); save(); }
+}
+// Caret as character offsets inside the (plain-text) field, so a re-render can put it back
+// exactly — re-focusing a re-attached node otherwise lands the caret at the end mid-word.
+function futureCaret(el){
+  const s=window.getSelection(); if(!s.rangeCount || !el.contains(s.anchorNode)) return null;
+  const r=s.getRangeAt(0), pre=document.createRange(); pre.selectNodeContents(el);
+  pre.setEnd(r.startContainer, r.startOffset); const start=pre.toString().length;
+  return { start, end:start+r.toString().length };
+}
+function setFutureCaret(el, c){
+  const len=el.textContent.length, at=n=>{
+    n=Math.max(0,Math.min(len,n)); const w=document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for(let t; (t=w.nextNode()); ){ if(n<=t.length) return [t,n]; n-=t.length; }
+    return [el, el.childNodes.length];
+  };
+  const r=document.createRange(); r.setStart(...at(c?c.start:len)); r.setEnd(...at(c?c.end:len));
+  const s=window.getSelection(); s.removeAllRanges(); s.addRange(r);
+}
+function focusFutureEdit(el, caret){
+  el.setAttribute('contenteditable','plaintext-only'); el.classList.remove('empty');
+  el.closest('.future-row')?.classList.add('editing');
+  if(document.activeElement===el) return;
+  el.focus({preventScroll:true});
+  setFutureCaret(el, caret);                   // saved caret on re-attach; end of text on first focus
+}
+function scrollFutureEditIntoView(){
+  const el=futureEditEl, row=el && el.closest('.future-row'), add=histBody.querySelector('.future-add');
+  if(!row) return;
+  const box=histScroll.getBoundingClientRect(), r=row.getBoundingClientRect();
+  const floor=(add ? add.getBoundingClientRect().top : box.bottom);
+  if(r.bottom>floor) histScroll.scrollTop+=r.bottom-floor;
+  else if(r.top<box.top) histScroll.scrollTop-=box.top-r.top;
+}
+// Click "Add +": commit the field in progress (if any), then open a fresh draft.
+function addFutureAndEdit(){
+  futureCursor=-1;                             // a leftover Tab ring + Enter would send that row to today
+  commitFutureEdit();
+  futureDraft={ id:nid() };
+  render();
+  const el=histBody.querySelector(`[data-fid="${futureDraft.id}"]`);
+  if(el){ futureEditEl=el; focusFutureEdit(el); scrollFutureEditIntoView(); }
+}
+function startFutureEdit(id){
+  futureCursor=-1;
+  const el=histBody.querySelector(`[data-fid="${id}"]`); if(!el) return;
+  futureEditEl=el; focusFutureEdit(el); scrollFutureEditIntoView();
+}
+// The editable title shared by existing rows and the draft. Looks state up by id on
+// every event — a sync adopt can replace the row objects while the node lives on.
+function buildFutureTitle(id, text){
+  // Keep the live editor — but only while the panel is open: a closing panel must let it
+  // detach so settleFutureEdit() commits it, not hide it still focused in the closed sheet.
+  if(state.histOpen && futureEditEl && futureEditEl.dataset.fid===id) return futureEditEl;
+  const t=document.createElement('div');
+  t.className='future-title cursor-text flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2]';
+  t.style.cssText='font-size:24px;color:var(--ink);';
+  t.dataset.fid=id; t.dataset.ph='Untitled';
+  t.textContent=text||''; if(!text) t.classList.add('empty');
+  // Editable on MOUSEDOWN (before the caret is placed) so one click edits — same as Today.
+  t.addEventListener('mousedown',()=>{
+    if(futureEditEl===t) return;
+    futureCursor=-1;
+    // Clicking straight from one field into another: commit the old one first and hand the
+    // editor over, so the re-render its blur triggers KEEPS this node (one click edits it,
+    // instead of the render eating the click — or the old text being dropped).
+    if(futureEditEl) commitFutureEdit();
+    futureEditEl=t; t.setAttribute('contenteditable','plaintext-only'); t.classList.remove('empty');
+    t.closest('.future-row')?.classList.add('editing');
+  });
+  t.addEventListener('keydown',e=>{
+    // Every key stays in the field: 'plaintext-only' doesn't match the global layer's
+    // [contenteditable="true"] typing check, so letters would otherwise fire shortcuts.
+    e.stopPropagation();
+    if(e.isComposing || e.keyCode===229) return;   // IME confirm-Enter (WebKit reports it as 229, not isComposing)
+    if(e.key==='Enter'||e.key==='Escape'){ e.preventDefault(); t.blur(); return; }
+    if(e.key!=='Tab') return;
+    e.preventDefault();
+    // Tab hops to the next row's edit (Shift+Tab = previous); Tab past the last row
+    // chains into a fresh Add — only when this row has text (same rule as Today).
+    const ids=(state.deferred||[]).filter(x=>!x.sent).map(x=>x.id);
+    const at=ids.indexOf(id), hasText=!!t.textContent.trim();
+    const isLast = futureDraft&&futureDraft.id===id ? true : at===ids.length-1;
+    if(!e.shiftKey && isLast){ if(hasText) addFutureAndEdit(); else t.blur(); return; }
+    const nextId = futureDraft&&futureDraft.id===id ? ids[ids.length-1]
+                 : ids[(at+(e.shiftKey?-1:1)+ids.length)%ids.length];
+    commitFutureEdit(); render();
+    if(nextId) startFutureEdit(nextId);
+  });
+  // Judge the blur a tick later: when a render tears the focused node out, the browser may
+  // deliver its blur only AFTER renderFuture re-attached and re-focused it — committing then
+  // cut the text mid-word ("Ty…"). By the next tick, a still-focused node means "keep typing".
+  t.addEventListener('blur',()=>{ setTimeout(()=>{
+    if(document.activeElement===t || !t.isConnected) return;   // re-focused, or torn out for good (settle handles it)
+    if(futureEditEl===t) commitFutureEdit();   // else already committed (Tab / Add / click-into-another)
+    render();
+  },0); });
+  return t;
+}
+function buildFutureAddRow(){
+  const add=document.createElement('div');
+  add.className='future-add addrow pressable row-neutral bd flex items-center cursor-pointer border-[#d9d9d9]';
+  add.style.cssText='position:sticky;bottom:0;z-index:2;height:110px;padding:0 32px;background:var(--card);';
+  add.innerHTML='<div class="addtxt flex gap-[18px] font-medium tracking-[-0.48px]" style="font-size:24px"><span>Add</span><span>+</span></div>';
+  add.addEventListener('mousedown',e=>e.preventDefault());   // keep focus in the field until we commit it
+  add.addEventListener('click',()=>addFutureAndEdit());
+  return add;
+}
 function renderFuture(){
-  if(!state.deferred || !state.deferred.length){ histBody.appendChild(histEmpty('Nothing in Future yet.')); return; }
+  if(!state.deferred) state.deferred=[];
   const full = activeCount()>=taskLimit();            // today maxed → hide every +
   const wrap=document.createElement('div');
   wrap.className='bd';
   if(futureCursor>=state.deferred.length) futureCursor=-1;   // clamp after removals
-  state.deferred.slice().reverse().forEach((d,i)=>{
+  const rows=state.deferred.map((d,i)=>{
     const row=d.sent ? buildSentFutureRow(d) : buildFutureRow(d, full);
-    if(i>0) row.classList.add('border-t');
     if(i===futureCursor) row.classList.add('cursor-ring');   // Tab keyboard cursor
-    wrap.appendChild(row);
+    return row;
   });
+  if(futureDraft) rows.push(buildFutureDraftRow());
+  rows.forEach((row,i)=>{ if(i>0) row.classList.add('border-t'); wrap.appendChild(row); });
   histBody.appendChild(wrap);
+  const add=buildFutureAddRow(); if(rows.length) add.classList.add('border-t');
+  histBody.appendChild(add);
+  // Re-attached the live editor → give focus straight back (same tick, so no keystroke is lost).
+  if(futureEditEl && futureEditEl.isConnected) focusFutureEdit(futureEditEl, futureCaretSaved);
 }
 
 function buildFutureRow(d, full){
-  const t=document.createElement('div');
-  t.className='future-title flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2]';
-  t.style.cssText='font-size:24px;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden';
-  t.textContent=d.text;
+  const t=buildFutureTitle(d.id, d.text);
   const actions=[];
-  if(!full) actions.push({title:'Add to today', icon:PLUS, run:()=>addDeferredToToday(d.id)});
-  actions.push({title:'Remove', icon:XICON, run:()=>deleteDeferred(d.id)});
+  // Acting on a row mid-edit uses what's typed, not the stale text.
+  // If the edit emptied the row, settling deleted it — just show that.
+  const settle=()=>{ if(futureEditEl && futureEditEl.dataset.fid===d.id) commitFutureEdit();
+    if(state.deferred.some(x=>x.id===d.id)) return true; save(); render(); return false; };
+  if(!full) actions.push({title:'Add to today', icon:PLUS, run:()=>{ if(settle()) addDeferredToToday(d.id); }});
+  actions.push({title:'Remove', icon:XICON, run:()=>{ if(settle()) deleteDeferred(d.id); }});
   return makeFutureHoverRow(t, actions);
+}
+// The draft row: same look as a Future row, but no + / × — there's nothing to act on yet.
+function buildFutureDraftRow(){
+  const row=makeFutureHoverRow(buildFutureTitle(futureDraft.id, ''), []);
+  if(!futureDraft.shown){ futureDraft.shown=true; row.classList.add('item-enter'); }   // once — re-renders mid-typing must not blink it
+  return row;
 }
 
 // A parked task that's been sent to Today: bold "Sent to today!" + the title in grey,
@@ -4324,7 +4492,7 @@ document.addEventListener('keydown', e=>{
   // FUTURE panel: Tab / Shift+Tab walk the parked rows (cursor-ring), Enter
   // sends the cursored row to today (same as its + action, cap-respecting).
   if(state.histOpen && state.histTab==='future'){
-    const rows=(state.deferred||[]).slice().reverse();   // displayed order (newest first)
+    const rows=(state.deferred||[]).slice();   // displayed order (oldest first, like Today)
     if(e.key==='Tab' && rows.length){
       e.preventDefault();
       futureCursor=((futureCursor+(e.shiftKey?-1:1))%rows.length+rows.length)%rows.length;
@@ -4380,7 +4548,7 @@ function liveRolloverCheck(){
   // editingActive() rather than `editingId!==null`: it HEALS a guard left dangling by a render
   // that tore the field out. Testing the raw global meant an UNPAIRED Mac (no sync pass to heal
   // it) stayed wedged forever — no rollover, and the key layer inert (skeptic 2026-08-11).
-  if(editingActive()) return;                // defer until the edit commits
+  if(editingActive() || futureEditLive()) return;   // defer until the edit commits
   const rolled=rolloverAndCarry();           // SAME path as boot — carries unfinished forward + wakes deferred
   if(rolled){
     setDate();
