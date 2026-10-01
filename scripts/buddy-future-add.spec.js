@@ -390,19 +390,40 @@ test('tabs show Future (n) / Done (n), with a quieter count that stays on one li
 
 // ---- "N more ↓" in the sticky Add row (whale 2026-10-01: chose the quiet count) ----
 
-test('quiet count: shows how many rows hide under Add, click scrolls (does not add), gone at the bottom', async ({ page }) => {
+test('quiet count: shows how many rows hide under Add, click scrolls (does not add), fades out at the bottom', async ({ page }) => {
   await boot(page);
-  expect(await page.locator('.future-more').isVisible()).toBe(false);   // short list: nothing hidden
+  const on = () => page.evaluate(() => document.querySelector('.future-more').classList.contains('on'));
+  const label = () => page.evaluate(() => document.querySelector('.future-more').textContent.replace(/\s+/g, ' ').trim());
+  expect(await on()).toBe(false);                                 // short list: nothing hidden
   await page.evaluate(() => { const s = window.__buddy.state; s.deferred = Array.from({ length: 16 }, (_, i) => ({ id: 'f' + i, text: 'Item ' + i, wake: '', v: 1 })); window.__buddy.render(); });
-  const more = page.locator('.future-more');
-  await expect(more).toBeVisible();
-  const n = parseInt(await more.textContent(), 10);
+  await page.waitForTimeout(600);
+  expect(await on()).toBe(true);
+  const n = parseInt(await label(), 10);
   expect(n).toBeGreaterThan(0);
-  expect(await more.textContent()).toBe(n + ' more ↓');
-  await more.click(); await page.waitForTimeout(700);
+  expect(await label()).toBe(n + ' more ↓');
+  await page.locator('.future-more').click(); await page.waitForTimeout(900);
   expect(await texts(page)).toHaveLength(16);                    // the click scrolled — no draft, no new item
   expect(await page.evaluate(() => !!document.activeElement.dataset.fid)).toBe(false);
-  await expect(more).toBeHidden();                                // at the bottom: nothing left underneath
-  const color = await page.evaluate(() => getComputedStyle(document.querySelector('.future-more')).color);
-  expect(color).toBeTruthy();
+  expect(await on()).toBe(false);                                 // at the bottom: fading out
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector('.future-more')).pointerEvents)).toBe('none');
+});
+
+test('quiet count: changes once per row (half-hidden rule), and a render does not replay its fade', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => { const s = window.__buddy.state; s.deferred = Array.from({ length: 16 }, (_, i) => ({ id: 'f' + i, text: 'Item ' + i, wake: '', v: 1 })); window.__buddy.render(); });
+  await page.waitForTimeout(600);
+  // Scroll in small steps across ~2 rows and record every distinct value seen.
+  const seen = await page.evaluate(async () => {
+    const sc = document.querySelector('.future-body').parentElement, vals = [];
+    const read = () => parseInt(document.querySelector('.future-more .fm-num > span:last-child').textContent, 10);
+    for (let y = 0; y <= 120; y += 4) { sc.scrollTop = y; await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); const v = read(); if (vals[vals.length - 1] !== v) vals.push(v); }
+    return vals;
+  });
+  for (let i = 1; i < seen.length; i++) expect(seen[i - 1] - seen[i]).toBe(1);   // steps of one, never back-and-forth
+  const replay = await page.evaluate(async () => {
+    window.__buddy.render();
+    const m = document.querySelector('.future-more');
+    return { on: m.classList.contains('on'), still: m.classList.contains('still') };
+  });
+  expect(replay).toEqual({ on: true, still: true });              // reborn already showing, without a fade
 });

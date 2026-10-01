@@ -64,11 +64,32 @@
   .future-list > .future-row, .future-list > .future-add{ flex:1 0 var(--fmin); min-height:auto; }   /* equal from --fmin; never below its own text (auto min) */
   .future-list > .future-row.future-sent{ flex:0 0 auto; min-height:0; }
   .future-list.fit-probe > *{ flex-grow:0 !important; }   /* measure natural heights, no fill */
-  .seg-count{ opacity:.55; }
-  /* "6 more ↓" in the sticky Add row while rows sit underneath it (whale 2026-10-01). */
-  .future-more{ margin-left:auto; font-size:15px; letter-spacing:-0.3px; color:var(--addtxt); white-space:nowrap; cursor:pointer; transition:color .1s ease; }
+  .seg-count{ opacity:.55; }   /* "(n)" on the Future / Done tabs: quieter than the label, still legible */
+  /* "6 more ↓" in the sticky Add row while rows sit underneath it (whale 2026-10-01).
+     Moves in Buddy's language: appears with Fade+Drift (--t-drift, --ease-out), leaves
+     faster, and the number rolls (old up/out, new in) like item-in — never pops. */
+  .future-more{ margin-left:auto; font-size:15px; letter-spacing:-0.3px; color:var(--addtxt); white-space:nowrap; cursor:pointer;
+    opacity:0; transform:translateX(6px); pointer-events:none;
+    transition:opacity .24s var(--ease-out), transform .24s var(--ease-out), color .1s ease; }
+  .future-more.on{ opacity:1; transform:none; pointer-events:auto;
+    transition:opacity var(--t-drift) var(--ease-out), transform var(--t-drift) var(--ease-out), color .1s ease; }
+  .future-more.still{ transition:none !important; }   /* rebuilt by a render: land in place, no replay */
   .future-more:hover{ color:var(--addtxt-hover); }
-  .future-more[hidden]{ display:none; }   /* "(n)" on the Future / Done tabs: quieter than the label, still legible */
+  .fm-num{ display:inline-grid; overflow:hidden; vertical-align:bottom; }
+  .fm-num > span{ grid-area:1/1; text-align:right; }
+  .fm-num > .fm-in-up{   animation: fm-in-up .18s var(--ease-out) both; }
+  .fm-num > .fm-in-down{ animation: fm-in-down .18s var(--ease-out) both; }
+  .fm-num > .fm-out-up{   animation: fm-out-up .14s var(--ease-out) both; }
+  .fm-num > .fm-out-down{ animation: fm-out-down .14s var(--ease-out) both; }
+  @keyframes fm-in-up{    from{ opacity:0; transform:translateY(60%); }  to{ opacity:1; transform:none; } }
+  @keyframes fm-in-down{  from{ opacity:0; transform:translateY(-60%); } to{ opacity:1; transform:none; } }
+  @keyframes fm-out-up{   to{ opacity:0; transform:translateY(-60%); } }
+  @keyframes fm-out-down{ to{ opacity:0; transform:translateY(60%); } }
+  @media (prefers-reduced-motion: reduce){
+    .future-more, .future-more.on{ transform:none; }
+    .fm-num > [class^="fm-"]{ animation-name: rm-fade; transform:none; }
+    .fm-num > .fm-out-up, .fm-num > .fm-out-down{ display:none; }
+  }
   .future-title:not([contenteditable]){ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
   .future-title[contenteditable]{ outline:none; white-space:pre-wrap; overflow-wrap:anywhere; }
 
@@ -3776,25 +3797,51 @@ function buildFutureAddRow(){
   add.addEventListener('mousedown',e=>e.preventDefault());   // keep focus in the field until we commit it
   add.addEventListener('click',()=>addFutureAndEdit());
   // Quiet count of rows hidden under the sticky Add; click jumps to the bottom (not an add).
+  // Renders rebuild this row constantly, so it is born already showing the last count
+  // (.still = no transition) — the fade only plays when the count truly appears/leaves.
   const more=document.createElement('span');
-  more.className='future-more'; more.hidden=true; more.title='Scroll to the bottom';
+  more.className='future-more still'+(futureMoreN>0?' on':''); more.title='Scroll to the bottom';
+  more.innerHTML='<span class="fm-num"><span></span></span> more ↓';
+  if(futureMoreN>0) futureMoreShown=futureMoreN;
+  more.querySelector('.fm-num > span').textContent=String(futureMoreShown||'');
   more.addEventListener('click',e=>{ e.stopPropagation(); histScroll.scrollTo({ top:histScroll.scrollHeight, behavior:'smooth' }); });
   add.appendChild(more);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>more.classList.remove('still')));
   return add;
 }
-// How many rows are (even partly) tucked under the sticky Add row right now.
+let futureMoreN=0, futureMoreShown=0, futureMoreRaf=0;
+// How many rows are tucked under the sticky Add row. A row counts once at least HALF of it
+// is underneath — so the number changes once per row as you scroll, not at every edge.
+function countFutureMore(add){
+  // Nothing can hide if the list doesn't scroll — also guards the open animation, whose
+  // translated rows would otherwise read as "under" the Add row for a moment.
+  if(histScroll.scrollHeight <= histScroll.clientHeight+1) return 0;
+  const floor=add.getBoundingClientRect().top;
+  return [...histBody.querySelectorAll('.future-list > .future-row')]
+    .filter(r=>{ const b=r.getBoundingClientRect(); return (b.top+b.bottom)/2 > floor; }).length;
+}
 function updateFutureMore(){
   const add=histBody.querySelector('.future-add'), more=add && add.querySelector('.future-more');
   if(!more) return;
-  // Nothing can hide if the list doesn't scroll — also guards the open animation, whose
-  // translated rows would otherwise read as "under" the Add row for a moment.
-  const overflows = histScroll.scrollHeight > histScroll.clientHeight+1;
-  const floor=add.getBoundingClientRect().top+2;
-  const n = !overflows ? 0 : [...histBody.querySelectorAll('.future-list > .future-row')].filter(r=>r.getBoundingClientRect().bottom>floor).length;
-  more.hidden = n===0;
-  if(n) more.textContent = n+' more ↓';
+  const n=countFutureMore(add), prev=futureMoreN;
+  futureMoreN=n;
+  if(n===0){ more.classList.remove('on'); return; }          // fade out, keeping the last number visible
+  const num=more.querySelector('.fm-num');
+  if(!more.classList.contains('on')){                         // appearing: set the number, then Fade+Drift in
+    num.replaceChildren(Object.assign(document.createElement('span'),{textContent:String(n)}));
+    futureMoreShown=n; more.classList.add('on'); return;
+  }
+  if(n===futureMoreShown) return;
+  // Roll: fewer hidden (scrolling down) → numbers move up; more hidden → they move down.
+  const dir = n<prev ? 'up' : 'down';
+  [...num.children].forEach(old=>{ old.className='fm-out-'+dir; old.addEventListener('animationend',()=>old.remove(),{once:true}); });
+  const fresh=document.createElement('span'); fresh.className='fm-in-'+dir; fresh.textContent=String(n);
+  num.appendChild(fresh); futureMoreShown=n;
 }
-histScroll.addEventListener('scroll', ()=>{ if(state.histOpen && state.histTab==='future') updateFutureMore(); }, { passive:true });
+histScroll.addEventListener('scroll', ()=>{
+  if(!(state.histOpen && state.histTab==='future') || futureMoreRaf) return;
+  futureMoreRaf=requestAnimationFrame(()=>{ futureMoreRaf=0; updateFutureMore(); });   // once per frame, not per event
+}, { passive:true });
 function renderFuture(){
   if(!state.deferred) state.deferred=[];
   const full = activeCount()>=taskLimit();            // today maxed → hide every +
