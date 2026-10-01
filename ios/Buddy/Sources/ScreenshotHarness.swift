@@ -76,6 +76,22 @@ enum ScreenshotHarness {
             store.deferred = [DeferredTask(id: "f1", text: "Renew the domain", wake: "2026-07-05"),
                               DeferredTask(id: "f2", text: "Plan Q3 offsite", wake: "2026-07-10")]
             return (store, .history, false, false)
+        case "future-sent-overflow":
+            store.seedForScreenshot(tasks: MockData.normalTasks, history: recentHistory())
+            store.deferred = [DeferredTask(id: "f1", text: "Renew the domain", wake: ""),
+                              DeferredTask(id: "s1", text: "Email the accountant", wake: "", sent: true, sentTid: "x1", v: 2),
+                              DeferredTask(id: "f2", text: "Plan Q3 offsite", wake: ""),
+                              DeferredTask(id: "s2", text: "Book the vet", wake: "", sent: true, sentTid: "x2", v: 2),
+                              DeferredTask(id: "f3", text: "Fix the bike", wake: "")]
+            return (store, .history, false, false)
+        case "future-sent":
+            // Plain rows interleaved with sent ones in store order — sent must render on TOP, compact.
+            store.seedForScreenshot(tasks: MockData.normalTasks, history: recentHistory())
+            store.deferred = [DeferredTask(id: "f1", text: "Renew the domain", wake: ""),
+                              DeferredTask(id: "s1", text: "Email the accountant", wake: "", sent: true, sentTid: "x1", v: 2),
+                              DeferredTask(id: "f2", text: "Plan Q3 offsite", wake: ""),
+                              DeferredTask(id: "s2", text: "Book the vet", wake: "", sent: true, sentTid: "x2", v: 2)]
+            return (store, .history, false, false)
         case "future-long-lvl2":
             store.seedForScreenshot(tasks: MockData.alarmTasks)
             store.deferred = (1...12).map { i in

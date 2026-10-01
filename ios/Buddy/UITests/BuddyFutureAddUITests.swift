@@ -144,4 +144,50 @@ final class BuddyFutureAddUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label ==[c] 'renew the domain'")).count, 1)
         XCTAssertFalse(app.staticTexts["renew THE domain"].exists)
     }
+
+    // MARK: - Layout (Today's flex rhythm)
+
+    private func el(_ app: XCUIApplication, _ id: String) -> XCUIElement {
+        app.descendants(matching: .any)[id].firstMatch
+    }
+
+    // A row's accessibility frame is only its text's bounds, so measure plain rows by PITCH:
+    // the distance between two consecutive rows' (vertically centred) text = row height + 1pt divider.
+    private func pitch(_ a: XCUIElement, _ b: XCUIElement) -> CGFloat { b.frame.midY - a.frame.midY }
+
+    // Few items → plain rows + Add share the panel equally (each ≥ 110pt), no empty band.
+    func testShortListFillsPanelWithEqualRows() throws {
+        let app = launch()
+        let r1 = el(app, "future-row-f1"), r2 = el(app, "future-row-f2"), add = el(app, "future-add")
+        XCTAssertTrue(add.waitForExistence(timeout: 3))
+        let rowH = pitch(r1, r2) - 1
+        XCTAssertGreaterThan(rowH, 110, "rows stretch past the 110pt floor to fill")
+        XCTAssertEqual(rowH, add.frame.height, accuracy: 1.5, "plain rows and Add get equal shares")
+        let barTop = el(app, "chrome-calendar").frame.minY
+        XCTAssertGreaterThan(add.frame.maxY, barTop - 60, "Add reaches the panel bottom (no empty band; the icon sits ~40pt into the bottom bar)")
+    }
+
+    // Sent rows: on TOP (above plain rows, store order kept) and compact like Donezo rows.
+    func testSentRowsAreCompactAndOnTop() throws {
+        let app = launch("future-sent")
+        let a = app.staticTexts["Email the accountant"], b = app.staticTexts["Book the vet"]
+        XCTAssertTrue(a.waitForExistence(timeout: 3))
+        let p1 = el(app, "future-row-f1"), p2 = el(app, "future-row-f2")
+        XCTAssertLessThan(a.frame.minY, b.frame.minY)                  // store order among sent rows
+        XCTAssertLessThan(b.frame.maxY, p1.frame.minY)                 // all sent rows above plain rows
+        XCTAssertLessThan(pitch(a, b), 60, "sent rows are compact, not 110pt")
+        XCTAssertGreaterThanOrEqual(pitch(p1, p2) - 1, 110)
+        XCTAssertEqual(pitch(p1, p2) - 1, el(app, "future-add").frame.height, accuracy: 1.5)
+    }
+
+    // Overflow → rows sit at the 110pt floor, the list scrolls, Add stays pinned & tappable.
+    func testOverflowScrollsWithPinnedAdd() throws {
+        let app = launch("future-long")
+        let add = el(app, "future-add")
+        XCTAssertTrue(add.waitForExistence(timeout: 3))
+        XCTAssertEqual(pitch(el(app, "future-row-fl1"), el(app, "future-row-fl2")) - 1, 110, accuracy: 1)
+        XCTAssertEqual(add.frame.height, 110, accuracy: 1)
+        XCTAssertTrue(add.isHittable)
+        XCTAssertFalse(el(app, "future-row-fl12").isHittable, "the end of the list is scrolled off")
+    }
 }

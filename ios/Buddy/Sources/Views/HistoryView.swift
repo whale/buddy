@@ -28,7 +28,8 @@ struct HistoryView: View {
     @State private var editSession = 0                 // bumps per edit → a fresh editor + stale-write guard
     private static let draftID = "future-draft"
     private static let addRowHeight: CGFloat = 110
-    @State private var futureRowsHeight: CGFloat = 0   // measured height of the rows (excl. Add)
+    @State private var futureLayoutHeight: CGFloat = 0 // panel height without the keyboard (row sizing)
+    @State private var sentRowHeight: CGFloat = 44     // measured compact "Sent to today!" row height
     @State private var keyboardTop: CGFloat = .infinity
     @State private var sheetMaxY: CGFloat = 0
 
@@ -158,25 +159,77 @@ struct HistoryView: View {
         return max(0, sheetMaxY - keyboardTop)
     }
 
+    // Future list layout — mirrors Today's flex rows:
+    //   • "Sent to today!" rows sit on TOP, compact like Today's Donezo rows (natural height).
+    //   • Plain rows + the draft + the Add row SHARE the remaining height equally, each ≥ 110pt,
+    //     so a short list fills the panel (no empty band at the bottom) — Today's rhythm.
+    //   • Only when every flex row is at its 110pt floor and still doesn't fit does the list
+    //     scroll, with Add pinned at the bottom and rows flowing under it.
+    // Heights are set EXPLICITLY (not maxHeight: .infinity) so the view tree is identical in
+    // both modes — switching trees mid-edit would rebuild the UITextView and drop focus.
+    private enum FutureItem: Identifiable {
+        case sent(DeferredTask), plain(DeferredTask), draft
+        var id: String {
+            switch self {
+            case .sent(let d), .plain(let d): return d.id
+            case .draft: return HistoryView.draftID
+            }
+        }
+    }
+
+    private var futureItems: [FutureItem] {
+        var out = store.deferred.filter { $0.sent == true }.map { FutureItem.sent($0) }       // store order
+        out += store.deferred.filter { $0.sent != true }.map { FutureItem.plain($0) }
+        if editingId == Self.draftID { out.append(.draft) }
+        return out
+    }
+
+    /// Equal share for each flex row (plain + draft + Add) in a panel of height H.
+    /// Returns (rowHeight ≥ 110, overflowing).
+    private func futureLayout(height H: CGFloat, items: [FutureItem]) -> (rowH: CGFloat, overflow: Bool) {
+        let sentCount = items.filter { if case .sent = $0 { return true } else { return false } }.count
+        let flexCount = items.count - sentCount + 1                   // + the Add row
+        let dividers = CGFloat(items.count)                           // one between each of items + Add
+        let avail = H - CGFloat(sentCount) * sentRowHeight - dividers
+        let share = avail / CGFloat(flexCount)
+        guard H > 0, share.isFinite else { return (Self.addRowHeight, false) }
+        if share + 0.5 < Self.addRowHeight { return (Self.addRowHeight, true) }
+        return (floor(share), false)
+    }
+
     private var futureScroll: some View {
         GeometryReader { geo in
-            // Compare rows-only height (never changes with pin state → no layout feedback loop).
-            let pinned = futureRowsHeight + 1 + Self.addRowHeight > geo.size.height + 0.5
+            // While the keyboard is up the list is shortened (padding below); keep sizing rows
+            // from the pre-keyboard height so they don't jump as it rises — the list scrolls.
+            let H = keyboardOverlap > 0 && futureLayoutHeight > 0 ? futureLayoutHeight : geo.size.height
+            let items = futureItems
+            let layout = futureLayout(height: H, items: items)
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
-                        futureRows
-                            .background(GeometryReader { g in
-                                Color.clear
-                                    .onAppear { futureRowsHeight = g.size.height }
-                                    .onChange(of: g.size.height) { _, v in futureRowsHeight = v }
-                            })
-                        if !pinned { addBlock(showDivider: !futureRowsEmpty) }
+                        ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
+                            if i > 0 { historyDivider }
+                            Group {
+                                switch item {
+                                case .sent(let d):
+                                    sentFutureRow(id: d.id, text: d.text)
+                                case .plain(let d):
+                                    if editingId == d.id { futureEditorRow(id: d.id, height: layout.rowH) }
+                                    else { futureRow(id: d.id, text: d.text, height: layout.rowH) }
+                                case .draft:
+                                    // View-local only, no + / × actions (it isn't a task yet).
+                                    futureEditorRow(id: Self.draftID, height: layout.rowH)
+                                }
+                            }
+                            .id(item.id)
+                        }
+                        if !layout.overflow { addBlock(showDivider: !items.isEmpty, height: layout.rowH) }
                     }
                 }
+                .scrollBounceBehavior(.basedOnSize)
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if pinned {
-                        addBlock(showDivider: true).background(theme.cardBackground)
+                    if layout.overflow {
+                        addBlock(showDivider: true, height: Self.addRowHeight).background(theme.cardBackground)
                     }
                 }
                 .onChange(of: editingId) { _, id in
@@ -194,47 +247,24 @@ struct HistoryView: View {
                     withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .bottom) }
                 }
             }
+            .onAppear { if keyboardOverlap == 0 { futureLayoutHeight = geo.size.height } }
+            .onChange(of: geo.size.height) { _, h in if keyboardOverlap == 0 { futureLayoutHeight = h } }
         }
         // The app column ignores the keyboard, so shrink just this list while editing so
         // the field (and the pinned Add) stay above the keyboard.
         .padding(.bottom, keyboardOverlap)
     }
 
-    private var futureRowsEmpty: Bool { store.deferred.isEmpty && editingId != Self.draftID }
-
-    @ViewBuilder private var futureRows: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(store.deferred.enumerated()), id: \.element.id) { i, d in
-                if i > 0 { historyDivider }
-                Group {
-                    if d.sent == true {
-                        sentFutureRow(id: d.id, text: d.text)
-                    } else if editingId == d.id {
-                        futureEditorRow(id: d.id)
-                    } else {
-                        futureRow(id: d.id, text: d.text)
-                    }
-                }
-                .id(d.id)
-            }
-            // The in-progress new item: view-local only, no + / × actions (it isn't a task yet).
-            if editingId == Self.draftID {
-                if !store.deferred.isEmpty { historyDivider }
-                futureEditorRow(id: Self.draftID).id(Self.draftID)
-            }
-        }
-    }
-
-    @ViewBuilder private func addBlock(showDivider: Bool) -> some View {
+    @ViewBuilder private func addBlock(showDivider: Bool, height: CGFloat) -> some View {
         VStack(spacing: 0) {
             if showDivider { historyDivider }
-            futureAddRow
+            futureAddRow(height: height)
         }
     }
 
     // Same "Add +" as Today's Add row (Geist medium, −0.48 tracking, 18pt gap, addInk token),
     // at the Future rows' fixed 24pt / 110pt.
-    private var futureAddRow: some View {
+    private func futureAddRow(height: CGFloat) -> some View {
         HStack(spacing: 18) {
             Text("Add")
             Text("+")
@@ -243,7 +273,7 @@ struct HistoryView: View {
         .tracking(-0.48)
         .foregroundStyle(theme.addInk)
         .padding(.horizontal, 32)
-        .frame(maxWidth: .infinity, minHeight: Self.addRowHeight, maxHeight: Self.addRowHeight, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture { startDraft() }
         .accessibilityElement(children: .combine)
@@ -256,7 +286,7 @@ struct HistoryView: View {
     // 110pt, and it GROWS with long text while editing instead of clipping. It sizes from the
     // editor's own measured height (not Today's invisible-Text ghost): UITextView lines are a
     // touch taller than SwiftUI Text, so a ghost-sized box clipped the 3rd+ line.
-    private func futureEditorRow(id: String) -> some View {
+    private func futureEditorRow(id: String, height: CGFloat) -> some View {
         let session = editSession
         let binding = Binding<String>(
             get: { editText },
@@ -274,7 +304,7 @@ struct HistoryView: View {
         .id(session)   // a fresh UITextView per edit — never reuse the last entry's text
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 32).padding(.vertical, 16)
-        .frame(minHeight: Self.addRowHeight)
+        .frame(minHeight: height)          // its share of the panel; grows past it for long text
     }
 
     private func startDraft() {
@@ -367,7 +397,7 @@ struct HistoryView: View {
     }
 
     // Future rows use the Today row visual language, but fixed at 110pt and scrollable.
-    private func futureRow(id: String, text: String) -> some View {
+    private func futureRow(id: String, text: String, height: CGFloat) -> some View {
         SwipeableRow(
             rowID: id,
             openRowID: $openFutureRowID,
@@ -387,28 +417,36 @@ struct HistoryView: View {
                 .background(theme.line.opacity(highlightId == id ? 0.7 : 0))
                 .accessibilityIdentifier(highlightId == id ? "future-highlight" : "future-row-\(id)")
         }
-        .frame(height: 110)
+        .frame(height: height)
     }
 
-    // A parked task already sent to today. Same fixed row, swipe to undo.
+    // A parked task already sent to today — compact like Today's Donezo rows (same
+    // RowFit.doneFont/donePad at Today's 24pt/16pt fit), swipe to undo.
     private func sentFutureRow(id: String, text: String) -> some View {
-        SwipeableRow(
+        let f = RowFit.doneFont(for: 24)
+        return SwipeableRow(
             rowID: id,
             openRowID: $openFutureRowID,
             theme: theme,
             onRestore: { withoutAnimation { store.unsendDeferred(id: id) } }
         ) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Sent to today!").font(.geist(18, .semibold)).tracking(-0.30)
+                Text("Sent to today!").font(.geist(f, .semibold)).tracking(-0.02 * f)
                     .foregroundStyle(theme.escalationText).fixedSize(horizontal: true, vertical: false)
-                Text(text).font(.geist(18, .regular)).tracking(-0.36)
+                Text(text).font(.geist(f, .regular)).tracking(-0.02 * f)
                     .foregroundStyle(theme.inkDim).lineLimit(1)
                 Spacer(minLength: 8)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .padding(.horizontal, 32)
+            .padding(.vertical, RowFit.donePad(for: RowFit.padMax))
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(height: 110)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(GeometryReader { g in
+            Color.clear
+                .onAppear { sentRowHeight = g.size.height }
+                .onChange(of: g.size.height) { _, v in sentRowHeight = v }
+        })
     }
 
     // Rightmost row icon: glyph hugs the row's trailing edge so every surface's icons line up
