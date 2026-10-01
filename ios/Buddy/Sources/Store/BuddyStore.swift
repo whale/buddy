@@ -42,6 +42,11 @@ final class BuddyStore {
     // apply mid-type would tear down the text field and could commit a half-typed task
     // (mirrors the Mac's applyWire editingId guard). The next sync pass re-merges.
     var isEditing = false
+    /// A Future (History sheet) row/draft is being edited. Separate from `isEditing` so
+    /// TodayView's self-heal (which clears isEditing when Today has no editor) can't drop it.
+    /// adopt() and rollover defer while it's set (Mac parity); HistoryView clears it on every
+    /// way an edit ends (commit / tab switch / close / disappear / background).
+    var isEditingFuture = false
 
     // MARK: - Derived helpers
     var activeTasks: [BuddyTask] { today.items.filter { $0.isActive } }
@@ -347,10 +352,75 @@ final class BuddyStore {
 
     /// Remove a parked (Future) task for good. Mirrors the Mac Future-tab × button.
     /// Tombstone the id so a stale push from the other device can't resurrect it.
-    func deleteDeferred(id: String) {
+    func deleteDeferred(id: String, immediate: Bool = false) {
         tombstone(id)
         deferred.removeAll { $0.id == id }
-        scheduleSave()
+        scheduleSave(immediate: immediate)
+    }
+
+    /// Future text normalisation — Mac parity `text.replace(/\s+/g,' ').trim()`: every run of
+    /// whitespace (incl. pasted newlines) becomes one space, then trim.
+    static func normalizeFutureText(_ text: String) -> String {
+        text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
+    /// Same-title key the sync merge collapses plain Future rows on (trim + lowercase),
+    /// applied to normalised text so "Call mom" == "  call   MOM ".
+    static func futureTitleKey(_ text: String) -> String {
+        normalizeFutureText(text).lowercased()
+    }
+    /// A plain (un-sent) Future row with this title key, other than `excluding`.
+    private func plainDeferredIndex(key: String, excluding id: String? = nil) -> Int? {
+        guard !key.isEmpty else { return nil }
+        return deferred.firstIndex { $0.id != id && $0.sent != true && Self.futureTitleKey($0.text) == key }
+    }
+
+    enum DeferredAddResult: Equatable {
+        case added(String)       // new row id
+        case duplicate(String)   // an existing plain row already has this title — nothing added
+    }
+
+    /// Add a task straight to Future (History → Future → Add). Takes the FINISHED text — the
+    /// view keeps the in-progress draft locally, so a blank row is never written here (it would
+    /// sync to the Mac as an empty task). Blank / whitespace-only text is rejected (nil).
+    /// Appends (store order = oldest first), so the new row lands right above the Add row.
+    /// Same title as an existing plain row → NOT added (sync's same-title dedupe would make one
+    /// of them vanish on the next pass); returns .duplicate(existing id) for the view to point at.
+    /// `immediate` writes to disk now (the backgrounding path — the app may be killed next).
+    @discardableResult
+    func addDeferred(text: String, immediate: Bool = false) -> DeferredAddResult? {
+        let clean = Self.normalizeFutureText(text)
+        guard !clean.isEmpty else { return nil }
+        if let dup = plainDeferredIndex(key: clean.lowercased()) { return .duplicate(deferred[dup].id) }
+        let id = newId()                   // iPhone-minted → UPPERCASE UUID
+        deferred.append(DeferredTask(id: id, text: clean, wake: "", v: 1))
+        scheduleSave(immediate: immediate)
+        return .added(id)
+    }
+
+    /// Edit a parked (Future) row's text. Empty → delete via the × path (tombstoned).
+    /// A real change bumps the row's v so the edit beats the peer's stale copy in merge
+    /// (Mac parity: `d.v=(d.v|0)+1`). Sent rows aren't editable.
+    /// `original` = the text when editing began: if the user didn't change it, this is a no-op —
+    /// otherwise a sync that updated the row mid-edit would be reverted by the stale copy with v+1.
+    /// Renaming onto ANOTHER plain row's title keeps the edited row (v bump) and deletes the
+    /// other one (tombstoned) — exactly what the sync merge's same-title dedupe would produce.
+    func editDeferred(id: String, text: String, original: String? = nil, immediate: Bool = false) {
+        guard let idx = deferred.firstIndex(where: { $0.id == id }) else { return }
+        guard deferred[idx].sent != true else { return }
+        let clean = Self.normalizeFutureText(text)
+        if let original, clean == Self.normalizeFutureText(original) { return }
+        if clean.isEmpty {
+            deleteDeferred(id: id, immediate: immediate)
+            return
+        }
+        guard deferred[idx].text != clean else { return }
+        deferred[idx].text = clean
+        deferred[idx].v += 1
+        while let other = plainDeferredIndex(key: clean.lowercased(), excluding: id) {
+            tombstone(deferred[other].id)
+            deferred.remove(at: other)
+        }
+        scheduleSave(immediate: immediate)
     }
 
     /// Every completed task text (today + history), newest first — for the Settings export.
@@ -437,6 +507,7 @@ final class BuddyStore {
     /// Deferred while a row edit is in flight (isEditing) — the next pass re-merges.
     func adopt(_ merged: SyncSnapshot) {
         guard !isEditing else { BuddyDiag.log("adopt-deferred-editing"); return }   // never clobber an in-progress edit (Mac applyWire parity)
+        guard !isEditingFuture else { BuddyDiag.log("adopt-deferred-editing-future"); return }   // the next poll re-merges once the Future edit ends
         applyingRemote = true
         defer { applyingRemote = false }
         if let t = merged.today { today = t }
@@ -475,7 +546,7 @@ final class BuddyStore {
     // Mirrors the Mac's `maybeRollover()` + `rolloverAndCarry()` (dist/index.html).
     @discardableResult
     func performRolloverIfNeeded() -> Bool {
-        guard !isEditing else { return false }             // never roll over mid-edit (Mac parity)
+        guard !isEditing, !isEditingFuture else { return false }   // never roll over mid-edit (Mac parity)
         let cur = Self.localDate()
         let stored = today.date
         guard stored != cur else { return false }          // same day → restore verbatim

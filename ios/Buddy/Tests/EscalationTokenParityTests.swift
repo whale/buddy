@@ -46,6 +46,7 @@ final class EscalationTokenParityTests: XCTestCase {
             try assertToken(theme.selBg,          json["selBg"],     "\(name).selBg")
             try assertToken(theme.selInk,         json["selInk"],    "\(name).selInk")
             try assertToken(theme.line,           json["line"],      "\(name).line")
+            try assertToken(theme.addInk,         json["addInk"],    "\(name).addInk")
         }
     }
 

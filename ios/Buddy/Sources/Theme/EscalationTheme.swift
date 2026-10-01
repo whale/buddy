@@ -100,11 +100,13 @@ struct EscalationTheme {
         }
     }
 
-    // "Add +" placeholder text. Mac --addtxt: lvl0/1 rgba(0,0,0,.20) · lvl2 rgba(255,255,255,.60)
+    // "Add +" placeholder text. Mac --addtxt: lvl0 rgba(0,0,0,.20) · lvl1 rgba(229,72,77,.45)
+    // · lvl2 rgba(255,255,255,.60). Pinned to design/escalation-tokens.json `addInk`.
     var addInk: Color {
         switch level {
-        case .lvl0, .lvl1: return Color.black.opacity(0.20)
-        case .lvl2:        return Color.white.opacity(0.60)
+        case .lvl0: return Color.black.opacity(0.20)
+        case .lvl1: return Color(red: 229/255, green: 72/255, blue: 77/255).opacity(0.45)
+        case .lvl2: return Color.white.opacity(0.60)
         }
     }
 

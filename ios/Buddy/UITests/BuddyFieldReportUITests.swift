@@ -76,7 +76,7 @@ final class BuddyFieldReportUITests: XCTestCase {
     /// the content, covered the revealed tray, and swallowed every action tap).
     func testSwipeActionButtonFires() throws {
         let app = launch(fixture: "future-long")
-        let row = app.staticTexts["Future item 12"]   // newest-parked → rendered on top
+        let row = app.staticTexts["Future item 1"]    // oldest-parked → rendered on top (Future is oldest-first)
         XCTAssertTrue(row.waitForExistence(timeout: 3))
         // Real horizontal swipe left on the row to reveal the tray.
         let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))

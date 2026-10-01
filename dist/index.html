@@ -53,6 +53,46 @@
      blank white band the eye reads as padding — invisible, yet holding a cap slot. Show it
      always, and via the token so it adapts on red (RULE 1) instead of staying dark. */
   .empty:before{content:attr(data-ph);color:var(--ink-dim)}
+  /* Future fills the panel like Today: plain rows + Add share the height (110px floor each);
+     only when they no longer fit does it scroll, with Add sticky. Sent rows stay compact. */
+  .future-body{ display:flex; flex-direction:column; min-height:100%; }
+  .future-body > .future-list{ flex:1 1 auto; display:flex; flex-direction:column; }
+  /* Rows grow to fill; each is at least max(its text, --fmin). fitFuture() shrinks --fmin and the
+     text (--ffs) step by step as the list fills — down to the "Sent to today!" row's size — and
+     only past that does the list scroll under the sticky Add. A long edit grows its own row. */
+  .future-list{ --fmin:110px; --ffs:24px; }
+  .future-list > .future-row, .future-list > .future-add{ flex:1 0 var(--fmin); min-height:auto; }   /* equal from --fmin; never below its own text (auto min) */
+  .future-list > .future-row.future-sent{ flex:0 0 auto; min-height:0; }
+  .future-list.fit-probe > *{ flex-grow:0 !important; }   /* measure natural heights, no fill */
+  .seg-count{ opacity:.55; margin-left:6px; }   /* "(n)" on the Future / Done tabs: quieter than the label, still legible; 6px past the word space */
+  /* "6 more ↓" in the sticky Add row while rows sit underneath it (whale 2026-10-01).
+     Moves in Buddy's language: appears with Fade+Drift (--t-drift, --ease-out), leaves
+     faster, and the number rolls (old up/out, new in) like item-in — never pops. */
+  .future-more{ margin-left:auto; font-size:15px; letter-spacing:-0.3px; color:var(--addtxt); white-space:nowrap; cursor:pointer;
+    opacity:0; transform:translateX(6px); pointer-events:none;
+    transition:opacity .24s var(--ease-out), transform .24s var(--ease-out), color .1s ease; }
+  .future-more.on{ opacity:1; transform:none; pointer-events:auto;
+    transition:opacity var(--t-drift) var(--ease-out), transform var(--t-drift) var(--ease-out), color .1s ease; }
+  .future-more.still{ transition:none !important; }   /* rebuilt by a render: land in place, no replay */
+  .future-more:hover{ color:var(--addtxt-hover); }
+  .future-add:has(.future-more:active){ transform:none; }   /* tapping the count isn't an Add press */
+  .fm-num{ display:inline-grid; overflow:hidden; vertical-align:bottom; }
+  .fm-num > span{ grid-area:1/1; text-align:right; }
+  .fm-num > .fm-in-up{   animation: fm-in-up .18s var(--ease-out) both; }
+  .fm-num > .fm-in-down{ animation: fm-in-down .18s var(--ease-out) both; }
+  .fm-num > .fm-out-up{   animation: fm-out-up .14s var(--ease-out) both; }
+  .fm-num > .fm-out-down{ animation: fm-out-down .14s var(--ease-out) both; }
+  @keyframes fm-in-up{    from{ opacity:0; transform:translateY(60%); }  to{ opacity:1; transform:none; } }
+  @keyframes fm-in-down{  from{ opacity:0; transform:translateY(-60%); } to{ opacity:1; transform:none; } }
+  @keyframes fm-out-up{   to{ opacity:0; transform:translateY(-60%); } }
+  @keyframes fm-out-down{ to{ opacity:0; transform:translateY(60%); } }
+  @media (prefers-reduced-motion: reduce){
+    .future-more, .future-more.on{ transform:none; }
+    .fm-num > [class^="fm-"]{ animation-name: rm-fade; transform:none; }
+    .fm-num > .fm-out-up, .fm-num > .fm-out-down{ display:none; }
+  }
+  .future-title:not([contenteditable]){ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .future-title[contenteditable]{ outline:none; white-space:pre-wrap; overflow-wrap:anywhere; }
 
   /* press feedback intentionally OFF — no click movement (text was shrinking/icons bouncing) */
   .pressable:active{ transform:none; }
@@ -1123,8 +1163,11 @@ function save(){ if(saveSuppressed) return;
 
 /* Force-flush synchronously when the tab is hidden / closing — a trailing
    debounce gets killed by tab close, so cancel the timer and write inline. */
-window.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') writeNow(); });
-window.addEventListener('beforeunload', writeNow);
+// A Future field mid-typing lives only in the DOM until it commits — fold it in first, or an
+// updater relaunch / quit would drop it (Today's rows write it.text live, so they're covered).
+const flushAndWrite=()=>{ if(typeof flushFutureEdit==='function') flushFutureEdit(); writeNow(); };
+window.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') flushAndWrite(); });
+window.addEventListener('beforeunload', flushAndWrite);
 
 /* --------------------------------------------------------------------
    LOAD + MIGRATE  — corruption guard: a bad blob must NEVER reach render
@@ -1795,7 +1838,7 @@ function applyWire(blob){
   // Never clobber an in-progress edit: render() would tear down the contenteditable
   // mid-type and the blur handler could tombstone a half-typed task. Defer — the next
   // sync pass re-merges and applies once the edit commits.
-  if(editingActive()){ diag('adopt-deferred-editing', {}); return; }
+  if(editingActive() || futureEditLive()){ diag('adopt-deferred-editing', {}); return; }
   const keepPinned = state.pinned;               // pinned is device-local — never adopt the remote's
   const h = hydrate(migrate(blob));
   if(!h) return;
@@ -2543,12 +2586,28 @@ function rolloverAndCarry(){
   return rolled;
 }
 
-// Done history: store up to ~1 year. The Done tab shows ONE WEEK at a time and a
-// "Load more" button reveals the next week (no per-user setting). RETENTION bounds
-// storage growth. `pastDaysShown` is transient UI state, reset to a week each time
-// the panel opens or the tab switches.
+// Done history: store up to ~1 year (RETENTION bounds storage growth). The Done tab
+// pages by items (DONE_PAGE below); `pastDaysShown` still pages the legacy Skipped view
+// by week. Both are transient UI state, reset when the panel opens or the tab switches.
 const PAST_PAGE=7, RETENTION_DAYS=365;
 let pastDaysShown=PAST_PAGE;
+// Done pages by ITEMS, not days (whale 2026-10-01): 30 completed tasks at a time — a busy
+// week no longer floods it, a quiet one no longer looks empty. Reset on open / tab switch.
+const DONE_PAGE=30;
+let doneShown=DONE_PAGE;
+// Every archived day with done tasks, newest first. Days within the last week read as a
+// weekday; older ones add the date, since paging by items can reach back past a week.
+function doneDays(){
+  const today=localDate(), weekAgo=localDate(new Date(Date.now()-7*86400000));
+  return (state.history||[])
+    .filter(r=>r && typeof r.date==='string' && r.date<today)
+    .sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:0)
+    .map(r=>{ const d=new Date(r.date+'T00:00:00');
+      const name = r.date>weekAgo ? DOW[d.getDay()]
+        : DOW[d.getDay()]+', '+d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+      return { name, items:(r.items||[]).filter(it=>it && it.done && String(it.text||'').trim()) }; })
+    .filter(d=>d.items.length);
+}
 // Drop archived days older than the retention window so storage stays bounded.
 function pruneHistory(){
   if(!Array.isArray(state.history)) return;
@@ -3418,11 +3477,16 @@ function buildDonezoRow(it, idx, morning){
   return row;
 }
 
+let futureCaretSaved=null, futureWasFocused=false;   // the live Future field's focus + caret across a rebuild
 function renderHist(){
+  futureWasFocused = !!futureEditEl && document.activeElement===futureEditEl;
+  futureCaretSaved = futureWasFocused ? futureCaret(futureEditEl) : null;
   histBody.innerHTML='';            // .stagger is applied by render() on the open transition only
   if(state.histTab==='skipped') state.histTab='past';   // Skipped tab removed → fall back to Done
+  histBody.classList.toggle('future-body', state.histTab==='future');
   if(state.histTab==='future') renderFuture();
   else renderPast();
+  settleFutureEdit();
 }
 function histEmpty(msg){
   const e=document.createElement('div');
@@ -3444,9 +3508,15 @@ function restoreHistoryTask(text){
 // they live in the Skipped tab.
 function renderPast(){
   const todayDone = state.items.filter(it=>it.state==='done');     // live: today's completions
-  const past = lastNDays(pastDaysShown)
-    .map(d=>({ name:d.name, items:(d.items||[]).filter(it=>it && it.done && String(it.text||'').trim()) }))
-    .filter(d=>d.items.length);
+  // First `doneShown` completions: today's are always all shown (and count toward the page);
+  // past days fill the rest, cut mid-day if needed.
+  let room=Math.max(0, doneShown-todayDone.length), total=todayDone.length;
+  const past=[];
+  for(const d of doneDays()){
+    total+=d.items.length;
+    if(room>0){ past.push({ name:d.name, items:d.items.slice(0,room) }); room-=Math.min(room, d.items.length); }
+  }
+  const doneHasMore = total > doneShown;
   if(!todayDone.length && !past.length){ histBody.appendChild(histEmpty('No completed tasks yet.')); return; }
   const groups=[];
   if(todayDone.length) groups.push({ name:'Today', items:todayDone.map(it=>({text:it.text,liveId:it.id,id:it.id,doneWord:it.doneWord})), today:true });
@@ -3475,7 +3545,7 @@ function renderPast(){
     });
     histBody.appendChild(grp);
   });
-  histLoadMore();
+  if(doneHasMore) histBody.appendChild(loadMoreButton(()=>{ doneShown+=DONE_PAGE; render(); }));
 }
 // SKIPPED tab = PAST tasks left undone. Plain (no strike, no done-word), each
 // restorable into today via + — hidden when today is full (taskLimit()), so a skipped
@@ -3517,24 +3587,25 @@ function histLoadMore(){
   const boundary = localDate(new Date(Date.now()-pastDaysShown*86400000));   // = today − pastDaysShown
   const hasMore = (state.history||[]).some(r=> r && typeof r.date==='string' && r.date < boundary);
   if(!hasMore) return;
+  histBody.appendChild(loadMoreButton(()=>{ pastDaysShown+=PAST_PAGE; render(); }));
+}
+function loadMoreButton(onMore){
   const more=document.createElement('button');
   more.className='bd w-full px-8 py-4 text-[15px] tracking-[-0.3px] border-t ihover';
   more.style.color='var(--ink-dim)';                       // adaptive: light on red
   more.textContent='Load more';
   more.addEventListener('mousedown',e=>e.preventDefault());
-  more.addEventListener('click',()=>{ pastDaysShown+=PAST_PAGE; render(); });
-  histBody.appendChild(more);
+  more.addEventListener('click',onMore);
+  return more;
 }
-// FUTURE: a manual holding pen. Parked tasks DON'T auto-return — you pull each
-// into today with + (capped) or drop it with ×. Rows are read-only (edit a task
-// after pulling it into today). Newest-parked on top; no date grouping.
+// One Future row shell: 110px (grows while editing so long text never clips) + hover rail.
 function makeFutureHoverRow(contentEl, actions){
   const row=document.createElement('div');
-  row.className='future-row bd group/h relative flex items-center border-[#d9d9d9]';
-  row.style.cssText='height:110px;background:var(--card);';
+  row.className='future-row bd group/h relative flex items-stretch border-[#d9d9d9]';
+  row.style.background='var(--card)';   // height: .future-list flex rule (fills like Today, 110px floor)
 
   const front=document.createElement('div');
-  front.className='flex items-center px-8 pr-[88px] w-full h-full min-w-0';
+  front.className='flex items-center px-8 pr-[88px] py-4 w-full min-w-0';   // stretches to the row; grows it for long edits
   front.appendChild(contentEl);
   row.appendChild(front);
 
@@ -3553,33 +3624,324 @@ function makeFutureHoverRow(contentEl, actions){
   row.appendChild(rail);
   return row;
 }
-// FUTURE: a manual holding pen. Parked tasks DON'T auto-return — you pull each
-// into today with + (capped) or drop it with ×. Rows are read-only (edit a task
-// after pulling it into today). Newest-parked on top; no date grouping.
+// FUTURE: a holding pen. Parked tasks DON'T auto-return — you pull each into today
+// with + (capped) or drop it with ×. Oldest first, like Today, so "Add +" sits right
+// after the last item and a new item lands just above it. Once the list outgrows the
+// panel, the Add row sticks to the bottom and items scroll beneath it.
+//
+// Adding/editing mirrors Today (click Add → blank row with the caret; Enter / Esc / Tab
+// commit; an emptied row deletes itself) with two deliberate differences, each closing a
+// bug the prototype hit:
+//  • The blank row being typed is a DRAFT (futureDraft), never in state.deferred until it
+//    has text. A blank in state would sync to the phone as an empty task, show + / × that
+//    act on nothing, and be left behind as a ghost when Add is clicked twice.
+//  • The field being edited is ONE persistent DOM node (futureEditEl). renderFuture()
+//    re-uses it instead of rebuilding it, so a background render (sync adopt, Donezo
+//    timer) can't drop keystrokes, split the text, or strand the edit.
+let futureDraft = null;     // { id } — the new row being typed; not yet in state.deferred
+let futureEditEl = null;    // the live contenteditable (draft or existing row), kept across renders
+const futureEditLive = () => !!futureEditEl && document.activeElement===futureEditEl;
+
+// Commit whatever the live field holds. Draft: push if it has text, else discard.
+// Existing row: save the edit (v-bump for sync), or delete it (tombstone) if emptied.
+// Same key the sync merge uses to collapse plain Future rows with one title (mergeDeferred's
+// same-title dedupe). Two plain rows with one key can't coexist after a sync, so we resolve it
+// NOW, the way the merge would — instead of one row silently vanishing on the next pass.
+const futureKey = t => String(t||'').replace(/\s+/g,' ').trim().toLowerCase();
+const futureTwin = (id, text) => (state.deferred||[]).find(x => x.id!==id && !x.sent && futureKey(x.text)===futureKey(text));
+let futureFlashId=null, futureFlashTimer=null;
+// "That's already in Future": scroll to the existing row and ring it briefly (cursor-ring
+// is the adaptive keyboard-cursor tint, so it follows lvl0/1/2).
+function flashFutureRow(id){
+  futureFlashId=id; clearTimeout(futureFlashTimer);
+  futureFlashTimer=setTimeout(()=>{ futureFlashId=null; render(); }, 1200);
+  requestAnimationFrame(()=>histBody.querySelector(`[data-fid="${id}"]`)?.closest('.future-row')?.scrollIntoView({block:'nearest'}));
+}
+function commitFutureEdit(){
+  const el=futureEditEl; if(!el) return;
+  futureEditEl=null;
+  const id=el.dataset.fid, text=el.textContent.replace(/\s+/g,' ').trim();
+  if(futureDraft && futureDraft.id===id){
+    futureDraft=null;
+    if(!text) return;
+    const twin=futureTwin(id, text);
+    if(twin){ flashFutureRow(twin.id); return; }                    // already there — don't mint a duplicate
+    state.deferred.push({ id, text, wake:'', v:1 });
+    return;
+  }
+  const d=(state.deferred||[]).find(x=>x.id===id); if(!d) return;   // removed meanwhile (e.g. by sync)
+  if(!text){ tombstone(id); state.deferred=state.deferred.filter(x=>x.id!==id); return; }
+  if(text!==d.text){ d.text=text; d.v=(d.v|0)+1; }                 // v-bump: the edit must beat the peer's stale copy
+  // Renamed to match another row: the merge would keep this one (higher v) and drop the
+  // other — do that now, tombstoned so the peer's copy can't bring it back.
+  const twin=futureTwin(id, text);
+  if(twin){ tombstone(twin.id); state.deferred=state.deferred.filter(x=>x.id!==twin.id); }
+}
+// Write what's typed into state without ending the edit (quit / hide safety net). Empty is
+// left alone — deleting a row the user is still typing into would be worse than keeping it.
+function flushFutureEdit(){
+  const el=futureEditEl; if(!el) return;
+  const id=el.dataset.fid, text=el.textContent.replace(/\s+/g,' ').trim(); if(!text) return;
+  if(futureDraft && futureDraft.id===id){ if(!futureTwin(id, text)) state.deferred.push({ id, text, wake:'', v:1 }); futureDraft=null; return; }
+  const d=(state.deferred||[]).find(x=>x.id===id);
+  if(d && text!==d.text){ d.text=text; d.v=(d.v|0)+1; }
+}
+// A field whose row didn't make it into the latest render (tab switched, panel closed,
+// row removed by sync) is detached — commit it so typed text is never silently lost.
+function settleFutureEdit(){
+  if(futureEditEl && !futureEditEl.isConnected){ commitFutureEdit(); save(); }
+}
+// Caret as character offsets inside the (plain-text) field, so a re-render can put it back
+// exactly — re-focusing a re-attached node otherwise lands the caret at the end mid-word.
+function futureCaret(el){
+  const s=window.getSelection(); if(!s.rangeCount || !el.contains(s.anchorNode)) return null;
+  const r=s.getRangeAt(0), pre=document.createRange(); pre.selectNodeContents(el);
+  pre.setEnd(r.startContainer, r.startOffset); const start=pre.toString().length;
+  return { start, end:start+r.toString().length };
+}
+function setFutureCaret(el, c){
+  const len=el.textContent.length, at=n=>{
+    n=Math.max(0,Math.min(len,n)); const w=document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for(let t; (t=w.nextNode()); ){ if(n<=t.length) return [t,n]; n-=t.length; }
+    return [el, el.childNodes.length];
+  };
+  const r=document.createRange(); r.setStart(...at(c?c.start:len)); r.setEnd(...at(c?c.end:len));
+  const s=window.getSelection(); s.removeAllRanges(); s.addRange(r);
+}
+function focusFutureEdit(el, caret){
+  el.setAttribute('contenteditable','plaintext-only'); el.classList.remove('empty');
+  el.closest('.future-row')?.classList.add('editing');
+  if(document.activeElement===el) return;
+  el.focus({preventScroll:true});
+  setFutureCaret(el, caret);                   // saved caret on re-attach; end of text on first focus
+}
+function scrollFutureEditIntoView(){
+  const el=futureEditEl, row=el && el.closest('.future-row'), add=histBody.querySelector('.future-add');
+  if(!row) return;
+  const box=histScroll.getBoundingClientRect(), r=row.getBoundingClientRect();
+  const floor=(add ? add.getBoundingClientRect().top : box.bottom);
+  if(r.bottom>floor) histScroll.scrollTop+=r.bottom-floor;
+  else if(r.top<box.top) histScroll.scrollTop-=box.top-r.top;
+}
+// Click "Add +": commit the field in progress (if any), then open a fresh draft.
+function addFutureAndEdit(){
+  futureCursor=-1;                             // a leftover Tab ring + Enter would send that row to today
+  commitFutureEdit();
+  futureDraft={ id:nid() };
+  render();
+  const el=histBody.querySelector(`[data-fid="${futureDraft.id}"]`);
+  if(el){ futureEditEl=el; focusFutureEdit(el); scrollFutureEditIntoView(); }
+}
+function startFutureEdit(id){
+  futureCursor=-1;
+  const el=histBody.querySelector(`[data-fid="${id}"]`); if(!el) return;
+  futureEditEl=el; focusFutureEdit(el); scrollFutureEditIntoView();
+}
+// The editable title shared by existing rows and the draft. Looks state up by id on
+// every event — a sync adopt can replace the row objects while the node lives on.
+function buildFutureTitle(id, text){
+  // Keep the live editor — but only while the panel is open: a closing panel must let it
+  // detach so settleFutureEdit() commits it, not hide it still focused in the closed sheet.
+  if(state.histOpen && futureEditEl && futureEditEl.dataset.fid===id) return futureEditEl;
+  const t=document.createElement('div');
+  t.className='future-title cursor-text flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2]';
+  t.style.cssText='font-size:var(--ffs,24px);color:var(--ink);';
+  t.dataset.fid=id; t.dataset.ph='Untitled';
+  t.textContent=text||''; if(!text) t.classList.add('empty');
+  // Editable on MOUSEDOWN (before the caret is placed) so one click edits — same as Today.
+  t.addEventListener('mousedown',()=>{
+    if(futureEditEl===t) return;
+    futureCursor=-1;
+    // Clicking straight from one field into another: commit the old one first and hand the
+    // editor over, so the re-render its blur triggers KEEPS this node (one click edits it,
+    // instead of the render eating the click — or the old text being dropped).
+    if(futureEditEl) commitFutureEdit();
+    futureEditEl=t; t.setAttribute('contenteditable','plaintext-only'); t.classList.remove('empty');
+    t.closest('.future-row')?.classList.add('editing');
+  });
+  // The row grows as you type; the browser's own caret-scrolling ignores the sticky Add row,
+  // so the last line would slide underneath it — keep it in view ourselves.
+  t.addEventListener('input',()=>{ scrollFutureEditIntoView(); updateFutureMore(); });
+  t.addEventListener('keydown',e=>{
+    // Every key stays in the field: 'plaintext-only' doesn't match the global layer's
+    // [contenteditable="true"] typing check, so letters would otherwise fire shortcuts.
+    e.stopPropagation();
+    if(e.isComposing || e.keyCode===229) return;   // IME confirm-Enter (WebKit reports it as 229, not isComposing)
+    if(e.key==='Enter'||e.key==='Escape'){ e.preventDefault(); t.blur(); return; }
+    if(e.key!=='Tab') return;
+    e.preventDefault();
+    // Tab hops to the next row's edit (Shift+Tab = previous); Tab past the last row
+    // chains into a fresh Add — only when this row has text (same rule as Today).
+    const ids=(state.deferred||[]).filter(x=>!x.sent).map(x=>x.id);
+    const at=ids.indexOf(id), hasText=!!t.textContent.trim();
+    const isLast = futureDraft&&futureDraft.id===id ? true : at===ids.length-1;
+    if(!e.shiftKey && isLast){ if(hasText) addFutureAndEdit(); else t.blur(); return; }
+    const nextId = futureDraft&&futureDraft.id===id ? ids[ids.length-1]
+                 : ids[(at+(e.shiftKey?-1:1)+ids.length)%ids.length];
+    commitFutureEdit(); render();
+    if(nextId) startFutureEdit(nextId);
+  });
+  // Judge the blur a tick later: when a render tears the focused node out, the browser may
+  // deliver its blur only AFTER renderFuture re-attached and re-focused it — committing then
+  // cut the text mid-word ("Ty…"). By the next tick, a still-focused node means "keep typing".
+  t.addEventListener('blur',()=>{ setTimeout(()=>{
+    if(document.activeElement===t || !t.isConnected) return;   // re-focused, or torn out for good (settle handles it)
+    if(futureEditEl===t) commitFutureEdit();   // else already committed (Tab / Add / click-into-another)
+    render();
+  },0); });
+  return t;
+}
+function buildFutureAddRow(){
+  const add=document.createElement('div');
+  add.className='future-add addrow pressable row-neutral bd flex items-center cursor-pointer border-[#d9d9d9]';
+  add.style.cssText='position:sticky;bottom:0;z-index:2;padding:0 32px;background:var(--card);';   // height: .future-body flex rule
+  add.innerHTML='<div class="addtxt flex gap-[18px] font-medium tracking-[-0.48px]" style="font-size:var(--ffs,24px)"><span>Add</span><span>+</span></div>';
+  add.addEventListener('mousedown',e=>e.preventDefault());   // keep focus in the field until we commit it
+  add.addEventListener('click',()=>addFutureAndEdit());
+  // Quiet count of rows hidden under the sticky Add; click jumps to the bottom (not an add).
+  // Renders rebuild this row constantly, so it is born already showing the last count
+  // (.still = no transition) — the fade only plays when the count truly appears/leaves.
+  const more=document.createElement('span');
+  more.className='future-more still'+(futureMoreN>0?' on':''); more.title='Scroll to the bottom';
+  more.innerHTML='<span class="fm-num" aria-hidden="true"><span></span></span><span aria-hidden="true"> more ↓</span>';
+  more.setAttribute('role','button');
+  if(futureMoreN>0){ futureMoreShown=futureMoreN; more.setAttribute('aria-label', futureMoreN+' more below'); }
+  more.querySelector('.fm-num > span').textContent=String(futureMoreShown||'');
+  more.addEventListener('click',e=>{ e.stopPropagation(); histScroll.scrollTo({ top:histScroll.scrollHeight, behavior:'smooth' }); });
+  add.appendChild(more);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>more.classList.remove('still')));
+  return add;
+}
+let futureMoreN=0, futureMoreShown=0, futureMoreRaf=0;
+// How many rows are tucked under the sticky Add row. A row counts once at least HALF of it
+// is underneath — so the number changes once per row as you scroll, not at every edge.
+function countFutureMore(add){
+  // Nothing can hide if the list doesn't scroll — also guards the open animation, whose
+  // translated rows would otherwise read as "under" the Add row for a moment.
+  if(histScroll.scrollHeight <= histScroll.clientHeight+1) return 0;
+  const floor=add.getBoundingClientRect().top;
+  return [...histBody.querySelectorAll('.future-list > .future-row')]
+    .filter(r=>{ const b=r.getBoundingClientRect(); return (b.top+b.bottom)/2 > floor; }).length;
+}
+function updateFutureMore(){
+  const add=histBody.querySelector('.future-add'), more=add && add.querySelector('.future-more');
+  if(!more) return;
+  const n=countFutureMore(add), prev=futureMoreN;
+  futureMoreN=n;
+  if(n===0){ more.classList.remove('on'); return; }          // fade out, keeping the last number visible
+  const num=more.querySelector('.fm-num');
+  if(!more.classList.contains('on')){                         // appearing: set the number, then Fade+Drift in
+    num.replaceChildren(Object.assign(document.createElement('span'),{textContent:String(n)}));
+    futureMoreShown=n; more.classList.add('on'); more.setAttribute('aria-label', n+' more below'); return;
+  }
+  if(n===futureMoreShown) return;
+  // Roll: fewer hidden (scrolling down) → numbers move up; more hidden → they move down.
+  const dir = n<prev ? 'up' : 'down';
+  [...num.children].forEach(old=>{
+    if(reducedMotion()){ old.remove(); return; }    // RM hides outgoing spans (no animationend) — drop them now
+    old.className='fm-out-'+dir; old.addEventListener('animationend',()=>old.remove(),{once:true}); });
+  const fresh=document.createElement('span'); fresh.className='fm-in-'+dir; fresh.textContent=String(n);
+  num.appendChild(fresh); futureMoreShown=n;
+  more.setAttribute('aria-label', n+' more below');
+}
+histScroll.addEventListener('scroll', ()=>{
+  if(!(state.histOpen && state.histTab==='future') || futureMoreRaf) return;
+  futureMoreRaf=requestAnimationFrame(()=>{ futureMoreRaf=0; updateFutureMore(); });   // once per frame, not per event
+}, { passive:true });
 function renderFuture(){
-  if(!state.deferred || !state.deferred.length){ histBody.appendChild(histEmpty('Nothing in Future yet.')); return; }
+  if(!state.deferred) state.deferred=[];
   const full = activeCount()>=taskLimit();            // today maxed → hide every +
   const wrap=document.createElement('div');
   wrap.className='bd';
+  wrap.classList.add('future-list');
+  setFutureFitVars(wrap, futureFit);   // born at the last fitted size → one layout per render, not two
   if(futureCursor>=state.deferred.length) futureCursor=-1;   // clamp after removals
-  state.deferred.slice().reverse().forEach((d,i)=>{
+  const rows=futureDisplayOrder().map((d,i)=>{
     const row=d.sent ? buildSentFutureRow(d) : buildFutureRow(d, full);
-    if(i>0) row.classList.add('border-t');
-    if(i===futureCursor) row.classList.add('cursor-ring');   // Tab keyboard cursor
-    wrap.appendChild(row);
+    if(i===futureCursor || d.id===futureFlashId) row.classList.add('cursor-ring');   // Tab keyboard cursor / "already here" flash
+    return row;
   });
+  if(futureDraft) rows.push(buildFutureDraftRow());
+  rows.forEach((row,i)=>{ if(i>0) row.classList.add('border-t'); wrap.appendChild(row); });
+  // Add lives IN the list so it shares the height equally with the rows (exactly like Today's
+  // Add); sticky bottom still pins it once the list outgrows the panel.
+  const add=buildFutureAddRow(); if(rows.length) add.classList.add('border-t');
+  wrap.appendChild(add);
   histBody.appendChild(wrap);
+  // Re-attached the live editor → give focus straight back (same tick, so no keystroke is lost).
+  fitFuture(wrap);
+  if(futureWasFocused && futureEditEl && futureEditEl.isConnected) focusFutureEdit(futureEditEl, futureCaretSaved);
+  updateFutureMore();
+  // Re-read once the open/enter animations settle — and re-fit then too: on a session's first
+  // open the Tailwind runtime only styles new class names AFTER this script, so the first
+  // probe measured unstyled rows and could pick a step one too big (skeptic 2026-10-01).
+  clearTimeout(futureMoreTimer);
+  futureMoreTimer=setTimeout(()=>{ if(state.histOpen && state.histTab==='future'){ fitFuture(null, true); updateFutureMore(); } }, 450);
 }
+let futureMoreTimer=null;
+// Shrink-to-fit, like Today's fitWrap: the largest step (24px text / 110px rows → 18px / 59px,
+// the "Sent to today!" size) at which every row fits the panel. Past the smallest step the list
+// scrolls under the sticky Add. Mid-edit the size is held, so the row you're typing in never jumps.
+const FUTURE_FIT={ FS:[24,18], MIN:[110,59], STEPS:12 };
+let futureFit=0;
+function setFutureFitVars(list, t){
+  const [f0,f1]=FUTURE_FIT.FS, [m0,m1]=FUTURE_FIT.MIN;
+  list.style.setProperty('--ffs', (f0+(f1-f0)*t).toFixed(2)+'px');
+  list.style.setProperty('--fmin', Math.round(m0+(m1-m0)*t)+'px');
+}
+function fitFuture(list, force){
+  list=list||histBody.querySelector('.future-list'); if(!list || !list.isConnected) return;
+  const apply=t=>setFutureFitVars(list, t);
+  if(futureWasFocused || futureEditLive()){ apply(futureFit); return; }
+  const H=histScroll.clientHeight; if(H<=0){ apply(futureFit); return; }
+  // Each probe step re-lays-out every row's text, so (skeptic 2026-10-01: 75ms/render at 20
+  // items in WebKit with a 12-step linear scan): skip entirely when nothing that affects the
+  // answer changed, and otherwise check the smallest step first, then binary-search — "fits"
+  // is monotonic in the step, so this picks the same step in ≤5 probes instead of 12.
+  const key=[H, histScroll.clientWidth, list.children.length,
+    [...list.querySelectorAll('.future-title')].reduce((n,t)=>n+t.textContent.length,0)].join('|');
+  if(!force && key===futureFitKey) return;   // built at this size already — nothing to touch
+  const last=FUTURE_FIT.STEPS-1, fits=k=>{ apply(k/last); return list.scrollHeight<=H; };
+  list.classList.add('fit-probe');
+  let k;
+  if(!fits(last)) k=last;                     // even the smallest doesn't fit → scroll under Add
+  else { let lo=0, hi=last; while(lo<hi){ const mid=(lo+hi)>>1; if(fits(mid)) hi=mid; else lo=mid+1; } k=lo; }
+  list.classList.remove('fit-probe');
+  futureFit=k/last; futureFitKey=key;
+  apply(futureFit);
+}
+let futureFitKey='';
+// Resize: once per frame, and not while Morning (the same native window) is up or the drawer
+// is tucked — dragging the Morning window's edge must not re-fit a hidden list per event.
+let futureResizeRaf=0;
+window.addEventListener('resize', ()=>{
+  if(futureResizeRaf || !(state.histOpen && state.histTab==='future') || morningUp()) return;
+  futureResizeRaf=requestAnimationFrame(()=>{ futureResizeRaf=0;
+    if(drawer.classList.contains('translate-x-full')) return;
+    fitFuture(); updateFutureMore(); });
+});
 
+// Sent rows ride on top (compact, like Today's Donezo), then plain rows oldest-first.
+function futureDisplayOrder(){
+  const all=state.deferred||[];
+  return [...all.filter(d=>d.sent), ...all.filter(d=>!d.sent)];
+}
 function buildFutureRow(d, full){
-  const t=document.createElement('div');
-  t.className='future-title flex-1 min-w-0 font-medium tracking-[-0.48px] leading-[1.2]';
-  t.style.cssText='font-size:24px;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden';
-  t.textContent=d.text;
+  const t=buildFutureTitle(d.id, d.text);
   const actions=[];
-  if(!full) actions.push({title:'Add to today', icon:PLUS, run:()=>addDeferredToToday(d.id)});
-  actions.push({title:'Remove', icon:XICON, run:()=>deleteDeferred(d.id)});
+  // Acting on a row mid-edit uses what's typed, not the stale text.
+  // If the edit emptied the row, settling deleted it — just show that.
+  const settle=()=>{ if(futureEditEl && futureEditEl.dataset.fid===d.id) commitFutureEdit();
+    if(state.deferred.some(x=>x.id===d.id)) return true; save(); render(); return false; };
+  if(!full) actions.push({title:'Add to today', icon:PLUS, run:()=>{ if(settle()) addDeferredToToday(d.id); }});
+  actions.push({title:'Remove', icon:XICON, run:()=>{ if(settle()) deleteDeferred(d.id); }});
   return makeFutureHoverRow(t, actions);
+}
+// The draft row: same look as a Future row, but no + / × — there's nothing to act on yet.
+function buildFutureDraftRow(){
+  const row=makeFutureHoverRow(buildFutureTitle(futureDraft.id, ''), []);
+  if(!futureDraft.shown){ futureDraft.shown=true; row.classList.add('item-enter'); }   // once — re-renders mid-typing must not blink it
+  return row;
 }
 
 // A parked task that's been sent to Today: bold "Sent to today!" + the title in grey,
@@ -3594,11 +3956,26 @@ function buildSentFutureRow(d){
   ttl.className='future-sent-dim truncate'; ttl.style.cssText='font-size:18px;color:var(--ink-dim)';
   ttl.textContent=d.text;
   lab.append(tag, ttl);
-  return makeFutureHoverRow(lab, [{title:'Undo — back to Future', icon:UNDO, run:()=>unsendDeferred(d.id)}]);
+  const row=makeFutureHoverRow(lab, [{title:'Undo — back to Future', icon:UNDO, run:()=>unsendDeferred(d.id)}]);
+  row.classList.add('future-sent');   // thin, like Today's Donezo row
+  return row;
 }
 // Tombstone the id — without it a synced peer's copy resurrects the row on the next pass.
 function deleteDeferred(id){ tombstone(id); state.deferred=state.deferred.filter(d=>d.id!==id); save(); render(); }
 
+// "(n)" on the tabs. Future = items still parked (sent-to-today rows aren't waiting any more);
+// Done = everything the Done tab can show: today's completions + every archived done task.
+function histTabCount(tab){
+  if(tab==='future') return (state.deferred||[]).filter(d=>!d.sent && String(d.text||'').trim()).length;
+  if(tab==='past'){  // same rule the Done tab renders with (done:true, has text, dated before today) —
+    const today=localDate();   // counted directly: building doneDays()' labels cost ~13ms/render
+    let n=(state.items||[]).filter(it=>it.state==='done').length;
+    for(const r of state.history||[]) if(r && typeof r.date==='string' && r.date<today)
+      for(const it of r.items||[]) if(it && it.done && String(it.text||'').trim()) n++;
+    return n;
+  }
+  return null;
+}
 // Sticky header of the OPEN history panel: a [ Future | Past ] segmented toggle.
 function renderHistHeader(){
   last7.innerHTML='';
@@ -3613,9 +3990,15 @@ function renderHistHeader(){
     b.className='px-4 grid place-items-center rounded-full text-[15px] tracking-[-0.3px] transition-colors '+
       (active?'seg-sel shadow-sm':'');
     b.style.minHeight='38px';                        // generous tap target (was ~22px — fiddly to hit)
+    b.style.whiteSpace='nowrap';                     // "Future (12)" stays on one line
     if(!active) b.style.color='var(--chrome-ink)';
-    b.textContent=label;
-    b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; pastDaysShown=PAST_PAGE; render(); } });
+    // One inline run (the button is a grid — separate children would stack onto two lines).
+    const run=document.createElement('span'); run.textContent=label;
+    const n=histTabCount(tab);
+    if(n!==null){ const c=document.createElement('span'); c.className='seg-count'; c.textContent=' ('+n+')'; run.appendChild(c); }
+    b.appendChild(run);
+    b.addEventListener('mousedown',e=>{ if(futureEditEl) e.preventDefault(); });   // keep the header alive till click; settleFutureEdit commits the field
+    b.addEventListener('click',()=>{ if(state.histTab!==tab){ state.histTab=tab; pastDaysShown=PAST_PAGE; doneShown=DONE_PAGE; render(); } });
     return b;
   };
   seg.append(mkSeg('future','Future'), mkSeg('past','Done'));
@@ -3623,6 +4006,7 @@ function renderHistHeader(){
   const close=document.createElement('button'); close.title='Close';
   close.className='chrome-btn pressable size-[36px] grid place-items-center rounded-full';
   close.innerHTML=XICON;
+  close.addEventListener('mousedown',e=>{ if(futureEditEl) e.preventDefault(); });
   close.addEventListener('click',()=>{ state.histOpen=false; render(); });
   wrap.append(seg, close);
   const divider=document.createElement('div'); divider.className='divider h-px w-full bg-[#d9d9d9]';
@@ -4175,7 +4559,7 @@ $('#histBtn')?.addEventListener('click', e=>{ e.stopPropagation();
   const wasSettings=settingsOpen;
   if(settingsOpen) closeSettings();
   state.histOpen = wasSettings ? true : !state.histOpen;   // from settings → always show calendar
-  if(state.histOpen){ pastDaysShown=PAST_PAGE; futureCursor=-1; }   // fresh open → one week, no Tab cursor
+  if(state.histOpen){ pastDaysShown=PAST_PAGE; doneShown=DONE_PAGE; futureCursor=-1; }   // fresh open → one week, no Tab cursor
   render(); if(state.histOpen) histScroll.scrollTop=0;
 });
 // keep the toggle honest if the user flips system reduced-motion live
@@ -4324,7 +4708,7 @@ document.addEventListener('keydown', e=>{
   // FUTURE panel: Tab / Shift+Tab walk the parked rows (cursor-ring), Enter
   // sends the cursored row to today (same as its + action, cap-respecting).
   if(state.histOpen && state.histTab==='future'){
-    const rows=(state.deferred||[]).slice().reverse();   // displayed order (newest first)
+    const rows=futureDisplayOrder();   // displayed order (sent on top, then oldest first)
     if(e.key==='Tab' && rows.length){
       e.preventDefault();
       futureCursor=((futureCursor+(e.shiftKey?-1:1))%rows.length+rows.length)%rows.length;
@@ -4380,7 +4764,7 @@ function liveRolloverCheck(){
   // editingActive() rather than `editingId!==null`: it HEALS a guard left dangling by a render
   // that tore the field out. Testing the raw global meant an UNPAIRED Mac (no sync pass to heal
   // it) stayed wedged forever — no rollover, and the key layer inert (skeptic 2026-08-11).
-  if(editingActive()) return;                // defer until the edit commits
+  if(editingActive() || futureEditLive()) return;   // defer until the edit commits
   const rolled=rolloverAndCarry();           // SAME path as boot — carries unfinished forward + wakes deferred
   if(rolled){
     setDate();
@@ -4402,7 +4786,7 @@ async function resumeMorningCheck(){
 async function resumeMorningCheckInner(){
   T('resumeMorningCheck');
   await refreshFromDurableState('system-resume');
-  if(editingId!==null) return;               // don't steal/roll while a field is active
+  if(editingId!==null || futureEditLive()) return;   // don't steal/roll while a field is active
   const rolled=rolloverAndCarry();
   if(rolled){ setDate(); writeNow(); render(); }
   // Wake is the moment Buddy must be first. If today is still unplanned — either
@@ -4784,15 +5168,16 @@ window.__buddy = {
       state.today={date:localDate(),morningDone:true,items:[]};
       state.history=[];
       for(let i=1;i<=20;i++){ const dd=localDate(new Date(Date.now()-i*86400000));
-        state.history.push({date:dd,weekday:DOW[new Date(dd+'T00:00:00').getDay()],items:[{id:'lm'+i,text:'day '+i,done:true}]}); }
-      pastDaysShown=PAST_PAGE; state.histOpen=true; state.histTab='past';
+        state.history.push({date:dd,weekday:DOW[new Date(dd+'T00:00:00').getDay()],items:[{id:'lm'+i+'a',text:'day '+i+' a',done:true},{id:'lm'+i+'b',text:'day '+i+' b',done:true},{id:'lm'+i+'c',text:'skipped',done:false}]}); }
+      doneShown=DONE_PAGE; state.histOpen=true; state.histTab='past';
       document.querySelector('#morning').classList.add('hidden'); editingId=null; render();
       const lmBtn=[...histBody.querySelectorAll('button')].find(b=>b.textContent.trim()==='Load more');
-      ok('load more: one week shown initially', histBody.querySelectorAll('.hrow').length===7, 'rows='+histBody.querySelectorAll('.hrow').length);
-      ok('load more: button appears when older days exist', !!lmBtn);
-      pastDaysShown+=PAST_PAGE; render();
-      ok('load more: next week revealed on click', histBody.querySelectorAll('.hrow').length===14, 'rows='+histBody.querySelectorAll('.hrow').length);
-      pastDaysShown=PAST_PAGE; state.histOpen=false;          // reset transient UI
+      ok('load more: 30 done items shown initially', histBody.querySelectorAll('.hrow').length===30, 'rows='+histBody.querySelectorAll('.hrow').length);
+      ok('load more: button appears when more done items exist', !!lmBtn);
+      lmBtn && lmBtn.click();
+      ok('load more: the rest revealed on click (40 done)', histBody.querySelectorAll('.hrow').length===40, 'rows='+histBody.querySelectorAll('.hrow').length);
+      ok('load more: no button once everything is shown', ![...histBody.querySelectorAll('button')].some(b=>b.textContent.trim()==='Load more'));
+      doneShown=DONE_PAGE; state.histOpen=false;          // reset transient UI
 
       // Mid-edit sync must never truncate a commit ("Thing" → "Thi", field report
       // 2026-07-10): passes SKIP while editing (no half-typed push), blur bumps v,

@@ -11,7 +11,8 @@
       "chromeInk": "rgba(0,0,0,0.45)",
       "selBg": "#000000",
       "selInk": "#ffffff",
-      "line": "#d9d9d9"
+      "line": "#d9d9d9",
+      "addInk": "rgba(0,0,0,0.2)"
     },
     "lvl1": {
       "card": "#ffffff",
@@ -21,7 +22,8 @@
       "chromeInk": "#e5484d",
       "selBg": "#e5484d",
       "selInk": "#ffffff",
-      "line": "#d9d9d9"
+      "line": "#d9d9d9",
+      "addInk": "rgba(229,72,77,0.45)"
     },
     "lvl2": {
       "card": "#e5484d",
@@ -31,7 +33,8 @@
       "chromeInk": "#ffffff",
       "selBg": "#ffffff",
       "selInk": "#e5484d",
-      "line": "rgba(255,255,255,0.3)"
+      "line": "rgba(255,255,255,0.3)",
+      "addInk": "rgba(255,255,255,0.6)"
     }
   }
 }
