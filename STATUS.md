@@ -1,5 +1,71 @@
 # Buddy — Status & Handoff
 
+## Shipped — 2026-10-01 — Mac 0.4.41 + iOS 0.4.41 (50)
+
+PR #165 merged (squash ff85afb); Mac release run 36924585708 succeeded. GitHub
+v0.4.41 published with DMG, Buddy.app.tar.gz and latest.json; the owner's Mac reports
+0.4.41 after updating. iOS build 50 (0.4.41) uploaded via `pnpm ios:beta`; App Store
+Connect confirms VALID and distributed to external testers (Friends).
+
+What shipped (Mac + iOS): add items directly in Future with Today's Add UX; Future
+fills the panel, shrinks text/rows step by step to the "Sent to today!" size, then
+scrolls under a sticky Add with a quiet "N more ↓" count; sent rows on top, compact;
+"Future (n)" / "Done (n)" tabs; Done pages 30 completed items. iOS addInk lvl1 token
+parity fix. Fastfile `BETA_INTERNAL_ONLY=1` = just-me TestFlight build (used for
+build 49 during design iteration).
+
+Verification: `pnpm test:future` 29/29 (WebKit + Chromium) plus ui:smoke, test:edit,
+test:settings, test:merge, test:crossbuild; iOS unit 171 + UI 27, 0 failures; Release
+builds sim + device. Six adversarial review rounds (3 Mac, 3 iOS), all CONFIRMED
+findings fixed with regression tests (incl. a 10–100× Future render slowdown and
+iOS keyboard/overflow bugs). Live two-device sync run converged. Not verified: real
+iPhone hardware beyond TestFlight install.
+
+Known limits (by design): cross-device order when both devices add at once;
+concurrent edits to one row resolve by tie-break.
+
+
+## Infra — 2026-09-28 — Supabase outage fixed, project moved to paid org
+
+**What happened:** the Buddy Cloud project (`awzkpkhsigbhfeklogzk`) was paused
+(INACTIVE) by its free org from 2026-09-24 → Mac logged `sync-error` "Load
+failed" every minute; Mac ⇄ iOS sync was down for ~4 days.
+
+**Fixed:** project transferred into the paid Pro org "hi-whalefyi's projects"
+(the old free org was then deleted), then restored through the Management API
+`POST /v1/projects/{ref}/restore` (~4 min). Transfer does NOT unpause a project.
+Project ref, URL, and anon key are unchanged → no app code or config changes.
+
+**Verified:** project `ACTIVE_HEALTHY`; `pnpm sync:validate` 10/10;
+`pnpm sync:live` 4/4 (the first run right after the restore failed while the
+server warmed up); the Mac log shows successful syncs + `sync-peer-seen ios`;
+the user confirmed on the iPhone that sync works. `sync:doctor` "split brain" =
+the Dev container on its own bucket (expected), not real Buddy vs iPhone.
+
+**CLI access:** a never-expiring `SUPABASE_ACCESS_TOKEN` in `~/.config/secrets.env`
+(the old one was expired → 401). Run CLI calls through `zsh -ic '…'` so the key loads.
+
+**Follow-up idea:** Buddy can't tell a *paused server* apart from other sync
+failures — consider surfacing "server unreachable for >1h" in diagnostics/UI.
+
+## Shipped — 2026-09-16 — Mac 0.4.40 + iOS 0.4.40 (48)
+
+PR164 merged; Mac release run 35112725517 succeeded. GitHub v0.4.40 and live
+latest.json confirmed, both darwin-aarch64 and darwin-x86_64 available. Installed
+through the actual Buddy update banner, app relaunched; /Applications/Buddy.app
+reports 0.4.40, codesign verification passes, spctl accepts Notarized Developer ID,
+and lipo confirms x86_64 + arm64. Production tasks remained visible after relaunch.
+Final native QA screenshot showed centered modal, solid left OK without automatic
+outline, no duplicate inline explanation; OK/Escape restore narrow settings.
+
+iOS 0.4.40 (48) release archive/upload completed. Direct Apple API confirms VALID,
+internal IN_BETA_TESTING and external IN_BETA_TESTING. Existing testers can update.
+Final source commit df885d3. Release evidence: /private/tmp/buddy-final-release/,
+latest.json, mac-release.log, testflight48.log, apple48.log.
+
+All earlier blocked/pending checkpoints below are historical and superseded.
+
+
 ## Final cleanup — 2026-09-16
 
 Removed the duplicate inline lower-limit explanation on both platforms. Mac keeps
