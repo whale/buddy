@@ -10,8 +10,8 @@ changes._
 |---|---|---|
 | `whale/buddy` | `~/Projects/buddy` | **The product.** Mac + iOS apps, sync backend (Supabase SQL), releases/updater, the pass backend (Phase 2) |
 | `whale/buddy-site` | `~/Projects/buddy-site` | **The funnel.** Kuma marketing site, Polar checkout + webhook function, Ghost newsletter wiring |
-| `wimpdecaf/stickers` | `~/Projects/wimp-stickers` | **The mascot.** Kuma character art — icon source for the rebrand |
-| _(no repo)_ WIMP Shopify + Ghost | `~/Projects/wimp-decaf` (workspace) | **The store + brand.** Coupon redemption, coffee fulfilment, pass cards in bags, WIMP voice |
+| `wimpdecaf/stickers` | `~/Projects/wimp/stickers` | **The mascot.** Kuma character art — icon source for the rebrand |
+| _(no repo)_ WIMP Shopify + Ghost | `~/Projects/wimp/content` (workspace) | **The store + brand.** Coupon redemption, coffee fulfilment, pass cards in bags, WIMP voice |
 
 ## Doc source of truth
 
