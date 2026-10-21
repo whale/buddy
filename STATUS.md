@@ -1,21 +1,24 @@
 # Status — Buddy
 
-_Last updated: 2026-10-16_
+_Last updated: 2026-10-21_
 
 ## Next
 
-Whale checks TestFlight build 50 on a real iPhone: keyboard plus shrink-to-fit while drafting a Future item at a mid step, and the "N more" roll (only simulator-verified so far).
+Whale updates the Mac to 0.4.42 and confirms the right edge reveals Buddy after a ~half-second rest, including after the Mac has idled (the fix was verified in a nap-speed dev build, not yet on the installed release). Then: TestFlight build 50 real-iPhone check (below).
 
 ## Where it stands
 
-- Latest release: Mac 0.4.41 + iOS 0.4.41 (build 50), shipped 2026-10-01 (PR #165; GitHub release v0.4.41; App Store Connect VALID, distributed to external testers "Friends").
-- Tree was clean after the docs-fold merge (#166); last commit `696bfde` (2026-10-01, docs handoff).
+- Latest release: Mac 0.4.42 (2026-10-21, PR #168, edge-reveal timing fix; Mac-only). iOS stays 0.4.41 (build 50, 2026-10-01) — nothing owed, the fix has no iOS counterpart.
+- Project-shape docs (AGENTS.md, STATUS.md, `.env.op`, docs/history) merged via #169 [skip release].
 - Buddy Cloud Supabase project (`awzkpkhsigbhfeklogzk`) was un-paused and moved to a paid org 2026-09-28; details in the Log.
 - Known limits (by design): cross-device order when both devices add at once; concurrent edits to one row resolve by tie-break.
 - Not verified: real iPhone hardware beyond TestFlight install; real two-device sync of Future items (live sync harness passed).
 
 ## Open tasks
 
+- [ ] Owner confirms the edge on installed Mac 0.4.42 (half-second rest reveals, also after idle).
+  If it ever feels slow again: `grep edge-alive` in the diag log — `ticks`/300 = checks per second.
+- [ ] Trim AGENTS.md (272 lines, limit 180) — doc-check flag.
 - [ ] Owner checks build 50 on a real iPhone — keyboard + shrink-to-fit while drafting
   at a mid step, and the "N more" roll (only simulator-verified).
 - [ ] Two-device check: add/edit a Future item on Mac 0.4.41, confirm it lands on the
@@ -30,6 +33,17 @@ Whale checks TestFlight build 50 on a real iPhone: keyboard plus shrink-to-fit w
 ## Log
 
 Newest first. Carried over from the old STATUS.md (original kept in [docs/history/STATUS.md](docs/history/STATUS.md)). The "Useful commands" block moved to AGENTS.md.
+
+### Shipped — 2026-10-21 — Mac 0.4.42 (edge reveal timing)
+
+Field report: resting on the right edge did nothing until ~3s. Diag log showed the edge
+watcher alive but running at 7–14 ticks/s (App Nap throttles its 16ms sleep), so the
+31-tick "500ms" dwell took 2–4s. PR #168 measures the reveal dwell (500ms) and hide grace
+(160ms) with `Instant`. Verified: installed 0.4.41 ignored a 0.7s touch (repro); dev build
+forced to 125ms ticks ignored 0.3s and caught 0.7s (`edge-reveal`). Release run
+39621086693 succeeded; GitHub v0.4.42 has DMG, Buddy.app.tar.gz, latest.json. Not yet
+verified on the installed 0.4.42. Note: terminal-launched dev builds are not napped
+(~53 ticks/s) — simulate by raising TICK_MS. Also merged #169 (project-shape docs).
 
 ### Shipped — 2026-10-01 — Mac 0.4.41 + iOS 0.4.41 (50)
 
