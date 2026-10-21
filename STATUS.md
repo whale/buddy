@@ -1,6 +1,37 @@
-# Buddy — Status & Handoff
+# Status — Buddy
 
-## Shipped — 2026-10-01 — Mac 0.4.41 + iOS 0.4.41 (50)
+_Last updated: 2026-10-16_
+
+## Next
+
+Whale checks TestFlight build 50 on a real iPhone: keyboard plus shrink-to-fit while drafting a Future item at a mid step, and the "N more" roll (only simulator-verified so far).
+
+## Where it stands
+
+- Latest release: Mac 0.4.41 + iOS 0.4.41 (build 50), shipped 2026-10-01 (PR #165; GitHub release v0.4.41; App Store Connect VALID, distributed to external testers "Friends").
+- Tree was clean after the docs-fold merge (#166); last commit `696bfde` (2026-10-01, docs handoff).
+- Buddy Cloud Supabase project (`awzkpkhsigbhfeklogzk`) was un-paused and moved to a paid org 2026-09-28; details in the Log.
+- Known limits (by design): cross-device order when both devices add at once; concurrent edits to one row resolve by tie-break.
+- Not verified: real iPhone hardware beyond TestFlight install; real two-device sync of Future items (live sync harness passed).
+
+## Open tasks
+
+- [ ] Owner checks build 50 on a real iPhone — keyboard + shrink-to-fit while drafting
+  at a mid step, and the "N more" roll (only simulator-verified).
+- [ ] Two-device check: add/edit a Future item on Mac 0.4.41, confirm it lands on the
+  phone and back (live sync harness passed; real devices not yet).
+- [ ] Consider: "N more ↓" contrast at lvl0 (20% black at 15px, matches Add — reviewer
+  flagged as faint); Done-heading weekday edge in DST week (Mac + iOS match).
+- [ ] Optional cleanup: delete the stale local branch `codex/task-limit-availability`
+  (its 2 docs commits landed via #166).
+- [ ] If cross-device add order ever bothers: add a creation stamp to deferred rows and
+  sort by it (touches the sync wire — ship Mac + iOS together, RULE 5).
+
+## Log
+
+Newest first. Carried over from the old STATUS.md (original kept in [docs/history/STATUS.md](docs/history/STATUS.md)). The "Useful commands" block moved to AGENTS.md.
+
+### Shipped — 2026-10-01 — Mac 0.4.41 + iOS 0.4.41 (50)
 
 PR #165 merged (squash ff85afb); Mac release run 36924585708 succeeded. GitHub
 v0.4.41 published with DMG, Buddy.app.tar.gz and latest.json; the owner's Mac reports
@@ -43,7 +74,7 @@ Next:
    sort by it (touches the sync wire — ship Mac + iOS together, RULE 5).
 
 
-## Infra — 2026-09-28 — Supabase outage fixed, project moved to paid org
+### Infra — 2026-09-28 — Supabase outage fixed, project moved to paid org
 
 **What happened:** the Buddy Cloud project (`awzkpkhsigbhfeklogzk`) was paused
 (INACTIVE) by its free org from 2026-09-24 → Mac logged `sync-error` "Load
@@ -66,7 +97,7 @@ the Dev container on its own bucket (expected), not real Buddy vs iPhone.
 **Follow-up idea:** Buddy can't tell a *paused server* apart from other sync
 failures — consider surfacing "server unreachable for >1h" in diagnostics/UI.
 
-## Shipped — 2026-09-16 — Mac 0.4.40 + iOS 0.4.40 (48)
+### Shipped — 2026-09-16 — Mac 0.4.40 + iOS 0.4.40 (48)
 
 PR164 merged; Mac release run 35112725517 succeeded. GitHub v0.4.40 and live
 latest.json confirmed, both darwin-aarch64 and darwin-x86_64 available. Installed
@@ -84,7 +115,7 @@ latest.json, mac-release.log, testflight48.log, apple48.log.
 All earlier blocked/pending checkpoints below are historical and superseded.
 
 
-## Final cleanup — 2026-09-16
+### Final cleanup — 2026-09-16
 
 Removed the duplicate inline lower-limit explanation on both platforms. Mac keeps
 a native hover tooltip and accessibility description; tapping opens the single
@@ -100,7 +131,7 @@ iOS build 48 upload started; Mac PR164 ready for release. Do not infer publicati
 until GitHub and Apple confirm it. Evidence: /private/tmp/buddy-final-release/.
 
 
-## Latest delivery — 2026-09-16 — iOS 0.4.40 (47) live, Mac blocked
+### Latest delivery — 2026-09-16 — iOS 0.4.40 (47) live, Mac blocked
 
 User explicitly requested shipping everything again. Latest copy is now uploaded
 as iOS **0.4.40 (47)**. Fastlane and the wrapper completed successfully. Apple
@@ -115,7 +146,7 @@ question was sent again. Do not bypass the previous safety rejection. PR #164
 stays draft, not merged. No Mac release or installed-app replacement performed.
 
 
-## Copy follow-up — not released
+### Copy follow-up — not released
 
 Both dialogs now say “Your list needs room” and explain: “You have 5 active tasks.
 To lower your limit to 3, first complete 2 tasks or move them to Future.” Counts
@@ -125,7 +156,7 @@ Mac native-launch approval remains outstanding. Copy tests/visual artifacts:
 `/private/tmp/buddy-copy-*`.
 
 
-## Release checkpoint — 2026-09-16 — iOS 0.4.40 (46), Mac pending
+### Release checkpoint — 2026-09-16 — iOS 0.4.40 (46), Mac pending
 
 - User requested a new release with the single OK button on the left, plus iOS visuals.
 - Commit `c283dab`, draft PR https://github.com/whale/buddy/pull/164.
@@ -148,7 +179,7 @@ Mac native-launch approval remains outstanding. Copy tests/visual artifacts:
   mark PR ready/merge, wait for signed/notarized 0.4.40 Mac workflow and verify
   GitHub tag + updater manifest. User also requested relaunch of the new release.
 
-## Local follow-up — centered limit explanation (release requested)
+### Local follow-up — centered limit explanation (release requested)
 
 The latest requested design is an explanatory Buddy modal, not task selection or
 move confirmation. Single **OK** aligned left, no Cancel. Mac uses a top-layer
@@ -168,7 +199,7 @@ flags the already-known stale DEV bucket versus installed app, not a new regress
 iOS 0.4.40 (46) upload completed; see checkpoint above. Release logs and screenshot results:
 `/private/tmp/buddy-ok-release`.
 
-## Earlier local follow-up — unavailable lower limits (not released)
+### Earlier local follow-up — unavailable lower limits (not released)
 
 User replaced 0.4.39's automatic overflow-confirmation design: lower choices must
 be dimmed until the active list fits. Implemented on `codex/task-limit-availability`.
@@ -184,7 +215,7 @@ Mac controls inspected at 452×900 in all themes and 452×650; iPhone native tes
 screenshots inspected with the explanation visible on iPhone 17 Pro and SE. No new release uploaded yet.
 
 
-## Release checkpoint — 2026-09-16 — 0.4.39
+### Release checkpoint — 2026-09-16 — 0.4.39
 
 User explicitly authorized shipping to all users. Feature PR #163 merged.
 - **Mac 0.4.39 published**: signed/notarized universal release workflow
@@ -211,7 +242,7 @@ The earlier work-in-progress checkpoints below are historical, superseded by thi
 release record. Apple external beta approval remains the only distribution gate.
 
 
-## Current local work — 2026-09-16
+### Current local work — 2026-09-16
 
 Branch: `codex/buddy-settings-and-quiet-opening`. **Unreleased.** User clarified:
 start immediately; morning switch on Mac only. Scheduled heartbeat is PAUSED.
@@ -235,7 +266,7 @@ The historical release information below has NOT been refreshed by this feature 
 
 _Last updated: 2026-09-02. Branch `main`. Latest **Mac**: **`v0.4.36`** (PR #160 merged; the auto-release run was still in progress at wrap — confirm with `gh release view v0.4.36`). Latest **iOS**: **TestFlight `0.4.34 (build 44)`** — unchanged; this session was Mac-only by design (no shared plumbing touched). Live docs: THIS file + `RELEASE-CHECKLIST.md` + `SYNC-COMPAT.md` + `VALIDATION.md`._
 
-## Session summary — 2026-09-02 — "I scanned the QR and the Mac didn't respond" (Mac v0.4.36)
+### Session summary — 2026-09-02 — "I scanned the QR and the Mac didn't respond" (Mac v0.4.36)
 
 Field report: phone scanned the pairing QR and showed sync; the Mac's Settings pill sat on
 "Waiting for iPhone…" with no response. Diag + `pnpm sync:doctor` showed the phone HAD joined
@@ -257,7 +288,7 @@ Also learned while reading the log:
 - `sync:doctor` still flags the stale DEV container (bucket `0dc16090`) as split-brain. No dev
   process was running; it is noise until the DEV container is re-paired or wiped.
 
-### Verified (2026-09-02)
+#### Verified (2026-09-02)
 - `pnpm test:merge` — mergeTest / syncTest (new #36) / skewTest pass; `smokeTest` 51/51.
 - New live two-device test in `scripts/buddy-two-device.spec.js` ("pairing view ends on its own
   once the phone writes the bucket"): a browser "phone" writes as `ios` (harness hook
@@ -267,7 +298,7 @@ Also learned while reading the log:
   writer-less wire-1/hybrid blobs, unlink ordering, test hygiene — no findings.
 - Red-state sweep n/a — no colour/border/token changes (status text + visibility only).
 
-### NOT verified / still owed (2026-09-02)
+#### NOT verified / still owed (2026-09-02)
 - **Native (real Buddy.app) observation of the flip** — Playwright only. The user's own phone
   was paired BEFORE this shipped, so the next real scan (Resync or a friend's pairing) is the
   first native proof. Diag line to look for: `sync-peer-seen {plat:"ios"}`.
@@ -276,12 +307,12 @@ Also learned while reading the log:
 - New harness hooks (`setWirePlatform`, `renderSyncUI`, `openSettings`, `closeSettings`) are
   test-only and live on `window.__buddy`; nothing in-app calls them.
 
-## Session summary — 2026-08-08/12 — Two field reports: resurrecting tasks, and a cap that lied
+### Session summary — 2026-08-08/12 — Two field reports: resurrecting tasks, and a cap that lied
 
 Shipped **Mac v0.4.32 / v0.4.34** and **iOS TestFlight build 42 / build 44**. Two separate
 bugs, four adversarial reviews, and one bad merge worth remembering.
 
-### 1. "I checked off Ghost pricing pages and it keeps coming back" (Mac 0.4.32 / iOS build 42)
+#### 1. "I checked off Ghost pricing pages and it keeps coming back" (Mac 0.4.32 / iOS build 42)
 
 `today.items` is a CRDT merged by union keyed by id. Every destructive op in Buddy emits a
 tombstone — **except the day rollover**, which expressed "drop the completed rows" as pure
@@ -305,7 +336,7 @@ merge could not tell a carry-over from a task you just typed.
   and never pulled — the phone's day then landed in one lump and tripped the red alarm. Now
   two-speed: 1.5s visible, one catch-up pass a minute otherwise.
 
-### 2. "I was at 5 tasks and it wouldn't let me add the 6th" (Mac 0.4.34 / iOS build 44)
+#### 2. "I was at 5 tasks and it wouldn't let me add the 6th" (Mac 0.4.34 / iOS build 44)
 
 `renderToday()` wipes and rebuilds every row, and the ONLY thing that commits typed text or
 cleans up a blank row is the contenteditable's `blur` handler — which **WebKit does not fire when
@@ -320,7 +351,7 @@ sticking").
 (`liveEditId()`), plus `pendingAddId` for the frame between `addAndEdit()` and `startEdit()`.
 `render()` calls `editingActive()` to heal an orphaned guard. iOS got `sweepStrandedBlanks()`.
 
-## Verified
+### Verified
 - Mac 18 Playwright specs · `sync:validate` 10/10 · iOS 130 tests, Debug AND Release.
 - Both regression suites confirmed FAILING without their fix, in BOTH engines.
 - New `scripts/buddy-crossbuild.spec.js` boots one page on `origin/main` and one on the branch —
@@ -331,7 +362,7 @@ sticking").
   those timers. Both halves of the background-sync fix confirmed on the real app.
 - Release assets confirmed at source (`gh release view`, ASC build list).
 
-## NOT verified / still owed
+### NOT verified / still owed
 - **The edit fix (0.4.34) was never verified natively** — Playwright only, not the shipping
   WKWebView. Needs Buddy quit (single-instance lock).
 - **Typing AFTER a foreign render still goes nowhere.** Deliberately out of scope: the real fix is
@@ -346,12 +377,12 @@ sticking").
   (needs XCUITest).
 - `ECOSYSTEM.md` + `PAYMENT-PLAN.md` STILL uncommitted drafts (public-vs-private decision pending).
 
-## Next milestone
+### Next milestone
 Confirm v0.4.36 at source and watch for the first native `sync-peer-seen` on a real pairing.
 Then the carried-over item: native verification pass of the 0.4.34 edit fix, and decide whether
 to fix the "typing after a re-render" root cause properly (don't tear the edited row out of the DOM).
 
-## Session summary — 2026-07-28 — Mac v0.4.29: Morning actually summons on wake/unlock
+### Session summary — 2026-07-28 — Mac v0.4.29: Morning actually summons on wake/unlock
 
 **The v0.4.27 "refresh Morning state on wake" summon was dead code.** It hung off
 `tauri::RunEvent::Resumed`, which never fires on macOS sleep/wake (startup/mobile-lifecycle
@@ -380,7 +411,7 @@ judgment call) — check the morning after updating to 0.4.29.
   machine later woke at 9:02 — expected while asleep, but worth watching whether polls resume
   promptly after 0.4.29's wake events (they should: `system-resume` triggers `syncNow`).
 
-## Session summary — 2026-07-20/21 — iOS Boss Mode (mirrored + synced), RULE 8, and two iOS fixes
+### Session summary — 2026-07-20/21 — iOS Boss Mode (mirrored + synced), RULE 8, and two iOS fixes
 
 Shipped to **Mac v0.4.27** + **iOS TestFlight build 40 (0.4.27)** (Apple-confirmed). This batch was iOS-only feature/UI work mirroring existing Mac behaviour, plus a new process rule; each Mac release here was a no-op lockstep rebuild (no Mac code changed).
 
@@ -397,7 +428,7 @@ Shipped to **Mac v0.4.27** + **iOS TestFlight build 40 (0.4.27)** (Apple-confirm
 - `ECOSYSTEM.md` + `PAYMENT-PLAN.md` are uncommitted drafts. **PAYMENT-PLAN §5 says it updated HOSTED-PLAN.md but never did** — HOSTED-PLAN still lists "Lemon Squeezy vs Paddle" (decided: Polar) + "buddy.whale.fyi" (decided: kuma.wimpdecaf.com), and frames the pass backend as "someday" vs PAYMENT-PLAN's day-one blocker. **User decision pending** before committing those drafts.
 - Minor deferred: iOS morning planner shows done tasks (Mac hides them) — pre-existing parity gap, unreachable for cleared items.
 
-## Session summary — 2026-07-19/20 — sync never deletes tasks + mutual unlink
+### Session summary — 2026-07-19/20 — sync never deletes tasks + mutual unlink
 
 Two features, both shipped to **Mac v0.4.25** + **iOS TestFlight build 38 (0.4.25)** (Apple-confirmed). Both are shared sync plumbing → byte-parallel Mac (`dist/index.html`) + iOS (`ios/Buddy/Sources/Sync/*`), each caught a real bug in adversarial review (RULE 6) that the happy-path tests missed.
 
@@ -415,7 +446,7 @@ Two features, both shipped to **Mac v0.4.25** + **iOS TestFlight build 38 (0.4.2
 ---
 
 
-## Session summary — 2026-07-19 — wire-2 sync fix + settings redesign + holdover cleanup
+### Session summary — 2026-07-19 — wire-2 sync fix + settings redesign + holdover cleanup
 
 Big session. All shipped to `main` (Mac auto-released to **v0.4.23**; iOS cut to **TestFlight 0.4.20 build 36**, Apple-confirmed).
 
@@ -440,7 +471,7 @@ Big session. All shipped to `main` (Mac auto-released to **v0.4.23**; iOS cut to
 
 
 
-## Session summary — 2026-07-10 (night) — celebration physics, add choreography, swipe pan, friend beta
+### Session summary — 2026-07-10 (night) — celebration physics, add choreography, swipe pan, friend beta
 
 **Shipped as Mac v0.3.34 + TestFlight (28)** (PRs #93–#96, on top of the earlier marathon):
 - **Physics celebration, both platforms** (lab preset "Whale ✦ picked"; constants in dist `CELEB/QUIET` and iOS `CelebPhysics` — change together): ballistic integrator, bottom-RIGHT of the SCREEN → top-left at full lab speed (a width-scaling squeeze read as a "swirl" on the phone — removed). Emoji variety scales with intensity (parrots+thumbs → full happy spread). **celebrate = 0 → quiet pop**: one yellow hand (👍🤘💪✊🤜) floats 70px up from the completed row's ✓, in-fast/out-slow.
@@ -457,7 +488,7 @@ Big session. All shipped to `main` (Mac auto-released to **v0.4.23**; iOS cut to
 
 ---
 
-## Session summary — 2026-07-10 (marathon) — 15 field reports fixed + shipped both platforms
+### Session summary — 2026-07-10 (marathon) — 15 field reports fixed + shipped both platforms
 
 **Shipped as Mac v0.3.29 + TestFlight (25)** (PRs #90, #91):
 - **THE PATTERN**: every text/element follows lvl0 black → lvl1 red → lvl2 white-on-red, no done-row carve-out. Contract: `design/escalation-tokens.json`, pinned by Mac smokeTest asserts + iOS `EscalationTokenParityTests`.
@@ -475,7 +506,7 @@ Big session. All shipped to `main` (Mac auto-released to **v0.4.23**; iOS cut to
 
 ---
 
-## Session summary — 2026-07-10 (morning) — Future rows, red-state regression, Morning launch, releases
+### Session summary — 2026-07-10 (morning) — Future rows, red-state regression, Morning launch, releases
 
 **Shipped + verified:**
 - **Mac Future rows restored to desktop behavior:** Future rows are fixed at 110px, no extra `Future` heading, and actions are Mac hover-only (vertical `+` and `×` rail). iOS remains swipe-only for Future rows.
@@ -499,7 +530,7 @@ Big session. All shipped to `main` (Mac auto-released to **v0.4.23**; iOS cut to
 
 ---
 
-## Session summary — 2026-07-08 (evening/night) — Slice 2 shipped, field-report batch, self-diagnosis capability
+### Session summary — 2026-07-08 (evening/night) — Slice 2 shipped, field-report batch, self-diagnosis capability
 
 Mac `0.3.18` + `0.3.19` released; iOS TestFlight builds `14` + `15`. PRs #80–#82 merged; draft #61 closed.
 
@@ -517,14 +548,14 @@ Mac `0.3.18` + `0.3.19` released; iOS TestFlight builds `14` + `15`. PRs #80–#
 
 ---
 
-## THE PLAN — full adversarially-verified review, 2026-07-08 (evening)
+### THE PLAN — full adversarially-verified review, 2026-07-08 (evening)
 
 Four specialist review agents (security / stability / design / docs) swept everything published
 and live, then an adversarial agent re-verified every claim in code (most confirmed, 4 downgraded,
 1 refuted, 4 new finds). PR #80 (Future rows read-only + one shared icon gutter) shipped from the
 same session. This section replaces all older "open issues" lists.
 
-### 1 — 🔴 Sync Slice 2: deterministic merge (IN PROGRESS, branch `fix/sync-slice2`)
+#### 1 — 🔴 Sync Slice 2: deterministic merge (IN PROGRESS, branch `fix/sync-slice2`)
 The revert + overwrite data loss. `merge(a,b)==merge(b,a)` on BOTH platforms: stop using per-pass
 `savedAt` as primary; canonical order + content-based winners; tombstone every removal;
 unknown-field pass-through (Swift needs an unknown-fields Codable bag). MUST also fix, same seam:
@@ -536,20 +567,20 @@ unknown-field pass-through (Swift needs an unknown-fields Codable bag). MUST als
 - Sync adopt wipes `restartStash` (+`doneWordBag`) — not carried by `hydratedToWire` (~1003) / `applyHydrated` (~775) → "Restore your last list" unrecoverable.
 - Verify on two real devices (human-gated; browser + unit vectors first — SAME test vectors on both platforms).
 
-### 2 — Data-safety batch (small fixes, big trust)
+#### 2 — Data-safety batch (small fixes, big trust)
 - iOS: corrupt/unreadable store file → default empty state is auto-SAVED 0.25s later, wiping the file. Set the bad file aside as `.corrupt`, add a `.bak` layer (BuddyStore ~408).
 - iOS: `adopt()` runs on every 1.5s poll pass with no `editingId` guard → mid-typing clobber (SyncEngine ~98; Mac guards at index.html ~1022).
 - After-merge clamp can orphan a "Sent to today!" row: if the linked today item is deduped/capped away, `sentTid` dangles (index.html ~840 vs ~1424). Reconcile sent rows after clamp.
 - Mac `save_state`: fsync file + dir before/after rename (lib.rs ~599) — power cut can zero primary AND recovery.
 - `fileSave()` fire-and-forgets the durable write with no `.catch` (~667); tray Quit `app.exit(0)` skips the 250ms save debounce → flush-then-quit.
 
-### 3 — Legibility batch (RULE 1 violations, one token-compliance PR)
+#### 3 — Legibility batch (RULE 1 violations, one token-compliance PR)
 - Update banner: hardcoded `text-black`/`bg-black` on `.bcard`, which turns red at lvl2 → black-on-red (index.html ~290–303).
 - `#syncError` is red-on-red at lvl2 (inline `color:var(--red)` in the settings sheet, ~407). iOS SettingsView:87 same bug + wrong red (#e5474c vs token #e5484d).
 - History segmented pill hardcodes `bg-white text-[#1a1a1a]` instead of `--sel-bg`/`--sel-ink` (~2083); iOS mirrors it (incl. a literal `lvl2 ? .white : .white` no-op).
 - iOS morning Buddy! pill misses the lvl1 red — theme already exposes selBg/selInk (MorningView ~178).
 
-### 4 — Confirmed bugs & burrs (fix opportunistically)
+#### 4 — Confirmed bugs & burrs (fix opportunistically)
 - Mac polls Supabase every 1.5s ALL DAY while the drawer is tucked (visibilityState never trips; ~57k req/device/day) — pause when tucked (index.html ~3258).
 - Bug-report screenshot captures `#drawer` including an open pairing QR = uploads the raw syncKey. Blank `#syncQR` before capture (~3115).
 - iOS Done-tab "Today" undo is a NO-OP (`restoreHistoryTask(text:)` dupe-guard matches the done item itself; Mac uses `restoreItem(liveId)`) (HistoryView ~149).
@@ -557,7 +588,7 @@ unknown-field pass-through (Swift needs an unknown-fields Codable bag). MUST als
 - Global plain-Backquote shortcut steals ` system-wide in release builds (lib.rs ~746) — move to a chord.
 - Updater: after a failed install the banner never re-checks that session (`if(shown) return`, ~2420).
 
-### 5 — Hygiene sweep (docs + dead code, one PR)
+#### 5 — Hygiene sweep (docs + dead code, one PR)
 - DELETE stale docs: README-MAC.md, MORNING-REPORT.md, PLAN.md, BETA-SETUP.md, SYNC-HANDOFF.md (leaks live Supabase URL/key/org — values live in `.supabase-buddy.secret`), PARITY-PLAN.md, RELEASE.md, HANDOFF.md, DATA-SAFETY-PLAN.md (real task text), ios/_review/.
 - RELEASE-UPDATER.md:142 re-publishes the Apple Key ID + Team ID its own scrub command was written to remove — placeholder them.
 - README fixes: sync is live not "not wired up yet"; XcodeGen link → yonaskolb/XcodeGen; "Report a bug" opens a mail draft (endpoint never deployed — BUG_ENDPOINT is still REPLACE-AFTER-DEPLOY).
@@ -566,12 +597,12 @@ unknown-field pass-through (Swift needs an unknown-fields Codable bag). MUST als
 - styleguide.html badge says v0.2.x; Proposals live only on unmerged `feat/styleguide-proposals`.
 - Close draft PR #61 (superseded). Typography drift (four 14px trackings, Skip 15 vs 16) → fold into the token-system PR.
 
-### Consciously NOT fixing
+#### Consciously NOT fixing
 Bug-report endpoint hardening (never deployed — harden if/when deploying); done-word cross-device
 divergence (cosmetic); positional history-id collision (deterministic archival makes it moot);
 "infinite CAS loop" (REFUTED — the contentKey noop guard catches it after one round).
 
-## Session summary — 2026-07-08 — morning-window rebuild, sync convergence attempt (STILL BROKEN), many releases
+### Session summary — 2026-07-08 — morning-window rebuild, sync convergence attempt (STILL BROKEN), many releases
 
 Very long session, Mac `0.3.4 → 0.3.17` + iOS TestFlight `0.1.0 (12)→(13)`. Every fix was verified where possible by running the app (`pnpm tauri dev` + `screencapture`); AppleScript keystrokes/Quartz are blocked in this harness, so tiling/drag and cross-device sync need the USER to confirm.
 
@@ -601,7 +632,7 @@ Very long session, Mac `0.3.4 → 0.3.17` + iOS TestFlight `0.1.0 (12)→(13)`. 
 ---
 
 
-## Session summary — 2026-07-05 — merge cap+dedupe fix, sync-UI tweak, 0.3.3 shipped via CI
+### Session summary — 2026-07-05 — merge cap+dedupe fix, sync-UI tweak, 0.3.3 shipped via CI
 
 - **Merge cap + dedupe fix (the known bug).** Cross-device merge unioned both devices' active lists and never re-clamped, so Mac(6)+iPhone(new) → 8 rows with same-title dupes (seen live: two "Check on Anthropic bill"). New `clampActiveItems()` runs after every same-day merge on **both** platforms (`dist/index.html` + `ios/.../BuddyMerge.swift`): keep all done items, drop same-title active dupes (newer device wins), cap active at `HARD_CAP`. Deterministic → devices converge, no ping-pong. Tests: Mac `mergeTest` **18/18** (+3), iOS `BuddyTests` **51/51** (+2).
 - **Sync-settings tweak.** "Synced HH:MM" moved to the right of Unlink/Resync, one type step down (15→14px). Stays legible on the lvl2 red sheet via the existing `.lvl2 #settings [class*="text-black"]` override.
@@ -611,7 +642,7 @@ Very long session, Mac `0.3.4 → 0.3.17` + iOS TestFlight `0.1.0 (12)→(13)`. 
 ---
 
 
-## Session summary — 2026-07-04 — Mac⇄iOS polish, staged sync UI, adaptive row fitting
+### Session summary — 2026-07-04 — Mac⇄iOS polish, staged sync UI, adaptive row fitting
 
 Long session refining the synced Mac + iPhone apps against live testing. Branch `feat/ios-sync-live`.
 
@@ -634,7 +665,7 @@ _Historical: 2026-06-30. Branch `main`. Released **`0.3.1`** — history split i
 Buddy is a shipped, public, self-updating macOS menu-bar focus app for ADHD.
 Repo: `github.com/whale/buddy`.
 
-## Session summary — 2026-07-02 — iOS visual parity (branch `fix/ios-visual-parity`, pushed, no PR)
+### Session summary — 2026-07-02 — iOS visual parity (branch `fix/ios-visual-parity`, pushed, no PR)
 
 Rebuilt the **iPhone** app UI to match the Mac drawer's design language (it had drifted:
 system font, one card, native iOS nav/list/form chrome). Bundled **Geist** (static OTFs) +
@@ -647,7 +678,7 @@ the [Future|Done|Skipped] segmented history); restyled **MorningView**. Added st
 deterministic captures. **All 37 iOS unit tests pass.** Review artifact:
 `ios/_review/comparison.html`. Latest commit on the branch: `62328c4`. **Not merged; no PR.**
 Known deltas + follow-ups are listed in comparison.html and `ios/_review/PROGRESS.md`.
-## Session summary — 2026-07-01 — done-word shuffle bag (PR #60, open, not released)
+### Session summary — 2026-07-01 — done-word shuffle bag (PR #60, open, not released)
 
 **The bug (tester report).** A tester completed several tasks and the celebration labels (Donezo!, Ticked Off!, …) came out patterned, not random — Donezo / Ticked Off / Donezo / Ticked Off.
 
@@ -659,7 +690,7 @@ Known deltas + follow-ups are listed in comparison.html and `ios/_review/PROGRES
 
 **Not released.** `AUTO_RELEASE_MAC` stays OFF; PR #60 is open, awaiting merge into the next batched release.
 
-## Session summary — 2026-06-30 (later) — Future/Done/Skipped tabs + Future holding pen (shipped 0.3.1)
+### Session summary — 2026-06-30 (later) — Future/Done/Skipped tabs + Future holding pen (shipped 0.3.1)
 
 **The problem.** The **Done** tab showed both completed *and* skipped past tasks (each past day's `done:true` *and* `done:false` items), so skipped work polluted the "done" list — no clean view of what was actually finished.
 
@@ -673,7 +704,7 @@ Known deltas + follow-ups are listed in comparison.html and `ios/_review/PROGRES
 
 **Alpha-tester onboarding (asked at end of session).** Buddy is already distributable to a tester with **zero extra setup** — signed + notarized (opens cleanly on other Macs, no Gatekeeper block) and the repo is public with a working auto-updater. To onboard one tester: (1) send the direct DMG link `https://github.com/whale/buddy/releases/download/v0.3.1/Buddy_0.3.1_universal.dmg`; (2) tell them it's a menu-bar + right-edge app (so they know where it went); (3) "just text me" is a fine feedback loop for n=1. Requirement: **macOS 13 (Ventura)+**. First run may show a one-time "downloaded from the Internet — Open?" dialog (normal; notarized, so no hard block).
 
-## Session summary — 2026-06-30 — full-screen-Spaces fix + reliable updater (shipped 0.2.47, on-device verified)
+### Session summary — 2026-06-30 — full-screen-Spaces fix + reliable updater (shipped 0.2.47, on-device verified)
 
 **The bug.** User was stranded on `0.2.39` (no update banner), and on launch Buddy would "flash up
 then hide behind other windows," with the tray "Show / Hide" doing nothing. They work with apps in
@@ -705,7 +736,7 @@ installed `0.2.47` is **signed + notarized** (`spctl` → "accepted, Notarized D
 on-device. Full writeup in `JOURNAL.md` (PR #56, `[skip release]`). **Releases 0.2.46 & 0.2.47 both
 published; `AUTO_RELEASE_MAC` flipped back OFF.**
 
-## Session summary — 2026-06-26 (evening) — data-loss fix shipped + Done-tab/UX overhaul (batched, unreleased) + token-system spec
+### Session summary — 2026-06-26 (evening) — data-loss fix shipped + Done-tab/UX overhaul (batched, unreleased) + token-system spec
 
 **Released 0.2.39 (PR #44): overnight task-loss fix.** Root cause traced from the user's on-disk
 state: "Restart Buddy" stashed the list in a RAM-only var → dismissing the morning / relaunching
@@ -745,11 +776,11 @@ edit confirmed with a real mouse click. **NOT verified:** none of the post-0.2.3
 **native build or on device** — only the browser preview. The lone smokeTest "hit targets" failure is a
 known headless artifact (30px hover icons under a parked Playwright mouse), not a regression.
 
-## Session summary — 2026-06-26
+### Session summary — 2026-06-26
 
 Shipped a **critical click-blocking fix** as **0.2.38** (PR #42, merged → auto-release).
 
-### The bug (regression introduced 2026-06-25 in `bef4a7d`, shipped in 0.2.37)
+#### The bug (regression introduced 2026-06-25 in `bef4a7d`, shipped in 0.2.37)
 The Fade+Drift refactor changed the *closed* settings sheet from `translateY(100%)`
 (fully off-screen) to `translateY(22px); opacity:0` (invisible, in place) but **forgot
 `pointer-events:none`** — the same line it correctly added to `#drawer` and `#morning`.
@@ -759,29 +790,29 @@ and **swallowed every click** — the Future/Done history toggle **and** task ro
 header (Card 1) still worked because they sit outside the sheet. User reported it as
 "my dones are gone" + "the toggle doesn't work."
 
-### The fix (4 lines, `dist/index.html`)
+#### The fix (4 lines, `dist/index.html`)
 - `pointer-events:none` on `.sheet[data-open="false"]` (normal **and** reduced-motion variants).
 - History toggle buttons: `min-height:38px` (inline style — was ~22px) + `px-5`,
   `grid place-items-center`. NOTE: a brand-new arbitrary Tailwind class (`min-h-[38px]`)
   does **not** work here — this dist uses a **precompiled** Tailwind stylesheet, so only
   classes present at build time exist. Use inline style or existing utilities.
 
-### Verified (browser, served `dist/` via Playwright real clicks)
+#### Verified (browser, served `dist/` via Playwright real clicks)
 - Real click on closed-sheet build **timed out** (blocked by `#settings`) → after fix it **lands**.
 - Closed sheet computes `pointer-events:none`; toggle pill is 38px tall; realistic tap zone **15/15**.
 - `smokeTest`: no new failures (the lone pre-existing hit-target flag fails identically on `main`,
   an artifact of running the audit via Playwright vs `pnpm ui:smoke`).
 
-### Not verified / open
+#### Not verified / open
 - **0.2.38 release**: was `in_progress` at wrap. Confirm it **published** (DMG + tarball + latest.json)
   and that installing it actually restores clicking in the running app.
 - The 0.2.37 on-device items still pending (live weather fetch, 30pt top padding, Fade+Drift feel).
 
-## Session summary — 2026-06-25
+### Session summary — 2026-06-25
 
 A long build session. Shipped **6 public releases** (0.2.32 → 0.2.37). The auto-release pipeline is now fully working end to end.
 
-### Completed & shipped (all on `main`, released in 0.2.37)
+#### Completed & shipped (all on `main`, released in 0.2.37)
 - **Restart-to-fresh:** "Restart Buddy" stashes the current plan and shows a blank morning with a "Restore your last list" row.
 - **Fade+Drift motion (app-wide):** unified show/hide style (fade + small drift + slight scale, ease-out, `--t-drift` = .48s) on the drawer, morning leave, settings/history sheets, and update banner. Micro-interactions (row add, Donezo, crossfade, confetti) left as short ease-out fades. Started as a morning→drawer handoff animation, then unified per user pick of "Fade + Drift".
 - **Font → Geist** (self-hosted variable woff2, SIL OFL; Inter removed).
@@ -791,24 +822,24 @@ A long build session. Shipped **6 public releases** (0.2.32 → 0.2.37). The aut
 - **Notch top padding:** window top inset `MENUBAR` const (currently **30pt**) so the drawer's top gap matches the bottom on notch Macs. Tuned by eye.
 - **Release workflow protocol:** "ship it" → public signed release; "just land it" → `[skip release]` in the commit skips bump+release (added to `.github/workflows/version-bump.yml`).
 
-### Verified this session
+#### Verified this session
 - `pnpm ui:smoke` passes (incl. the hit-target audit, now skips `pointer-events:none`/`opacity:0`).
 - **v0.2.37 published** — signed, notarized, with DMG + `Buddy.app.tar.gz` + `latest.json` (version 0.2.37). The full auto-pipeline (version-bump → release-mac) works; `AUTO_RELEASE_MAC=true` and all 9 signing secrets present.
 - The in-app updater works end to end (user updated across multiple releases).
 - Browser-verified: header layout/baseline, weather-icon mapping (injected codes), settings layout, drawer drift states, export count, Done 14-day window.
 
-### Not verified / open
+#### Not verified / open
 - **Live weather fetch** (ipwho.is → Open-Meteo) only verified with *injected* weather codes — the real network fetch + correct local conditions need confirming in the running app. Fails silently if it doesn't work.
 - **Native feel** of Fade+Drift and the **30pt top padding** are eyeball estimates — confirm on-device; both are one-token/number tweaks (`--t-drift`, `MENUBAR`).
 - **Precise weather location** deferred: a Tauri/WKWebView app can't reach macOS location via `navigator.geolocation` (returns PERMISSION_DENIED with no prompt). Would need native CoreLocation (Rust) if revisited. IP-based already follows travel.
 
-### Gotcha worth remembering
+#### Gotcha worth remembering
 - **Apple notarization 403 "agreement missing/expired"** blocked two release builds. Apple periodically re-issues the Developer Program agreement; the account holder must re-accept at developer.apple.com/account, then re-run `gh workflow run release-mac.yml`. Not a code/credentials problem.
 
 
-## Session summary — 2026-06-23
+### Session summary — 2026-06-23
 
-### Completed
+#### Completed
 - Investigated a real morning data-loss report: Buddy opened Tuesday, June 23 with an empty morning even though Monday, June 22 had six tasks.
 - Confirmed the tasks were still present in `buddy-state.json` history and in `buddy-state.recovery.json`; the running old installed app was overwriting the repaired primary file with an empty same-day state.
 - Repaired the user’s local Buddy data while Buddy was closed. Restored today’s list to:
@@ -835,7 +866,7 @@ A long build session. Shipped **6 public releases** (0.2.32 → 0.2.37). The aut
 - Added a later launch-page todo: use `https://joi.software/` as inspiration for Buddy’s launch page. Do not work on it now.
 - Rebuilt and installed the local fixed app to `/Applications/Buddy.app`.
 
-### Verified this session
+#### Verified this session
 - `pnpm ui:smoke` passed. This checks Buddy’s internal smoke test plus the new hit-target audit.
 - Playwright recovery/smoke test passed during the data-loss fix.
 - Playwright full sync test passed after the recovery merge change.
@@ -846,15 +877,15 @@ A long build session. Shipped **6 public releases** (0.2.32 → 0.2.37). The aut
 - Installed local app was relaunched and verified running from `/Applications/Buddy.app/Contents/MacOS/buddy`.
 - Local state file still contained all six restored tasks after relaunch.
 
-### Not verified / still needs release work
+#### Not verified / still needs release work
 - Changes are not committed yet. Working tree intentionally contains edits to `dist/index.html`, `package.json`, `src-tauri/Cargo.lock`, `STATUS.md`, `HANDOFF.md`, and new `scripts/buddy-ui-smoke.spec.js`.
 - No signed/notarized public release was cut. Installed local `/Applications/Buddy.app` is fixed for this machine only.
 - Updater artifact signing is blocked locally by missing `TAURI_SIGNING_PRIVATE_KEY`.
 - System Settings may still show a stale “Buddy-Old” Accessibility row until the user removes it with the minus button. `/Applications/Buddy-Old.app` is no longer present.
 
-## Session summary — 2026-06-22
+### Session summary — 2026-06-22
 
-### Completed
+#### Completed
 - Investigated a report that Buddy “lost” the current task list after an update/restart.
 - Confirmed the user’s data was not lost:
   - primary durable file: `~/Library/Application Support/fyi.whale.buddy/buddy-state.json`
@@ -867,30 +898,15 @@ A long build session. Shipped **6 public releases** (0.2.32 → 0.2.37). The aut
   - real deletes remain respected through tombstones/`erasedAt`
 - Merged PR #33 into `main` and pulled the version-bump automation commit.
 
-### Verified this session
+#### Verified this session
 - `cargo check` passed on the recovery change.
 - Extracted app script passed `node --check`.
 - PR #33 was mergeable and merged into `main`.
 - Local `main` is clean and matches `origin/main` at `2127325`.
 
-### Not verified / still needs owner or release work
+#### Not verified / still needs owner or release work
 - The recovery behavior has not been verified in a built `.app` by simulating an accidental empty-state overwrite.
 - No new signed/notarized release was cut after PR #33, so installed users do not have the recovery-file safeguard yet.
 - Installed `/Applications/Buddy.app` was observed as `0.2.21`; confirm after the next release/update that it actually advances.
 - GitHub Actions/version bump ran, but release artifacts were not built or published in this session.
 - Automatic release workflow has been added but is gated until GitHub signing secrets and `AUTO_RELEASE_MAC=true` are configured.
-
-## Useful commands
-
-```bash
-cargo check --manifest-path src-tauri/Cargo.toml
-pnpm ui:smoke
-python3 - <<'PY'
-from pathlib import Path
-s=Path('dist/index.html').read_text()
-Path('/tmp/buddy-app-script.js').write_text(s[s.index('<script>')+8:s.rindex('</script>')])
-PY
-node --check /tmp/buddy-app-script.js
-```
-
-For release steps, use `RELEASE-UPDATER.md`.
