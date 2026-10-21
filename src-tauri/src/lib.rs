@@ -1382,8 +1382,12 @@ pub fn run() {
                     // Dwell times: the cursor must REST at the edge before revealing
                     // (so a quick brush-past doesn't pop it), and rest off the drawer
                     // a moment before hiding (so a small drift doesn't snap it shut).
-                    const REVEAL_DWELL: u32 = 500 / TICK_MS as u32; // ~31 ticks ≈ 500ms
-                    const HIDE_GRACE: u32 = 160 / TICK_MS as u32; //  ~10 ticks ≈ 160ms
+                    // Measured on the CLOCK, never in ticks: macOS App Nap throttles this
+                    // background thread's 16ms sleep to ~70-130ms, which stretched a
+                    // 31-tick "500ms" into 2-4 seconds of holding still (2026-10-21 report:
+                    // the edge "stopped working" — heartbeats showed 7-14 ticks/s, not 60).
+                    const REVEAL_DWELL: Duration = Duration::from_millis(500);
+                    const HIDE_GRACE: Duration = Duration::from_millis(160);
                     // Breadcrumbs (RULE 3), all privacy-safe counts/flags: a heartbeat every
                     // 5 min (so silence is evidence the thread is gone), reveals at most once
                     // per minute with a count, and one line per cursor-read outage. The
@@ -1391,8 +1395,8 @@ pub fn run() {
                     const HEARTBEAT_EVERY: Duration = Duration::from_secs(300);
                     const REVEAL_LOG_EVERY: Duration = Duration::from_secs(60);
                     const OUTAGE_LOG_AFTER: u32 = 500 / TICK_MS as u32; // ~0.5s of refusals
-                    let mut edge_ticks = 0u32; // consecutive ticks at the edge
-                    let mut away_ticks = 0u32; // consecutive ticks off the drawer
+                    let mut edge_since: Option<Instant> = None; // when this edge visit began
+                    let mut away_since: Option<Instant> = None; // when this away visit began
                     let mut edge_fired = false; // revealed during this edge visit
                     let mut away_fired = false; // hidden during this away visit
                     let mut last_beat = Instant::now();
@@ -1444,10 +1448,10 @@ pub fn run() {
 
                         if x >= right - 2.0 {
                             // At the edge → count toward reveal.
-                            away_ticks = 0;
+                            away_since = None;
                             away_fired = false;
-                            edge_ticks += 1;
-                            if edge_ticks >= REVEAL_DWELL && !edge_fired {
+                            let since = *edge_since.get_or_insert_with(Instant::now);
+                            if since.elapsed() >= REVEAL_DWELL && !edge_fired {
                                 edge_fired = true;
                                 beat_reveals += 1;
                                 reveals_since_log += 1;
@@ -1476,18 +1480,18 @@ pub fn run() {
                             }
                         } else if x < right - DRAWER_W {
                             // Off the drawer entirely → count toward hide.
-                            edge_ticks = 0;
+                            edge_since = None;
                             edge_fired = false;
-                            away_ticks += 1;
-                            if away_ticks >= HIDE_GRACE && !away_fired {
+                            let since = *away_since.get_or_insert_with(Instant::now);
+                            if since.elapsed() >= HIDE_GRACE && !away_fired {
                                 away_fired = true;
                                 beat_hides += 1;
                                 let _ = h.emit("buddy://hide", ());
                             }
                         } else {
                             // Over the open drawer → neutral; reset both dwells.
-                            edge_ticks = 0;
-                            away_ticks = 0;
+                            edge_since = None;
+                            away_since = None;
                             edge_fired = false;
                             away_fired = false;
                         }
