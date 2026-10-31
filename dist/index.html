@@ -3351,6 +3351,15 @@ function renderToday(wrap=todayWrap, morning=false){
     // cursored task" and marks it done (field reports 2026-07-10 ×2).
     // Tab commits AND hops to the next active row's edit (Shift+Tab = previous).
     txt.addEventListener('keydown',e=>{
+      // IME keys (Japanese / Chinese / Korean input) belong to the input method, not to us. WebKit —
+      // the Mac app's engine — delivers the Enter that CONFIRMS a conversion AFTER compositionend, as
+      // key 'Enter' with keyCode 229 and isComposing false. Treating it as "commit" closed the editor
+      // mid-phrase, and the user's own next Enter then fell through to the global layer, which reads
+      // Enter as "cycle the cursored task" and marked the brand-new task done (field report
+      // 2026-10-31: a 6th task typed in Japanese "took it for a second and then disappeared", twice).
+      // stopPropagation also keeps an IME Escape (cancel conversion) from blurring the row via the
+      // global layer. Same guard as the Future editor.
+      if(e.isComposing || e.keyCode===229){ e.stopPropagation(); return; }
       if(e.key==='Enter'){ e.preventDefault(); e.stopPropagation(); txt.blur(); return; }
       if(e.key==='Tab'){
         e.preventDefault(); e.stopPropagation();

@@ -190,6 +190,41 @@ test('a foreign render never leaves the keyboard dead', async ({ page }) => {
   expect(s.texts, 'the in-progress text was lost').toContain('Buy milk');
 });
 
+// Field report 2026-10-31: "I added a sixth task (practicing Japanese), it took it for a second and
+// then it disappeared — twice." Typing with a Japanese input method, the Enter that CONFIRMS a
+// conversion reaches the page as key 'Enter' / keyCode 229 — and in WebKit (the Mac app's engine) it
+// arrives AFTER compositionend, so isComposing is false. The row treated it as "commit": the editor
+// closed mid-phrase, and the user's own next Enter hit the global layer, which marks the cursored
+// task — the brand-new one — done. Neither engine here can drive a real macOS IME, so dispatch the
+// exact event WebKit produces.
+async function imeConfirmEnter(page) {
+  await page.evaluate(() => {
+    const e = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true, composed: true });
+    Object.defineProperty(e, 'keyCode', { get: () => 229 });
+    Object.defineProperty(e, 'which', { get: () => 229 });
+    (document.activeElement || document.body).dispatchEvent(e);
+  });
+}
+test('an IME confirm-Enter does not end the edit or complete the new task', async ({ page }) => {
+  await boot(page, ['one', 'two', 'three', 'four', 'five']);
+  await page.evaluate(() => window.addAndEdit());
+  await page.waitForTimeout(150);
+  await page.keyboard.insertText('日本語');                    // what the IME commits into the row
+  await imeConfirmEnter(page);
+  await page.waitForTimeout(80);
+  expect(await page.evaluate(() => !!document.activeElement?.isContentEditable),
+    'the IME confirm-Enter closed the editor mid-phrase').toBe(true);
+  await page.keyboard.insertText('の練習');                    // keep typing the phrase
+  await imeConfirmEnter(page);
+  await page.keyboard.press('Enter');                          // the user's own "done" Enter
+  await page.waitForTimeout(150);
+  const items = await page.evaluate(() => window.__buddy.state.items.map(i => ({ text: i.text, state: i.state })));
+  expect(items.map(i => i.text)).toEqual(['one', 'two', 'three', 'four', 'five', '日本語の練習']);
+  expect(items[5].state, 'the new task was marked done by a stray Enter').not.toBe('done');
+  // …and the task really is committed: a further Enter belongs to the keyboard layer again.
+  expect(await page.evaluate(() => window.__buddy.editingId), 'editing guard left dangling').toBeNull();
+});
+
 // A blank row that outlives the sweeper must not be archived as a permanent "Untitled" ghost
 // in the Done tab. Done rows are always kept, however they are worded.
 test('an untitled row is never archived into history', async ({ page }) => {
