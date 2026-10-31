@@ -38,6 +38,16 @@ final class BuddyStore {
     // pulled snapshot takes the merged max instead, so a device is never "newer" just
     // because it re-serialised (the 0.3.17 always-newer bug).
     private(set) var lastMutatedAt: Double = 0
+    // Counts genuine LOCAL mutations (bumped next to lastMutatedAt in scheduleSave, never by
+    // adopt). The sync engine reads it when it takes its snapshot and hands it back to adopt():
+    // a pass computes its merge from that snapshot, then waits on the network — if the user
+    // changed something in the meantime, the merge is stale and adopting it would silently undo
+    // that change. The likely cause of the 2026-10-31 field report (a just-added 6th task "took it
+    // for a second and then disappeared", twice): Return lands while a 1.5s poll pass is mid-pull,
+    // and the pass then adopts a merge built from the pre-Return snapshot — the new row was still
+    // blank there, and merge strips blank rows. No tombstone, no trace: the task is simply gone.
+    // Applies to any local change made mid-pass (a Future add, a delete, a completion), not just Today adds.
+    private(set) var localRevision = 0
     // True while a row edit is in flight in the UI. adopt() defers while set — a remote
     // apply mid-type would tear down the text field and could commit a half-typed task
     // (mirrors the Mac's applyWire editingId guard). The next sync pass re-merges.
@@ -505,9 +515,15 @@ final class BuddyStore {
     /// and NEVER fires onLocalChange — adopting remote truth must not schedule another push. Must
     /// be called on the main actor (mutates @Observable state the UI reads). Fires no celebration.
     /// Deferred while a row edit is in flight (isEditing) — the next pass re-merges.
-    func adopt(_ merged: SyncSnapshot) {
-        guard !isEditing else { BuddyDiag.log("adopt-deferred-editing"); return }   // never clobber an in-progress edit (Mac applyWire parity)
-        guard !isEditingFuture else { BuddyDiag.log("adopt-deferred-editing-future"); return }   // the next poll re-merges once the Future edit ends
+    /// `basedOn`: the `localRevision` read when the merge's local snapshot was taken. If anything
+    /// changed locally since, the merge is stale — skip it (returns false) and let the caller
+    /// re-merge from fresh state. nil = no check (cold background pass, tests).
+    @discardableResult
+    func adopt(_ merged: SyncSnapshot, basedOn revision: Int? = nil) -> Bool {
+        guard !isEditing else { BuddyDiag.log("adopt-deferred-editing"); return false }   // never clobber an in-progress edit (Mac applyWire parity)
+        guard !isEditingFuture else { BuddyDiag.log("adopt-deferred-editing-future"); return false }   // the next poll re-merges once the Future edit ends
+        // Never adopt a merge built from a snapshot that predates a local change (see localRevision).
+        if let revision, revision != localRevision { BuddyDiag.log("adopt-stale-snapshot"); return false }
         applyingRemote = true
         defer { applyingRemote = false }
         if let t = merged.today { today = t }
@@ -521,6 +537,7 @@ final class BuddyStore {
         extras     = merged.extras
         lastMutatedAt = merged.savedAt       // adopt the merged max — adopting must NOT claim newer
         saveToDisk()                         // persist without going through scheduleSave/dirty
+        return true
     }
 
     // MARK: - Morning planner
@@ -639,6 +656,7 @@ final class BuddyStore {
         // adopting a remote snapshot (that write is the RESULT of a pull, not a new edit).
         if !applyingRemote {
             lastMutatedAt = Date().timeIntervalSince1970
+            localRevision &+= 1          // an in-flight sync pass's snapshot is now stale (see adopt)
             onLocalChange?()
         }
         saveWorkItem?.cancel()

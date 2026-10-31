@@ -63,6 +63,51 @@ final class BuddyStoreSyncTests: XCTestCase {
         XCTAssertFalse(fired, "adopting a remote snapshot must not schedule a push")
     }
 
+    // Field report 2026-10-31: "I added a 6th task, it took it for a second and then it
+    // disappeared — twice." A poll pass snapshots while the new row is still blank, waits on the
+    // network, and the user taps Return meanwhile. The pass's merge (blank row stripped) must NOT
+    // be adopted over the committed task; the next pass, built from fresh state, keeps it.
+    func testAdoptRefusesMergeBuiltFromStaleSnapshot() {
+        let store = BuddyStore()
+        let five = (1...5).map { task("T\($0)", "task \($0)") }
+        let remote = SyncSnapshot(today: TodayState(date: BuddyStore.localDate(), items: five),
+                                  history: [], deferred: [], settings: .default,
+                                  tombstones: [:], erasedAt: nil, savedAt: 1000)
+        store.adopt(remote)
+        guard let id = store.addTask() else { return XCTFail("could not add a 6th task") }
+
+        // The pass: revision read, snapshot taken (new row still blank), merged against remote.
+        let revision = store.localRevision
+        guard let stale = BuddyMerge.merge(store.snapshot(), remote) else { return XCTFail("merge failed") }
+        let staleIds = (stale.today?.items ?? []).map { $0.id }
+        XCTAssertFalse(staleIds.contains(id), "precondition: merge strips the blank row")
+
+        // Return lands while the pass is on the network…
+        store.commitEdit(id: id, text: "Practicing Japanese")
+
+        // …and the pass comes back with its stale merge.
+        XCTAssertFalse(store.adopt(stale, basedOn: revision), "a merge built before the commit was adopted")
+        XCTAssertEqual(store.today.items.first(where: { $0.id == id })?.text, "Practicing Japanese",
+                       "the committed 6th task was wiped by a stale sync adopt")
+
+        // The re-run pass merges FRESH state and keeps the task.
+        let fresh = store.localRevision
+        guard let next = BuddyMerge.merge(store.snapshot(), stale) else { return XCTFail("merge failed") }
+        XCTAssertTrue(store.adopt(next, basedOn: fresh))
+        XCTAssertTrue(store.activeTasks.contains(where: { $0.id == id && $0.text == "Practicing Japanese" }))
+        XCTAssertEqual(store.activeCount, 6)
+    }
+
+    // adopt() itself must not count as a local change, or every adopt would look stale.
+    func testAdoptDoesNotBumpLocalRevision() {
+        let store = BuddyStore()
+        let before = store.localRevision
+        store.adopt(SyncSnapshot(today: TodayState(date: BuddyStore.localDate(), items: [task("A", "a")]),
+                                 history: [], deferred: [], settings: .default,
+                                 tombstones: [:], erasedAt: nil, savedAt: 1000))
+        XCTAssertEqual(store.localRevision, before)
+    }
+
     // A genuine local mutation DOES fire onLocalChange (the dirty trigger the engine needs).
     func testLocalMutationFiresLocalChange() {
         let store = BuddyStore()

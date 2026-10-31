@@ -169,6 +169,9 @@ final class SyncEngine {
                                          syncKey: live.syncKey, device: "ios")
         else { return }
         let key = SyncIdentity.ownerId(for: config.syncKey)   // M2: hash, not the raw key
+        // Read BEFORE the snapshot: if the user changes anything while this pass is on the
+        // network, adopt() sees the revision moved and refuses the now-stale merge.
+        let revision = store.localRevision
         let local = store.snapshot()
         do {
             let res = try await BuddySync.syncOnce(store: cas, key: key, local: local)
@@ -180,7 +183,13 @@ final class SyncEngine {
                 // mirrors the Mac's "only re-apply when our local copy is behind remote".
                 if let merged = res.merged,
                    !(res.noop && BuddySync.contentKey(local) == BuddySync.contentKey(merged)) {
-                    store.adopt(merged)
+                    // Refused because the user changed something mid-pass (2026-10-31: a task
+                    // added while a poll was mid-pull vanished ~1s after Return). Re-merge from
+                    // the fresh state right away instead of waiting for the next poll. Only for
+                    // THIS refusal — re-running on an edit deferral would spin passes while typing.
+                    if !store.adopt(merged, basedOn: revision), store.localRevision != revision {
+                        pending = true
+                    }
                 }
                 lastSyncedAt = Date()
                 lastError = nil
