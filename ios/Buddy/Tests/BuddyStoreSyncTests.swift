@@ -75,14 +75,19 @@ final class BuddyStoreSyncTests: XCTestCase {
                                   tombstones: [:], erasedAt: nil, savedAt: 1000)
         store.adopt(remote)
         guard let id = store.addTask() else { return XCTFail("could not add a 6th task") }
+        store.isEditing = true                    // TodayView.addTask sets this; typed text stays in the view
 
         // The pass: revision read, snapshot taken (new row still blank), merged against remote.
         let revision = store.localRevision
         guard let stale = BuddyMerge.merge(store.snapshot(), remote) else { return XCTFail("merge failed") }
         let staleIds = (stale.today?.items ?? []).map { $0.id }
         XCTAssertFalse(staleIds.contains(id), "precondition: merge strips the blank row")
+        // A pass that returns while still typing is deferred — that part always worked.
+        XCTAssertFalse(store.adopt(stale, basedOn: revision), "adopt must defer while a row is being edited")
+        XCTAssertTrue(store.today.items.contains(where: { $0.id == id }))
 
-        // Return lands while the pass is on the network…
+        // Return lands while a pass is on the network (TodayView.commitEdit order: guard off, then commit)…
+        store.isEditing = false
         store.commitEdit(id: id, text: "Practicing Japanese")
 
         // …and the pass comes back with its stale merge.
