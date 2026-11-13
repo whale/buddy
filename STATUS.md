@@ -16,6 +16,7 @@ Whale updates the Mac to 0.4.42 and confirms the right edge reveals Buddy after 
 
 ## Open tasks
 
+- [ ] **Bring up with the owner:** move Buddy's database into the shared Belly Supabase project (saves about $10/month, like Lucy's Birds and whale-fyi on 2026-11-09). Catch: Buddy's Supabase URL is baked into the shipped Mac/iOS builds and pairing codes, so it needs an app update plus friends re-pairing. Also clean up the 71 'web' test rows in the device table (real devices: 10 Mac and 3 iOS, only 2 active recently). The how-to is in whale-belly STATUS.md, under "Belly's database now hosts two other apps".
 - [ ] Owner confirms the edge on installed Mac 0.4.42 (half-second rest reveals, also after idle).
   If it ever feels slow again: `grep edge-alive` in the diag log — `ticks`/300 = checks per second.
 - [ ] Trim AGENTS.md (272 lines, limit 180) — doc-check flag.
