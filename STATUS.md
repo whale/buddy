@@ -1,6 +1,6 @@
 # Status — Buddy
 
-_Last updated: 2026-10-21_
+_Last updated: 2026-11-13_
 
 ## Next
 
@@ -12,6 +12,7 @@ Whale updates the Mac to 0.4.42 and confirms the right edge reveals Buddy after 
 - Project-shape docs (AGENTS.md, STATUS.md, `.env.op`, docs/history) merged via #169 [skip release].
 - Buddy Cloud Supabase project (`awzkpkhsigbhfeklogzk`) was un-paused and moved to a paid org 2026-09-28; details in the Log.
 - Known limits (by design): cross-device order when both devices add at once; concurrent edits to one row resolve by tie-break.
+- Dev machine: new Mac set up 2026-11-13 (see Log). Updater signing key `~/.tauri/buddy-updater.key` is NOT on it — only GitHub Actions has it, so releases must go through CI.
 - Not verified: real iPhone hardware beyond TestFlight install; real two-device sync of Future items (live sync harness passed).
 
 ## Open tasks
@@ -33,6 +34,13 @@ Whale updates the Mac to 0.4.42 and confirms the right edge reveals Buddy after 
 ## Log
 
 Newest first. Carried over from the old STATUS.md (original kept in [docs/history/STATUS.md](docs/history/STATUS.md)). The "Useful commands" block moved to AGENTS.md.
+
+### Setup — 2026-11-13 — new Mac
+
+- Installed Buddy 0.4.42 to /Applications (codesign verified, running).
+- Dev toolchain: Rust via Homebrew `rustup` (PATH added to `~/.zshrc`), fastlane, global `@playwright/test` (needed by `pnpm ui:smoke`), `pnpm install`.
+- Verified: `cargo check` passes; `pnpm ui:smoke` 4/4; iOS Release build for device signs automatically (Apple Development, team T9TX6U9WDB) with no upload.
+- Not on this Mac (owner chose not to recover): updater key `~/.tauri/buddy-updater.key` — CI secret is the only copy; local releases (RELEASE-UPDATER.md) not possible here.
 
 ### Shipped — 2026-10-21 — Mac 0.4.42 (edge reveal timing)
 
