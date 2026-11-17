@@ -31,9 +31,9 @@ jobs:
   validate:
     runs-on: macos-latest       # macOS so the Swift/CryptoKit envelope parity check runs too
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -49,7 +49,7 @@ jobs:
         if: failure() && env.SMTP_HOST != ''
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v24
         with:
           server_address: ${{ secrets.SMTP_HOST }}
           server_port: ${{ secrets.SMTP_PORT }}
