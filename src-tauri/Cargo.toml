@@ -32,7 +32,7 @@ tauri-plugin-single-instance = "2"
 # "Reserve space when pinned": Accessibility-API window nudging (macOS only).
 [target."cfg(target_os = \"macos\")".dependencies]
 core-foundation = "0.10"
-core-graphics = "0.24"
+core-graphics = "0.25"
 # Set the window's NSWindow collection behaviour so it can appear OVER apps that
 # are in native full-screen mode (CanJoinAllSpaces + FullScreenAuxiliary).
 objc2 = "0.6"
